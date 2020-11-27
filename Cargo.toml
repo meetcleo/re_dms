@@ -1,0 +1,8 @@
+[package]
+name = "re_dms"
+version = "0.1.0"
+authors = ["Michael Hauser-Raspe <michael@meetcleo.com>"]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
