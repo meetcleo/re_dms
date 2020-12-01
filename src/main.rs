@@ -9,23 +9,26 @@ use std::path::Path;
 extern crate log;
 
 mod parser;
+mod change_processing;
 
 fn main() {
     env_logger::init();
     // File hosts must exist in current path before this produces output
     if let Ok(lines) = read_lines("./data/test_decoding.txt") {
         let mut parser = parser::Parser::new(true);
+        let mut collector = change_processing::ChangeProcessing::new();
         // Consumes the iterator, returns an (Optional) String
         for line in lines//.skip(2637).take(3)
         {
             if let Ok(ip) = line {
-                let _parsed_line = parser.parse(&ip);
-                // println!("{}", parsed_line);
-                // println!("{}", ip);
+                let parsed_line = parser.parse(&ip);
+                match parsed_line {
+                    parser::ParsedLine::ContinueParse => {}, // Intentionally left blank, continue parsing
+                    _ => { collector.add_change(parsed_line); }
+                }
             }
         }
     }
-    println!("Hello, world!");
 }
 
 // The output is wrapped in a Result to allow matching on errors

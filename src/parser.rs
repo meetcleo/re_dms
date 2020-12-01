@@ -1,3 +1,4 @@
+#[allow(unused_imports)]
 use log::{debug, error, log_enabled, info, Level};
 
 // define more config later
@@ -32,6 +33,34 @@ pub enum Column {
     IncompleteColumn { key: String, column_type: String, value: ColumnValue }
 }
 
+impl Column {
+    pub fn column_name(&self) -> &str {
+        let string = match self {
+            Column::UnchangedToastColumn{ key,.. } => key,
+            Column::ChangedColumn{ key,.. } => key,
+            Column::IncompleteColumn{ key,.. } => key,
+        };
+        &string
+    }
+    pub fn column_value_unwrap<'a>(&'a self) -> &'a ColumnValue {
+        match self {
+            Column::ChangedColumn{value, ..} => {
+                match value {
+                    Some(inner) => inner,
+                    None => panic!("panic!")
+                }
+            },
+            Column::IncompleteColumn{value, ..} => {
+                &value
+            },
+            Column::UnchangedToastColumn{..} => {panic!("tried to get value for unchanged_toast_column")}
+        }
+    }
+    pub fn is_id_column(&self) -> bool {
+        self.column_name() == "id"
+    }
+}
+
 #[derive(Debug)]
 pub enum ChangeKind {
     Insert,
@@ -48,6 +77,18 @@ pub enum ParsedLine {
     ChangedData { columns: Vec<Column>, table_name: String, kind: ChangeKind },
     TruncateTable, // TODO
     ContinueParse // this is to signify that we're halfway through parsing a change
+}
+
+impl ParsedLine {
+    pub fn find_id_column(&self) -> &Column {
+        match self {
+            ParsedLine::ChangedData { columns,.. } => {
+                // unwrap because this is the id column which _must_ be here
+                columns.iter().find(|&x| x.is_id_column()).unwrap()
+            },
+            _ => panic!("tried to find id column of non changed_data")
+        }
+    }
 }
 
 impl ColumnValue {
@@ -242,7 +283,7 @@ impl Parser {
     fn column_is_incomplete(&self, columns: &Vec<Column>) -> bool {
         if let Some(final_column) = columns.last() {
             match final_column {
-                Column::IncompleteColumn { key, column_type, value } => true,
+                Column::IncompleteColumn { .. } => true,
                 _ => false
             }
         } else {
