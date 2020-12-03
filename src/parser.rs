@@ -1,5 +1,6 @@
 #[allow(unused_imports)]
 use log::{debug, error, log_enabled, info, Level};
+use std::fmt;
 
 // define more config later
 struct ParserConfig { include_xids: bool }
@@ -11,19 +12,26 @@ struct ParserState {
 pub struct Parser { config: ParserConfig, parse_state: ParserState }
 
 #[derive(Debug)]
-pub enum BoolValue {
-    True,
-    False
-}
-
-#[derive(Debug)]
 pub enum ColumnValue {
-    Boolean(BoolValue),
+    Boolean(bool),
     Integer(i64),
     Numeric(String),
     Text(String),
     IncompleteText(String),
     UnchangedToast
+}
+
+impl fmt::Display for ColumnValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ColumnValue::UnchangedToast => { write!(f, "unchanged-toast-datum") },
+            ColumnValue::Boolean(x) => { write!(f,"{}", x)},
+            ColumnValue::Integer(x) => { write!(f,"{}", x)},
+            ColumnValue::Numeric(x) => { write!(f,"{}", x)},
+            ColumnValue::Text(x) => { write!(f,"{}", x)},
+            ColumnValue::IncompleteText(x) => { write!(f,"{}", x)},
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -42,7 +50,8 @@ impl Column {
         };
         &string
     }
-    pub fn column_value_unwrap<'a>(&'a self) -> &'a ColumnValue {
+    // for when you _know_ a column has a value, used for id columns
+    pub fn column_value_unwrap(&self) -> &ColumnValue {
         match self {
             Column::ChangedColumn{value, ..} => {
                 match value {
@@ -53,7 +62,22 @@ impl Column {
             Column::IncompleteColumn{value, ..} => {
                 &value
             },
-            Column::UnchangedToastColumn{..} => {panic!("tried to get value for unchanged_toast_column")}
+            Column::UnchangedToastColumn{..} => { panic!("tried to get value for unchanged_toast_column") }
+        }
+    }
+
+    pub fn column_value_for_changed_column(&self) -> Option<&ColumnValue> {
+        match self {
+            Column::ChangedColumn{value,..} => {
+                value.as_ref()
+            },
+            _ => { panic!("column_value_for_changed_column called on non-changed-column {:?}", self)}
+        }
+    }
+    pub fn is_changed_data_column(&self) -> bool {
+        match self {
+            Column::ChangedColumn{..} => true,
+            _ => false
         }
     }
     pub fn is_id_column(&self) -> bool {
@@ -61,7 +85,7 @@ impl Column {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone,Copy,Debug)]
 pub enum ChangeKind {
     Insert,
     Update,
@@ -89,6 +113,8 @@ impl ParsedLine {
             _ => panic!("tried to find id column of non changed_data")
         }
     }
+    // TODO make the internal fields a struct and provide unwrap helper methods
+    // pub fn unwrap_changed_data(&self) ->
 }
 
 impl ColumnValue {
@@ -149,9 +175,7 @@ impl ColumnValue {
             match found_index_option {
                 Some(index) => {
                     total_index += index;
-                    debug!("total_index {}", total_index);
                     let escaped = is_escaped(without_first_quote, total_index);
-                    debug!("escaped: {}", escaped);
                     if !escaped {
                         complete_text = true;
                         break
@@ -173,7 +197,6 @@ impl ColumnValue {
         } else {
             (ColumnValue::IncompleteText(start.to_owned()), end)
         };
-        // debug!("parse_text returning {:?}", column);
         let (_thrown_away_space, adjusted_end) = ColumnValue::split_until_char_or_end(text, ' ');
         (column, adjusted_end)
     }
@@ -194,8 +217,8 @@ impl ColumnValue {
     fn parse_boolean<'a>(string: &'a str) -> (ColumnValue, &'a str) {
         let (start, rest) = ColumnValue::split_until_char_or_end(string, ' ');
         let bool_value = match start {
-            "true" => BoolValue::True,
-            "false" => BoolValue::False,
+            "true" => true,
+            "false" => false,
             _ => panic!("Unknown boolvalue {:?}", start)
 
         };
@@ -212,9 +235,6 @@ impl Parser {
     }
 
     pub fn parse(&mut self, string: &String) -> ParsedLine {
-        if self.parse_state.currently_parsing.is_none() {
-            // return None
-        }
         match string {
             x if { x.starts_with("BEGIN")} => self.parse_begin(x),
             x if { x.starts_with("COMMIT") } => self.parse_commit(x),
@@ -232,7 +252,7 @@ impl Parser {
             let rest_of_string = &string[SIZE_OF_BEGIN_TAG..string.len()];
             // "BEGIN 1234"
             let xid: i64 = rest_of_string.parse().unwrap();
-            // debug!("parsed begin {}", xid);
+            debug!("parsed begin {}", xid);
             ParsedLine::Begin(xid)
         } else {
             ParsedLine::Begin(0)
@@ -247,7 +267,7 @@ impl Parser {
             let rest_of_string = &string[SIZE_OF_COMMIT_TAG..string.len()];
             // "BEGIN 1234"
             let xid: i64 = rest_of_string.parse().unwrap();
-            // debug!("parsed commit {}", xid);
+            debug!("parsed commit {}", xid);
             ParsedLine::Commit(xid)
         } else {
             ParsedLine::Commit(0)
@@ -270,7 +290,7 @@ impl Parser {
 
         let kind = self.parse_kind(kind_string);
 
-        info!("table: {:?} change: {:?}", table_name, kind_string);
+        debug!("table: {:?} change: {:?}", table_name, kind_string);
 
         // + 2 for colon + space
         assert_eq!(&string_without_table[kind_string.len()..kind_string.len() + 2], ": ");
@@ -281,11 +301,8 @@ impl Parser {
     }
 
     fn column_is_incomplete(&self, columns: &Vec<Column>) -> bool {
-        if let Some(final_column) = columns.last() {
-            match final_column {
-                Column::IncompleteColumn { .. } => true,
-                _ => false
-            }
+        if let Some(Column::IncompleteColumn{..}) = columns.last() {
+            true
         } else {
             false
         }
@@ -400,7 +417,7 @@ impl Parser {
         } else {
             changed_data
         };
-        info!("returning change struct: {:?}", result);
+        debug!("returning change struct: {:?}", result);
         result
     }
 }
@@ -425,25 +442,17 @@ fn slice_until_colon_or_end(string: &str) -> &str {
 // fucking escaping
 // so this handles when the thing is escaped with a \'
 fn is_escaped(string: &str, index: usize) -> bool {
-    is_backslash_escaped(string, index) || is_quote_escaped(string, index)
-}
-
-fn is_backslash_escaped(string: &str, index: usize) -> bool {
-    is_backwards_escaped_by_char(string, index, r"\")
+    is_quote_escaped(string, index)
 }
 
 fn is_backwards_escaped_by_char(string: &str, index: usize, character: &str) -> bool {
     if index == 0 {
-        debug!("index 0");
         return false
     }
     else if string.get(index - 1..index).unwrap_or("") != character {
-        debug!("middle: index: {}", index);
-        debug!("middle: last_character: {}", string.get(index - 1..index).unwrap_or(""));
         return false;
     } else {
-        debug!("recurse");
-        !is_backslash_escaped(string, index - 1)
+        !is_backwards_escaped_by_char(string, index - 1, character)
     }
 }
 
@@ -457,13 +466,10 @@ fn is_quote_escaped(string: &str, index: usize) -> bool {
         string.get(index..index+1).unwrap_or("") == r"'" &&
         string.get(index+1..index+2).unwrap_or("") == r"'"
     {
-        debug!("quote followed by quote");
         return true
     } else if index == 0 {
-        debug!("index 0");
         return false;
     } else if index < string.len() {
-        debug!("backwards escaped");
         is_backwards_escaped_by_char(string, index, "'")
     } else {
         return false;
@@ -473,6 +479,12 @@ fn is_quote_escaped(string: &str, index: usize) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn foobar() {
+        let foo = ColumnValue::Text("foo".to_owned());
+        assert_eq!(foo.to_string().as_str(), "foo");
+    }
 
     #[test]
     fn quote_escaping_works() {

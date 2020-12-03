@@ -9,3 +9,5 @@ authors = ["Michael Hauser-Raspe <michael@meetcleo.com>"]
 log = "0.4.0"
 env_logger = "0.8.2"
 regex = "1.4.2"
+either = "1.6.1"
+csv = "1.1"
