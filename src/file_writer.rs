@@ -17,8 +17,8 @@ pub struct FileWriter {
     directory: PathBuf,
     pub insert_file: FileStruct,
     // update_file: FileStruct,
-    update_files: HashMap<String, FileStruct>,
-    delete_file: FileStruct
+    pub update_files: HashMap<String, FileStruct>,
+    pub delete_file: FileStruct
 }
 
 pub struct FileStruct {
@@ -107,6 +107,7 @@ impl FileStruct {
     }
 }
 
+// TODO: write iterator over files
 impl FileWriter {
     pub fn new(table_name: &str) -> FileWriter {
         let directory = Path::new(".").join("output");

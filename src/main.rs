@@ -35,11 +35,8 @@ async fn main() {
     collector.print_stats();
     let mut files = collector.write_files();
     let file_uploader = &file_uploader::FileUploader::new();
-    // let mut file = files.pop().unwrap();
-    // for mut file in files {
-    //     file.flush_all();
-    //     file_uploader.upload_table_to_s3(&file).await;
-    // }
+    // TODO: we need to define a proper threading model,
+    // 
     let results: Vec<_> = files.iter_mut().map(
         |file| async move {
             file.flush_all();
@@ -47,7 +44,7 @@ async fn main() {
         }
     ).collect();
 
-    futures::future::join_all(results).await;
+    let s3_files = futures::future::join_all(results).await;
     // Ok(())
 }
 
