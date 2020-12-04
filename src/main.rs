@@ -17,27 +17,27 @@ mod database_writer;
 #[tokio::main]
 async fn main() {
     env_logger::init();
-    // File hosts must exist in current path before this produces output
-    let mut parser = parser::Parser::new(true);
-    let mut collector = change_processing::ChangeProcessing::new();
-    if let Ok(lines) = read_lines("./data/test_decoding.txt") {
-        // Consumes the iterator, returns an (Optional) String
-        for line in lines
-        {
-            if let Ok(ip) = line {
-                let parsed_line = parser.parse(&ip);
-                match parsed_line {
-                    parser::ParsedLine::ContinueParse => {}, // Intentionally left blank, continue parsing
-                    _ => { collector.add_change(parsed_line); }
-                }
-            }
-        }
-    }
-    collector.print_stats();
-    let mut files = collector.write_files();
+    // // File hosts must exist in current path before this produces output
+    // let mut parser = parser::Parser::new(true);
+    // let mut collector = change_processing::ChangeProcessing::new();
+    // if let Ok(lines) = read_lines("./data/test_decoding.txt") {
+    //     // Consumes the iterator, returns an (Optional) String
+    //     for line in lines
+    //     {
+    //         if let Ok(ip) = line {
+    //             let parsed_line = parser.parse(&ip);
+    //             match parsed_line {
+    //                 parser::ParsedLine::ContinueParse => {}, // Intentionally left blank, continue parsing
+    //                 _ => { collector.add_change(parsed_line); }
+    //             }
+    //         }
+    //     }
+    // }
+    // collector.print_stats();
+    // let mut files = collector.write_files();
     // let file_uploader = &file_uploader::FileUploader::new();
 
-    // TODO: we need to define a proper threading model,
+    // // TODO: we need to define a proper threading model,
     // let results: Vec<_> = files.iter_mut().map(
     //     |file| async move {
     //         file.flush_all();
@@ -45,12 +45,13 @@ async fn main() {
     //     }
     // ).collect();
 
-    // TODO: select on these futures
+    // // TODO: select on these futures for some real good async sauce
     // let s3_files = futures::future::join_all(results).await;
     // s3_files.map(|s3_file|
 
     // )
     let database_writer = database_writer::DatabaseWriter::new();
+    database_writer.test().await;
 }
 
 // The output is wrapped in a Result to allow matching on errors
