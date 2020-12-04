@@ -12,6 +12,7 @@ mod parser;
 mod change_processing;
 mod file_writer;
 mod file_uploader;
+mod database_writer;
 
 #[tokio::main]
 async fn main() {
@@ -34,18 +35,22 @@ async fn main() {
     }
     collector.print_stats();
     let mut files = collector.write_files();
-    let file_uploader = &file_uploader::FileUploader::new();
-    // TODO: we need to define a proper threading model,
-    // 
-    let results: Vec<_> = files.iter_mut().map(
-        |file| async move {
-            file.flush_all();
-            file_uploader.upload_table_to_s3(&file).await
-        }
-    ).collect();
+    // let file_uploader = &file_uploader::FileUploader::new();
 
-    let s3_files = futures::future::join_all(results).await;
-    // Ok(())
+    // TODO: we need to define a proper threading model,
+    // let results: Vec<_> = files.iter_mut().map(
+    //     |file| async move {
+    //         file.flush_all();
+    //         file_uploader.upload_table_to_s3(&file).await
+    //     }
+    // ).collect();
+
+    // TODO: select on these futures
+    // let s3_files = futures::future::join_all(results).await;
+    // s3_files.map(|s3_file|
+
+    // )
+    let database_writer = database_writer::DatabaseWriter::new();
 }
 
 // The output is wrapped in a Result to allow matching on errors

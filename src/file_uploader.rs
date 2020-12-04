@@ -6,18 +6,19 @@ use tokio::fs::File;
 // use std::io::{self, BufReader};
 use tokio_util::codec;
 // use std::iter::Iterator;
-use futures::{TryStreamExt,Future}; // , FutureExt
-// use futures::Future
-use futures::future::FutureObj;
+use futures::{TryStreamExt}; // , FutureExt
 
 use crate::file_writer::FileWriter;
+use crate::parser::ChangeKind;
 
 pub struct FileUploader {
     s3_client: S3Client
 }
 
 pub struct CleoS3File {
-    remote_filename: String
+    remote_filename: String,
+    kind: ChangeKind,
+    table_name: String,
 }
 
 impl FileUploader {
@@ -26,7 +27,7 @@ impl FileUploader {
         FileUploader { s3_client: S3Client::new(Region::UsEast1) }
     }
     // Not actually async yet here
-    pub async fn upload_to_s3(&self, file_name: &str) -> CleoS3File {
+    pub async fn upload_to_s3(&self, file_name: &str, kind: ChangeKind, table_name: &str) -> CleoS3File {
         println!("copying file {}", file_name);
         let local_filename =  file_name;
         let remote_filename = "mike-test/".to_owned() + file_name;
@@ -48,7 +49,7 @@ impl FileUploader {
             .await
             .expect("Failed to put test object");
         println!("uploaded file {}", remote_filename);
-        CleoS3File { remote_filename: remote_filename.clone() }
+        CleoS3File { remote_filename: remote_filename.clone(), kind: kind, table_name: table_name.to_owned() }
     }
 
     // does all of these concurrently
@@ -65,7 +66,7 @@ impl FileUploader {
             .filter(|x| x.exists())
             .map(
             |file| async move {
-                self.upload_to_s3(file.file_name.to_str().unwrap()).await
+                self.upload_to_s3(file.file_name.to_str().unwrap(), file.kind, &file.table_name).await
             }
         ).collect::<Vec<_>>();
         futures::future::join_all(s3_file_results).await

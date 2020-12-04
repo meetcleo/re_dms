@@ -23,6 +23,8 @@ pub struct FileWriter {
 
 pub struct FileStruct {
     pub file_name: PathBuf,
+    pub table_name: String,
+    pub kind: ChangeKind,
     file: Option<csv::Writer<fs::File>>,
     written_header: bool
 }
@@ -34,8 +36,8 @@ impl FileStruct {
 }
 
 impl FileStruct {
-    fn new(path_name: PathBuf) -> FileStruct {
-        FileStruct { file_name: path_name, file: None, written_header: false}
+    fn new(path_name: PathBuf, kind: ChangeKind, table_name: String ) -> FileStruct {
+        FileStruct { file_name: path_name, file: None, kind: kind, table_name: table_name, written_header: false}
     }
 
     fn create_writer(&mut self) {
@@ -116,10 +118,10 @@ impl FileWriter {
         fs::create_dir_all(owned_directory.as_path()).expect("panic creating directory");
         FileWriter {
             directory: owned_directory,
-            insert_file: FileStruct::new(directory.join(table_name.to_owned() + "_inserts.csv")),
+            insert_file: FileStruct::new(directory.join(table_name.to_owned() + "_inserts.csv"), ChangeKind::Insert, table_name.to_owned()),
             // update_file: FileStruct::new(directory.join(table_name.to_owned() + "_updates.csv")),
             update_files: HashMap::new(),
-            delete_file: FileStruct::new(directory.join(table_name.to_owned() + "_deletes.csv"))
+            delete_file: FileStruct::new(directory.join(table_name.to_owned() + "_deletes.csv"), ChangeKind::Delete, table_name.to_owned())
         }
     }
     pub fn add_change(&mut self, change: &ParsedLine) {
@@ -161,8 +163,9 @@ impl FileWriter {
                 .or_insert_with(
                     ||
                         FileStruct::new(
-                            cloned_directory.join(
-                                table_name.to_owned() + "_" + &number_of_updates_that_exist.to_string() + "_updates.csv")
+                            cloned_directory.join(table_name.to_owned() + "_" + &number_of_updates_that_exist.to_string() + "_updates.csv"),
+                            ChangeKind::Update,
+                            table_name.to_owned()
                         )
                 )
                 .add_change(change);
