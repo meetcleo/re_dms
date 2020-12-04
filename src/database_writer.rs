@@ -9,7 +9,7 @@ use dotenv::dotenv;
 use std::env;
 
 pub struct DatabaseWriter {
-
+    connection_pool: Pool
 }
 
 #[derive(Debug, Deserialize)]
@@ -27,22 +27,27 @@ impl Config {
 
 impl DatabaseWriter {
     pub fn new() -> DatabaseWriter {
-        DatabaseWriter {}
+        DatabaseWriter {
+            connection_pool: DatabaseWriter::create_connection_pool()
+        }
     }
-    pub async fn test(&self) {
+
+    fn create_connection_pool() -> Pool {
         dotenv().ok();
         let mut cfg = Config::from_env().unwrap();
         // cfg.dbname = Some("cleo_development".to_string());
         cfg.pg.manager = Some(ManagerConfig { recycling_method: RecyclingMethod::Fast });
         let builder = SslConnector::builder(SslMethod::tls()).expect("fuck");
-        // builder.set_ca_file("database_cert.pem")?;
         let connector = MakeTlsConnector::new(builder.build());
-        let ref pool = cfg.pg.create_pool(connector).unwrap();
+        cfg.pg.create_pool(connector).unwrap()
+    }
 
-        let foo: Vec<_> = (1..10).map(|i| async move {
+    pub async fn test(&self) {
+        let ref pool = &self.connection_pool;
+        let foo: Vec<_> = (1..2).map(|i| async move {
             let client = pool.get().await.unwrap();
-            let stmt = client.prepare("SELECT 1 + $1").await.unwrap();
-            let rows = client.query(&stmt, &[&i]).await.unwrap();
+            let stmt = client.prepare("SELECT count(*) from users").await.unwrap();
+            let rows = client.query(&stmt, &[]).await.unwrap();
             let value: i32 = rows[0].get(0);
             assert_eq!(value, i + 1);
             println!("{}", value);
