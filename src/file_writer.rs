@@ -7,7 +7,8 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::fs;
 use crate::parser::{ParsedLine, ChangeKind};
-// use std::collections::{HashMap};//{ HashMap, BTreeMap, HashSet };
+use std::collections::{HashMap};//{ HashMap, BTreeMap, HashSet };
+use itertools::Itertools;
 // use std::io::prelude::*;
 
 // we have one of these per table,
@@ -15,7 +16,8 @@ use crate::parser::{ParsedLine, ChangeKind};
 pub struct FileWriter {
     directory: PathBuf,
     insert_file: FileStruct,
-    update_file: FileStruct,
+    // update_file: FileStruct,
+    update_files: HashMap<String, FileStruct>,
     delete_file: FileStruct
 }
 
@@ -37,21 +39,23 @@ impl FileStruct {
     }
 
     fn write_header(&mut self, change: &ParsedLine) {
-        if let Some(_file) = &mut self.file {
-            if let ParsedLine::ChangedData{ columns,.. } = change {
-                let strings: Vec<&str> = columns.iter().map(|x| x.column_name()).collect();
-                self.write(&strings);
-                // let result = file.write_record(strings).expect("failed to write csv header");
-            }
+        if !self.written_header {
+            if let Some(_file) = &mut self.file {
+                if let ParsedLine::ChangedData{ columns,.. } = change {
+                    let strings: Vec<&str> = columns.iter().map(|x| x.column_name()).collect();
+                    self.write(&strings);
+                    // let result = file.write_record(strings).expect("failed to write csv header");
+                }
 
+            }
+            self.written_header = true;
         }
-        self.written_header = true;
     }
 
     fn write_line(&mut self, change: &ParsedLine) {
         self.write_header(change);
         if let Some(_file) = &mut self.file {
-            if let ParsedLine::ChangedData{ columns, table_name,.. } = change {
+            if let ParsedLine::ChangedData{ columns,.. } = change {
                 // need to own these strings
                 let strings: Vec<String> = columns
                     .iter()
@@ -106,8 +110,8 @@ impl FileWriter {
         FileWriter {
             directory: owned_directory,
             insert_file: FileStruct::new(directory.join(table_name.to_owned() + "_inserts.csv")),
-            update_file: FileStruct::new(directory.join(table_name.to_owned() + "_updates.csv")),
-            // update_files: HashMap::new(),
+            // update_file: FileStruct::new(directory.join(table_name.to_owned() + "_updates.csv")),
+            update_files: HashMap::new(),
             delete_file: FileStruct::new(directory.join(table_name.to_owned() + "_deletes.csv"))
         }
     }
@@ -118,7 +122,8 @@ impl FileWriter {
                     self.insert_file.add_change(change);
                 },
                 ChangeKind::Update => {
-                    self.update_file.add_change(change);
+
+                    self.add_change_to_update_file(change);
                 },
                 ChangeKind::Delete => {
                     self.delete_file.add_change(change);
@@ -126,6 +131,26 @@ impl FileWriter {
             }
         }
     }
+    // update_files is a hash of our column names to our File
+    fn add_change_to_update_file(&mut self, change: &ParsedLine) {
+        let update_key: String = change.columns_for_changed_data()
+            .iter()
+            .filter(|x| x.is_changed_data_column())
+            .map(|x| x.column_name())
+            .sorted()
+            .join(",");
+        let number_of_updates_that_exist = self.update_files.len();
+        let cloned_directory = self.directory.clone();
+        if let ParsedLine::ChangedData{table_name, ..} = change {
+            self.update_files.entry(update_key)
+                .or_insert_with(
+                    ||
+                        FileStruct::new(
+                            cloned_directory.join(
+                                table_name.to_owned() + "_" + &number_of_updates_that_exist.to_string() + "_updates.csv")
+                        )
+                )
+                .add_change(change);
+        } else { panic!("non changed data passed to add_change_to_update_file") }
+    }
 }
-
-// fn collection_writer()

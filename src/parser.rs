@@ -113,8 +113,15 @@ impl ParsedLine {
             _ => panic!("tried to find id column of non changed_data")
         }
     }
-    // TODO make the internal fields a struct and provide unwrap helper methods
-    // pub fn unwrap_changed_data(&self) ->
+    // panic if called on something that's not ChangedData
+    pub fn columns_for_changed_data(&self) -> &Vec<Column> {
+        match self {
+            ParsedLine::ChangedData {columns, ..} => {
+                columns
+            },
+            _ => panic!("changed columns for changed data called on non-changed data")
+        }
+    }
 }
 
 impl ColumnValue {

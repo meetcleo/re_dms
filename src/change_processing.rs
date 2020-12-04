@@ -80,7 +80,7 @@ impl ChangeSet {
                         *old_columns = new_columns;
                     } else {
                         // recreate the enum
-                        self.changes.push(ParsedLine::ChangedData {columns: new_columns, table_name: new_table_name, kind: new_kind})
+                        self.changes.push(ParsedLine::ChangedData { columns: new_columns, table_name: new_table_name, kind: new_kind })
                     }
                 }
             }
