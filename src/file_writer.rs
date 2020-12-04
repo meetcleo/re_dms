@@ -15,16 +15,22 @@ use itertools::Itertools;
 // it will hold the files to write to and handle the writing
 pub struct FileWriter {
     directory: PathBuf,
-    insert_file: FileStruct,
+    pub insert_file: FileStruct,
     // update_file: FileStruct,
     update_files: HashMap<String, FileStruct>,
     delete_file: FileStruct
 }
 
 pub struct FileStruct {
-    file_name: PathBuf,
+    pub file_name: PathBuf,
     file: Option<csv::Writer<fs::File>>,
     written_header: bool
+}
+
+impl FileStruct {
+    pub fn exists(&self) -> bool {
+        self.file.is_some()
+    }
 }
 
 impl FileStruct {
@@ -130,6 +136,14 @@ impl FileWriter {
                 },
             }
         }
+    }
+    pub fn flush_all(&mut self) {
+        self.insert_file.file.as_mut().map(|x| x.flush());
+        for x in self.update_files.values_mut() {
+            x.file.as_mut().map(|x| x.flush());
+        }
+        // self.update_files.values_mut().map(|x| ).collect();
+        self.delete_file.file.as_mut().map(|x| x.flush());
     }
     // update_files is a hash of our column names to our File
     fn add_change_to_update_file(&mut self, change: &ParsedLine) {

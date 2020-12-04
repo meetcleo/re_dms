@@ -1,4 +1,4 @@
-use parser::{ ParsedLine, Column, ColumnValue, ChangeKind };
+use crate::parser::{ ParsedLine, Column, ColumnValue, ChangeKind };
 use std::collections::{ HashMap, BTreeMap, HashSet };
 
 use either::Either;
@@ -221,8 +221,8 @@ impl ChangeProcessing {
             }
         );
     }
-    pub fn write_files(&self) {
-        self.table_holder.tables.iter().for_each(
+    pub fn write_files(&self) -> Vec<file_writer::FileWriter> {
+        self.table_holder.tables.iter().map(
             |(table_name, table)| {
             let mut file_writer = file_writer::FileWriter::new(table_name);
                 table.changeset.values().for_each(
@@ -233,7 +233,9 @@ impl ChangeProcessing {
                             })
                     }
 
-                )
-            })
+                );
+                file_writer
+            }
+        ).collect()
     }
 }

@@ -766,6 +766,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "num_cpus"
+version = "1.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "05499f3756671c15885fee9034446956fff3f243d6077b91e5767df161f766b3"
+dependencies = [
+ "hermit-abi",
+ "libc",
+]
+
+[[package]]
 name = "once_cell"
 version = "1.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -964,11 +974,14 @@ dependencies = [
  "csv",
  "either",
  "env_logger",
+ "futures",
  "itertools",
  "log",
  "regex",
  "rusoto_core",
  "rusoto_s3",
+ "tokio",
+ "tokio-util",
 ]
 
 [[package]]
@@ -1440,6 +1453,7 @@ dependencies = [
  "mio",
  "mio-named-pipes",
  "mio-uds",
+ "num_cpus",
  "pin-project-lite 0.1.11",
  "signal-hook-registry",
  "slab",

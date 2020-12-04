@@ -8,16 +8,13 @@ use std::path::Path;
 // use std::io::prelude::*;
 // use std::fs;
 
-extern crate log;
-extern crate either;
-extern crate csv;
-extern crate itertools;
-
 mod parser;
 mod change_processing;
 mod file_writer;
+mod file_uploader;
 
-fn main() -> std::io::Result<()> {
+#[tokio::main]
+async fn main() {
     env_logger::init();
     // File hosts must exist in current path before this produces output
     let mut parser = parser::Parser::new(true);
@@ -35,9 +32,23 @@ fn main() -> std::io::Result<()> {
             }
         }
     }
-    // collector.print_stats();
-    collector.write_files();
-    Ok(())
+    collector.print_stats();
+    let mut files = collector.write_files();
+    let file_uploader = &file_uploader::FileUploader::new();
+    // let mut file = files.pop().unwrap();
+    // for mut file in files {
+    //     file.flush_all();
+    //     file_uploader.upload_table_to_s3(&file).await;
+    // }
+    let results: Vec<_> = files.iter_mut().map(
+        |file| async move {
+            file.flush_all();
+            file_uploader.upload_table_to_s3(&file).await
+        }
+    ).collect();
+
+    futures::future::join_all(results).await;
+    // Ok(())
 }
 
 // The output is wrapped in a Result to allow matching on errors

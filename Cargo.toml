@@ -2,6 +2,7 @@
 name = "re_dms"
 version = "0.1.0"
 authors = ["Michael Hauser-Raspe <michael@meetcleo.com>"]
+edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -14,3 +15,9 @@ csv = "1.1"
 rusoto_core = "0.45.0"
 rusoto_s3 = "0.45.0"
 itertools = "0.9"
+# rusoto uses this, try it for now
+# if we need another, look into
+# https://github.com/tokio-rs/tokio-compat
+tokio = { version = "0.2", features = ["full"] }
+tokio-util = {version = "0.3.1", features = ["codec"] }
+futures = "0.3.1"
