@@ -42,3 +42,7 @@ deadpool-postgres = { version = "0.5.6" }
 tokio-postgres = { version = "0.5.1", features = ["with-uuid-0_8"] }
 postgres-openssl = "0.3.0"
 openssl = "0.10"
+
+# serialisation
+serde = "1.0.117"
+config = "0.10.1"
