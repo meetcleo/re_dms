@@ -21,10 +21,12 @@ dotenv = "0.15.0"
 # s3
 rusoto_core = "0.45.0"
 rusoto_s3 = "0.45.0"
-
 # rusoto uses tokio 0.2, try it for now
 # if we need another, look into
 # https://github.com/tokio-rs/tokio-compat
+
+# gzipping
+flate2 = "1.0.19"
 
 # async
 

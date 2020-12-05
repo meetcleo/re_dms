@@ -39,7 +39,7 @@ async fn main() {
             }
         }
     }
-    collector.print_stats();
+    // collector.print_stats();
     let mut files = collector.write_files();
     let file_uploader = &file_uploader::FileUploader::new();
 

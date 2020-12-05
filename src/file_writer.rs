@@ -10,6 +10,8 @@ use crate::parser::{ParsedLine, ChangeKind};
 use std::collections::{HashMap};//{ HashMap, BTreeMap, HashSet };
 use itertools::Itertools;
 // use std::io::prelude::*;
+use flate2::Compression;
+use flate2::write::GzEncoder;
 
 // we have one of these per table,
 // it will hold the files to write to and handle the writing
@@ -25,7 +27,7 @@ pub struct FileStruct {
     pub file_name: PathBuf,
     pub table_name: String,
     pub kind: ChangeKind,
-    file: Option<csv::Writer<fs::File>>,
+    file: Option<csv::Writer<flate2::write::GzEncoder<fs::File>>>,
     written_header: bool
 }
 
@@ -41,9 +43,10 @@ impl FileStruct {
     }
 
     fn create_writer(&mut self) {
-        // TEMP use flexible csv writer
-        let writer = csv::WriterBuilder::new().flexible(true).from_path(self.file_name.as_path()).expect("writer couldn't open file");
-        self.file = Some(writer);
+        let file = fs::File::create(self.file_name.as_path()).unwrap();
+        let writer = GzEncoder::new(file, Compression::default());
+        let csv_writer = csv::WriterBuilder::new().flexible(true).from_writer(writer);
+        self.file = Some(csv_writer);
     }
 
     fn write_header(&mut self, change: &ParsedLine) {
@@ -70,14 +73,12 @@ impl FileStruct {
                     .filter(|x| x.is_changed_data_column())
                     .map(
                         |x| {
-                            // x.column_name()
                             if let Some(value) = x.column_value_for_changed_column() {
                                 value.to_string()
                             } else {"".to_owned()} // remember blank as nulls
                         }
                     ).collect();
                 self.write(&strings);
-                // let result = file.write_record(strings).expect("failed to write csv header");
             }
 
         }
@@ -89,8 +90,8 @@ impl FileStruct {
         T: AsRef<[u8]>,
     {
         if let Some(file) = &mut self.file {
+            // TODO handle error
             file.write_record(string).expect("failed to write file");
-            // file.write_all(string.as_bytes()).expect("write failed");
         } else {
             panic!("tried to write to file before creating it");
         }
@@ -118,10 +119,10 @@ impl FileWriter {
         fs::create_dir_all(owned_directory.as_path()).expect("panic creating directory");
         FileWriter {
             directory: owned_directory,
-            insert_file: FileStruct::new(directory.join(table_name.to_owned() + "_inserts.csv"), ChangeKind::Insert, table_name.to_owned()),
+            insert_file: FileStruct::new(directory.join(table_name.to_owned() + "_inserts.csv.gz"), ChangeKind::Insert, table_name.to_owned()),
             // update_file: FileStruct::new(directory.join(table_name.to_owned() + "_updates.csv")),
             update_files: HashMap::new(),
-            delete_file: FileStruct::new(directory.join(table_name.to_owned() + "_deletes.csv"), ChangeKind::Delete, table_name.to_owned())
+            delete_file: FileStruct::new(directory.join(table_name.to_owned() + "_deletes.csv.gz"), ChangeKind::Delete, table_name.to_owned())
         }
     }
     pub fn add_change(&mut self, change: &ParsedLine) {
@@ -163,7 +164,7 @@ impl FileWriter {
                 .or_insert_with(
                     ||
                         FileStruct::new(
-                            cloned_directory.join(table_name.to_owned() + "_" + &number_of_updates_that_exist.to_string() + "_updates.csv"),
+                            cloned_directory.join(table_name.to_owned() + "_" + &number_of_updates_that_exist.to_string() + "_updates.csv.gz"),
                             ChangeKind::Update,
                             table_name.to_owned()
                         )

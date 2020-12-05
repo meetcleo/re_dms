@@ -6,6 +6,8 @@ use serde::Deserialize;
 use dotenv::dotenv;
 use std::env;
 
+#[allow(unused_imports)]
+use log::{debug, error, log_enabled, info, Level};
 
 use crate::file_uploader::CleoS3File;
 use crate::parser::ChangeKind;
@@ -54,11 +56,11 @@ impl DatabaseWriter {
             return
         }
         // temp tables are present in the session, so we still need to drop it at the end of the transaction
-        println!("BEGIN INSERT {}", table_name);
-        let mut client = self.connection_pool.get().await.unwrap();
+        info!("BEGIN INSERT {}", table_name);
+        let client = self.connection_pool.get().await.unwrap();
         // let transaction = client.transaction().await.unwrap();
         let transaction = client;
-        println!("GOT CONNECTION {}", table_name);
+        info!("GOT CONNECTION {}", table_name);
         let (schema_name, just_table_name) = table_name.split_once('.').unwrap();
         assert!(!table_name.contains('"'));
         // TODO: escaping, check the table name is well formed
@@ -99,34 +101,34 @@ impl DatabaseWriter {
         let drop_staging_table = format!("drop table if exists {}_staging", &table_name);
         // let insert_query = format!();
         transaction.execute(create_staging_table.as_str(), &[]).await.unwrap();
-        println!("CREATED STAGING TABLE {}", table_name);
+        info!("CREATED STAGING TABLE {}", table_name);
         transaction.execute(copy_to_staging_table.as_str(), &[]).await.unwrap();
-        println!("COPIED TO STAGING TABLE {}", table_name);
+        info!("COPIED TO STAGING TABLE {}", table_name);
         transaction.execute(insert_from_staging_to_real_table.as_str(), &[]).await.unwrap();
-        println!("INSERTED FROM STAGING TABLE {}", table_name);
+        info!("INSERTED FROM STAGING TABLE {}", table_name);
         transaction.execute(drop_staging_table.as_str(), &[]).await.unwrap();
-        println!("DROPPED STAGING TABLE {}", table_name);
+        info!("DROPPED STAGING TABLE {}", table_name);
         // TEMP
         // serialiseable isolation error. might be to do with dms.
         // transaction.commit().await.unwrap();
-        println!("COMMITTED TX {}", table_name);
+        info!("COMMITTED TX {}", table_name);
 
-        println!("INSERTED {} {}", &remote_filepath, table_name);
+        info!("INSERTED {} {}", &remote_filepath, table_name);
     }
 
-    pub async fn run_query_with_no_args(&self, query_string: &str) {
-    }
+    // pub async fn run_query_with_no_args(&self, query_string: &str) {
+    // }
 
-    pub async fn test(&self) {
-        let ref pool = &self.connection_pool;
-        let foo: Vec<_> = (1..10).map(|i| async move {
-            let client = pool.get().await.unwrap();
-            // let stmt = client.prepare("SELECT 1 + $1;SELECT 1").await.unwrap();
-            let rows = client.query("select 1 + $1", &[&i]).await.unwrap();
-            let value: i32 = rows[0].get(0);
-            assert_eq!(value, i + 1);
-            println!("{}", value);
-        }).collect();
-        futures::future::join_all(foo).await;
-    }
+    // pub async fn test(&self) {
+    //     let ref pool = &self.connection_pool;
+    //     let foo: Vec<_> = (1..10).map(|i| async move {
+    //         let client = pool.get().await.unwrap();
+    //         // let stmt = client.prepare("SELECT 1 + $1;SELECT 1").await.unwrap();
+    //         let rows = client.query("select 1 + $1", &[&i]).await.unwrap();
+    //         let value: i32 = rows[0].get(0);
+    //         assert_eq!(value, i + 1);
+    //         info!("{}", value);
+    //     }).collect();
+    //     futures::future::join_all(foo).await;
+    // }
 }
