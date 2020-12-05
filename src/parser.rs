@@ -85,7 +85,7 @@ impl Column {
     }
 }
 
-#[derive(Clone,Copy,Debug)]
+#[derive(Clone,Copy,Debug,PartialEq)]
 pub enum ChangeKind {
     Insert,
     Update,

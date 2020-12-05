@@ -15,11 +15,21 @@ pub struct FileUploader {
     s3_client: S3Client
 }
 
+// little bag of data
 pub struct CleoS3File {
-    remote_filename: String,
-    kind: ChangeKind,
-    table_name: String,
+    pub remote_filename: String,
+    pub kind: ChangeKind,
+    pub table_name: String,
 }
+impl CleoS3File {
+    pub fn remote_path(&self) -> String {
+        "s3://".to_owned() + BUCKET_NAME.as_ref() + "/" + self.remote_filename.as_ref()
+    }
+}
+
+// just use a constant for now
+// use config later
+const BUCKET_NAME: &str = "cleo-data-science";
 
 impl FileUploader {
 
@@ -37,7 +47,7 @@ impl FileUploader {
         let byte_stream = codec::FramedRead::new(tokio_file, codec::BytesCodec::new()).map_ok(|x| x.freeze() );
         println!("Bytes being transferred {}", meta.len());
         let put_request = PutObjectRequest {
-            bucket: "cleo-data-science".to_owned(),
+            bucket: BUCKET_NAME.to_owned(),
             key: remote_filename.clone(),
             content_length: Some(meta.len() as i64),
             body: Some(ByteStream::new(byte_stream).into()),

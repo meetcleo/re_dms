@@ -112,7 +112,7 @@ impl FileStruct {
 // TODO: write iterator over files
 impl FileWriter {
     pub fn new(table_name: &str) -> FileWriter {
-        let directory = Path::new(".").join("output");
+        let directory = Path::new("output");
         // create directory
         let owned_directory = directory.clone().to_owned();
         fs::create_dir_all(owned_directory.as_path()).expect("panic creating directory");
