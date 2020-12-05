@@ -29,7 +29,6 @@ rusoto_s3 = "0.45.0"
 flate2 = "1.0.19"
 
 # async
-
 # highest tokio version that rusoto supports
 # TODO: think about tokio_compat / or switch to 
 tokio = { version = "0.2.9", features = ["full"] }
@@ -37,6 +36,9 @@ tokio = { version = "0.2.9", features = ["full"] }
 # let's get async up in here
 tokio-util = {version = "0.3.1", features = ["codec"] }
 futures = "0.3.1"
+
+# string internment
+internment = "0.4.1"
 
 # db connections
 # these are specific versions chosen to work with the tokio version above

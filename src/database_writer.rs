@@ -124,7 +124,6 @@ impl DatabaseWriter {
                 )
             },
             ChangeKind::Delete => {
-                unreachable!();
                 format!(
                     "delete from \"{schema_name}\"\"{table_name}\" where id in (select id from \"{staging_name}\")",
                     schema_name=&schema_name,

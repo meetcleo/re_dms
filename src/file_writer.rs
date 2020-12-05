@@ -6,7 +6,7 @@
 use std::path::Path;
 use std::path::PathBuf;
 use std::fs;
-use crate::parser::{ParsedLine, ChangeKind};
+use crate::parser::{ParsedLine, ChangeKind, ColumnInfo};
 use std::collections::{HashMap};//{ HashMap, BTreeMap, HashSet };
 use itertools::Itertools;
 // use std::io::prelude::*;
@@ -56,6 +56,7 @@ pub struct FileStruct {
     pub file_name: PathBuf,
     pub table_name: String,
     pub kind: ChangeKind,
+    pub columns: Option<Vec<ColumnInfo>>,
     file: CsvWriter,
     written_header: bool
 }
@@ -68,7 +69,14 @@ impl FileStruct {
 
 impl FileStruct {
     fn new(path_name: PathBuf, kind: ChangeKind, table_name: String ) -> FileStruct {
-        FileStruct { file_name: path_name, file: CsvWriter::Uninitialized, kind: kind, table_name: table_name, written_header: false}
+        FileStruct {
+            file_name: path_name,
+            file: CsvWriter::Uninitialized,
+            kind: kind,
+            table_name: table_name,
+            written_header: false,
+            columns: None
+        }
     }
 
     fn create_writer(&mut self) {
@@ -93,8 +101,7 @@ impl FileStruct {
     }
 
     fn write_line(&mut self, change: &ParsedLine) {
-        // TEMP no header
-        // self.write_header(change);
+        self.write_header(change);
         if let CsvWriter::ReadyToWrite(_file) = &mut self.file {
             if let ParsedLine::ChangedData{ columns,.. } = change {
                 // need to own these strings

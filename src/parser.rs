@@ -2,6 +2,8 @@
 use log::{debug, error, log_enabled, info, Level};
 use std::fmt;
 
+use internment::ArcIntern;
+
 // define more config later
 struct ParserConfig { include_xids: bool }
 struct ParserState {
@@ -36,17 +38,29 @@ impl fmt::Display for ColumnValue {
 
 #[derive(Debug)]
 pub enum Column {
-    UnchangedToastColumn { key: String, column_type: String },
-    ChangedColumn { key: String, column_type: String, value: Option<ColumnValue> },
-    IncompleteColumn { key: String, column_type: String, value: ColumnValue }
+    UnchangedToastColumn { column_info: ColumnInfo },
+    ChangedColumn { column_info: ColumnInfo, value: Option<ColumnValue> },
+    IncompleteColumn { column_info: ColumnInfo, value: ColumnValue }
+}
+
+#[derive(Debug)]
+pub struct ColumnInfo {
+    name: ArcIntern<String>,
+    column_type: ArcIntern<String>
+}
+
+impl ColumnInfo {
+    pub fn column_name(&self) -> &str {self.name.as_ref()}
+    pub fn column_type(&self) -> &str {self.name.as_ref()}
+    pub fn new<T: ToString>(name: T, column_type: T) -> ColumnInfo { ColumnInfo {name: ArcIntern::new(name.to_string()), column_type: ArcIntern::new(column_type.to_string())}}
 }
 
 impl Column {
     pub fn column_name(&self) -> &str {
         let string = match self {
-            Column::UnchangedToastColumn{ key,.. } => key,
-            Column::ChangedColumn{ key,.. } => key,
-            Column::IncompleteColumn{ key,.. } => key,
+            Column::UnchangedToastColumn{ column_info,.. } => column_info.column_name(),
+            Column::ChangedColumn{ column_info,.. } => column_info.column_name(),
+            Column::IncompleteColumn{ column_info,.. } => column_info.column_name(),
         };
         &string
     }
@@ -352,10 +366,11 @@ impl Parser {
         let string_without_column_type = &string_without_column_name[column_type.len() + 2..];
 
         let (column_value, rest) = ColumnValue::parse(string_without_column_type, column_type, false);
+        let column_info = ColumnInfo::new(column_name, column_type);
         let column = match column_value {
-            Some(ColumnValue::UnchangedToast) => Column::UnchangedToastColumn { key: column_name.to_owned(), column_type: column_type.to_owned()},
-            Some(ColumnValue::IncompleteText(string)) => Column::IncompleteColumn { key: column_name.to_owned(), column_type: column_type.to_owned(), value: ColumnValue::IncompleteText(string) },
-            _ => Column::ChangedColumn { key: column_name.to_owned(), column_type: column_type.to_owned(), value: column_value }
+            Some(ColumnValue::UnchangedToast) => Column::UnchangedToastColumn { column_info: column_info},
+            Some(ColumnValue::IncompleteText(string)) => Column::IncompleteColumn { column_info: column_info, value: ColumnValue::IncompleteText(string) },
+            _ => Column::ChangedColumn { column_info: column_info, value: column_value }
         };
         debug!("parse_column: returned: {:?}", column);
         (column, rest)
@@ -371,7 +386,7 @@ impl Parser {
                 let incomplete_column = columns.pop().unwrap();
                 assert!(matches!(incomplete_column, Column::IncompleteColumn {..}));
                 match incomplete_column {
-                    Column::IncompleteColumn { key, column_type, value: incomplete_value } => {
+                    Column::IncompleteColumn { column_info: ColumnInfo{name, column_type}, value: incomplete_value } => {
                         let (continued_column_value, rest) = ColumnValue::parse(string, &column_type, true);
                         let value = match incomplete_value {
                             ColumnValue::IncompleteText(value) => value,
@@ -381,12 +396,12 @@ impl Parser {
                         let updated_column = match continued_column_value {
                             Some(ColumnValue::Text(string)) => {
                                 let column_value = ColumnValue::Text(value + "\n" + &string);
-                                Column::ChangedColumn {key: key, column_type: column_type, value: Some(column_value)}
+                                Column::ChangedColumn {column_info: ColumnInfo {name, column_type}, value: Some(column_value)}
                             },
                             // another newline, so we're still incomplete
                             Some(ColumnValue::IncompleteText(string)) => {
                                 let column_value = ColumnValue::IncompleteText(value + "\n" + &string);
-                                Column::IncompleteColumn {key: key, column_type: column_type, value: column_value}
+                                Column::IncompleteColumn {column_info: ColumnInfo {name, column_type}, value: column_value}
                             },
                             _ => panic!("Trying to continue to parse a value that's not of type text")
                         };

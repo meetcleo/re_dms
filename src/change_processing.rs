@@ -66,13 +66,13 @@ impl ChangeSet {
                     // we ignore unchanged toast columns
                     // TODO: handle schema changes
                     let updated_column_names: HashSet<&str> = new_columns.iter().filter_map(
-                        |x| if let Column::ChangedColumn{key,..} = x {
-                            Some(key.as_ref())
+                        |x| if let Column::ChangedColumn{column_info,..} = x {
+                            Some(column_info.column_name())
                         } else { None }
                     ).collect();
                     let existing_column_names: HashSet<&str> = old_columns.iter().filter_map(
-                        |x| if let Column::ChangedColumn{key,..} = x {
-                            Some(key.as_ref())
+                        |x| if let Column::ChangedColumn{column_info,..} = x {
+                            Some(column_info.column_name())
                         } else { None }
                     ).collect();
                     if updated_column_names == existing_column_names {
