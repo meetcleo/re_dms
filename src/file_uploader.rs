@@ -7,6 +7,10 @@ use tokio::fs::File;
 use tokio_util::codec;
 // use std::iter::Iterator;
 use futures::{TryStreamExt}; // , FutureExt
+// use std::io;
+// use std::io::prelude::*;
+// use std::fs::File;
+
 
 use crate::file_writer::FileWriter;
 use crate::parser::ChangeKind;
@@ -38,14 +42,22 @@ impl FileUploader {
     }
     // Not actually async yet here
     pub async fn upload_to_s3(&self, file_name: &str, kind: ChangeKind, table_name: &str) -> CleoS3File {
-        println!("copying file {}", file_name);
+        // println!("copying file {}", file_name);
         let local_filename =  file_name;
         let remote_filename = "mike-test/".to_owned() + file_name;
-        println!("remote key {}", remote_filename);
-        let tokio_file = File::open(&local_filename).await.expect("fuck");
+        // println!("remote key {}", remote_filename);
+        // async
+        println!("{}", local_filename);
         let meta = ::std::fs::metadata(local_filename).unwrap();
+        let tokio_file = File::open(&local_filename).await.expect("fuck");
+        // async
         let byte_stream = codec::FramedRead::new(tokio_file, codec::BytesCodec::new()).map_ok(|x| x.freeze() );
-        println!("Bytes being transferred {}", meta.len());
+        // sync
+        // let mut file = File::open(file_name).unwrap();
+        // let mut buffer = Vec::new();
+        // file.read_to_end(&mut buffer);
+
+        println!("{} {}", meta.len(), file_name);
         let put_request = PutObjectRequest {
             bucket: BUCKET_NAME.to_owned(),
             key: remote_filename.clone(),
@@ -58,7 +70,7 @@ impl FileUploader {
             .put_object(put_request)
             .await
             .expect("Failed to put test object");
-        println!("uploaded file {}", remote_filename);
+        // println!("uploaded file {}", remote_filename);
         CleoS3File { remote_filename: remote_filename.clone(), kind: kind, table_name: table_name.to_owned() }
     }
 

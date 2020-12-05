@@ -49,7 +49,7 @@ impl DatabaseWriter {
 
     pub async fn import_table(&self, s3_file: &CleoS3File) {
         let CleoS3File{ kind, table_name,.. } = s3_file;
-        if kind != &ChangeKind::Insert {
+        if kind != &ChangeKind::Insert  {
             return
         }
         if ["public.transaction_descriptions", "public.user_relationships_timestamps", "transactions"].contains(&table_name.as_ref()) {
@@ -77,6 +77,7 @@ impl DatabaseWriter {
             "
             copy \"{staging_name}\" from '{remote_filepath}'
             CREDENTIALS '{credentials_string}'
+            GZIP
             CSV
             TRUNCATECOLUMNS
             IGNOREHEADER 1
@@ -84,27 +85,20 @@ impl DatabaseWriter {
             emptyasnull
             blanksasnull
             compupdate off
-            statupdate off",
+            statupdate off
+",
             staging_name=&staging_name,
             remote_filepath=&remote_filepath,
             credentials_string=&credentials_string);
-        let insert_from_staging_to_real_table = format!(
-            "
-            insert into \"{schema_name}\".\"{table_name}\"
-            select s.* from \"{staging_name}\" s left join \"{schema_name}\".\"{table_name}\" t
-            on s.id = t.id
-            where t.id is NULL",
-            schema_name=&schema_name,
-            table_name=&just_table_name,
-            staging_name=&staging_name
-        );
+
+        let data_migration_query_string = self.query_for_change_kind(kind, staging_name.as_ref(), just_table_name.as_ref(), schema_name.as_ref());
         let drop_staging_table = format!("drop table if exists {}_staging", &table_name);
         // let insert_query = format!();
         transaction.execute(create_staging_table.as_str(), &[]).await.unwrap();
         info!("CREATED STAGING TABLE {}", table_name);
         transaction.execute(copy_to_staging_table.as_str(), &[]).await.unwrap();
         info!("COPIED TO STAGING TABLE {}", table_name);
-        transaction.execute(insert_from_staging_to_real_table.as_str(), &[]).await.unwrap();
+        transaction.execute(data_migration_query_string.as_str(), &[]).await.unwrap();
         info!("INSERTED FROM STAGING TABLE {}", table_name);
         transaction.execute(drop_staging_table.as_str(), &[]).await.unwrap();
         info!("DROPPED STAGING TABLE {}", table_name);
@@ -114,6 +108,32 @@ impl DatabaseWriter {
         info!("COMMITTED TX {}", table_name);
 
         info!("INSERTED {} {}", &remote_filepath, table_name);
+    }
+
+    fn query_for_change_kind(&self, kind: &ChangeKind, staging_name: &str, table_name: &str, schema_name: &str ) -> String {
+        match kind {
+            ChangeKind::Insert => {
+                format!(
+                    "insert into \"{schema_name}\".\"{table_name}\"
+                    select s.* from \"{staging_name}\" s left join \"{schema_name}\".\"{table_name}\" t
+                    on s.id = t.id
+                    where t.id is NULL",
+                    schema_name=&schema_name,
+                    table_name=&table_name,
+                    staging_name=&staging_name
+                )
+            },
+            ChangeKind::Delete => {
+                unreachable!();
+                format!(
+                    "delete from \"{schema_name}\"\"{table_name}\" where id in (select id from \"{staging_name}\")",
+                    schema_name=&schema_name,
+                    table_name=&table_name,
+                    staging_name=&staging_name
+                )
+            }
+            _ => { unreachable!()}
+        }
     }
 
     // pub async fn run_query_with_no_args(&self, query_string: &str) {

@@ -23,11 +23,40 @@ pub struct FileWriter {
     pub delete_file: FileStruct
 }
 
+enum CsvWriter {
+    Uninitialized,
+    ReadyToWrite(csv::Writer<flate2::write::GzEncoder<fs::File>>),
+    Finished
+}
+
+impl CsvWriter {
+    pub fn is_some(&self) -> bool {
+        match self {
+            CsvWriter::Uninitialized => false,
+            _ => true
+        }
+    }
+    pub fn is_none(&self) -> bool {
+        !self.is_some()
+    }
+    // move
+    pub fn flush_and_close(&mut self) {
+        if self.is_some() {
+            let new_value = CsvWriter::Finished;
+            let old_value = std::mem::replace(self, new_value);
+            if let CsvWriter::ReadyToWrite(writer) = old_value {
+                writer.into_inner().map(|gzip| gzip.finish().unwrap());
+            }
+        }
+
+    }
+}
+
 pub struct FileStruct {
     pub file_name: PathBuf,
     pub table_name: String,
     pub kind: ChangeKind,
-    file: Option<csv::Writer<flate2::write::GzEncoder<fs::File>>>,
+    file: CsvWriter,
     written_header: bool
 }
 
@@ -39,19 +68,19 @@ impl FileStruct {
 
 impl FileStruct {
     fn new(path_name: PathBuf, kind: ChangeKind, table_name: String ) -> FileStruct {
-        FileStruct { file_name: path_name, file: None, kind: kind, table_name: table_name, written_header: false}
+        FileStruct { file_name: path_name, file: CsvWriter::Uninitialized, kind: kind, table_name: table_name, written_header: false}
     }
 
     fn create_writer(&mut self) {
         let file = fs::File::create(self.file_name.as_path()).unwrap();
         let writer = GzEncoder::new(file, Compression::default());
         let csv_writer = csv::WriterBuilder::new().flexible(true).from_writer(writer);
-        self.file = Some(csv_writer);
+        self.file = CsvWriter::ReadyToWrite(csv_writer);
     }
 
     fn write_header(&mut self, change: &ParsedLine) {
         if !self.written_header {
-            if let Some(_file) = &mut self.file {
+            if let CsvWriter::ReadyToWrite(_file) = &mut self.file {
                 if let ParsedLine::ChangedData{ columns,.. } = change {
                     let strings: Vec<&str> = columns.iter().map(|x| x.column_name()).collect();
                     self.write(&strings);
@@ -64,8 +93,9 @@ impl FileStruct {
     }
 
     fn write_line(&mut self, change: &ParsedLine) {
-        self.write_header(change);
-        if let Some(_file) = &mut self.file {
+        // TEMP no header
+        // self.write_header(change);
+        if let CsvWriter::ReadyToWrite(_file) = &mut self.file {
             if let ParsedLine::ChangedData{ columns,.. } = change {
                 // need to own these strings
                 let strings: Vec<String> = columns
@@ -89,7 +119,7 @@ impl FileStruct {
         I: IntoIterator<Item = T>,
         T: AsRef<[u8]>,
     {
-        if let Some(file) = &mut self.file {
+        if let CsvWriter::ReadyToWrite(file) = &mut self.file {
             // TODO handle error
             file.write_record(string).expect("failed to write file");
         } else {
@@ -97,16 +127,10 @@ impl FileStruct {
         }
     }
     fn add_change(&mut self, change: &ParsedLine) {
-        if self.file.is_some() {
-            if !self.written_header {
-                self.write_header(change)
-            }
-            self.write_line(change);
-        } else {
+        if self.file.is_none() {
             self.create_writer();
-            // TODO: danger recurse
-            self.add_change(change)
         }
+        self.write_line(change)
     }
 }
 
@@ -142,12 +166,12 @@ impl FileWriter {
         }
     }
     pub fn flush_all(&mut self) {
-        self.insert_file.file.as_mut().map(|x| x.flush());
+        self.insert_file.file.flush_and_close();
         for x in self.update_files.values_mut() {
-            x.file.as_mut().map(|x| x.flush());
+            x.file.flush_and_close()
         }
         // self.update_files.values_mut().map(|x| ).collect();
-        self.delete_file.file.as_mut().map(|x| x.flush());
+        self.delete_file.file.flush_and_close();
     }
     // update_files is a hash of our column names to our File
     fn add_change_to_update_file(&mut self, change: &ParsedLine) {
