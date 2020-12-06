@@ -52,7 +52,7 @@ pub struct ColumnInfo {
 
 impl ColumnInfo {
     pub fn column_name(&self) -> &str {self.name.as_ref()}
-    pub fn column_type(&self) -> &str {self.name.as_ref()}
+    pub fn column_type(&self) -> &str {self.column_type.as_ref()}
     pub fn new<T: ToString>(name: T, column_type: T) -> ColumnInfo { ColumnInfo {name: ArcIntern::new(name.to_string()), column_type: ArcIntern::new(column_type.to_string())}}
     pub fn is_id_column(&self) -> bool {self.name.as_ref() == "id"}
 }

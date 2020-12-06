@@ -80,7 +80,7 @@ impl FileStruct {
     fn create_writer(&mut self) {
         let file = fs::File::create(self.file_name.as_path()).unwrap();
         let writer = GzEncoder::new(file, Compression::default());
-        let csv_writer = csv::WriterBuilder::new().flexible(true).from_writer(writer);
+        let csv_writer = csv::WriterBuilder::new().from_writer(writer);
         self.file = CsvWriter::ReadyToWrite(csv_writer);
     }
 
