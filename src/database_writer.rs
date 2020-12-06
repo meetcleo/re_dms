@@ -52,7 +52,7 @@ impl DatabaseWriter {
         if kind != &ChangeKind::Insert  {
             return
         }
-        if ["public.transaction_descriptions", "public.user_relationships_timestamps", "transactions"].contains(&table_name.as_ref()) {
+        if ["public.transaction_descriptions", "public.user_relationships_timestamps", "transactions"].contains(&table_name.as_str()) {
             return
         }
         // temp tables are present in the session, so we still need to drop it at the end of the transaction

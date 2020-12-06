@@ -43,7 +43,8 @@ pub enum Column {
     IncompleteColumn { column_info: ColumnInfo, value: ColumnValue }
 }
 
-#[derive(Debug)]
+// happy to clone it, it's only holds two pointers
+#[derive(Debug,Clone)]
 pub struct ColumnInfo {
     name: ArcIntern<String>,
     column_type: ArcIntern<String>
@@ -53,16 +54,19 @@ impl ColumnInfo {
     pub fn column_name(&self) -> &str {self.name.as_ref()}
     pub fn column_type(&self) -> &str {self.name.as_ref()}
     pub fn new<T: ToString>(name: T, column_type: T) -> ColumnInfo { ColumnInfo {name: ArcIntern::new(name.to_string()), column_type: ArcIntern::new(column_type.to_string())}}
+    pub fn is_id_column(&self) -> bool {self.name.as_ref() == "id"}
 }
 
 impl Column {
     pub fn column_name(&self) -> &str {
-        let string = match self {
-            Column::UnchangedToastColumn{ column_info,.. } => column_info.column_name(),
-            Column::ChangedColumn{ column_info,.. } => column_info.column_name(),
-            Column::IncompleteColumn{ column_info,.. } => column_info.column_name(),
-        };
-        &string
+        self.column_info().column_name()
+    }
+    pub fn column_info(&self) -> &ColumnInfo {
+        match self {
+            Column::UnchangedToastColumn{ column_info,.. } => column_info,
+            Column::ChangedColumn{ column_info,.. } => column_info,
+            Column::IncompleteColumn{ column_info,.. } => column_info,
+        }
     }
     // for when you _know_ a column has a value, used for id columns
     pub fn column_value_unwrap(&self) -> &ColumnValue {
@@ -112,7 +116,7 @@ pub enum ParsedLine {
     Begin(i64),
     // int is xid
     Commit(i64),
-    ChangedData { columns: Vec<Column>, table_name: String, kind: ChangeKind },
+    ChangedData { columns: Vec<Column>, table_name: ArcIntern<String>, kind: ChangeKind },
     TruncateTable, // TODO
     ContinueParse // this is to signify that we're halfway through parsing a change
 }
@@ -318,7 +322,7 @@ impl Parser {
         let string_without_kind = &string_without_table[kind_string.len() + 2..string_without_table.len()];
 
         let columns = self.parse_columns(string_without_kind);
-        self.handle_parse_changed_data(table_name.to_owned(), kind, columns)
+        self.handle_parse_changed_data(table_name, kind, columns)
     }
 
     fn column_is_incomplete(&self, columns: &Vec<Column>) -> bool {
@@ -409,12 +413,12 @@ impl Parser {
                         columns.push(updated_column);
                         // because there could be multiple newlines we need to check again
                         if self.column_is_incomplete(&columns) {
-                            return self.handle_parse_changed_data(table_name, kind, columns)
+                            return self.handle_parse_changed_data(table_name.as_ref(), kind, columns)
                         } else {
                             let mut more_columns = self.parse_columns(rest);
                             // append modifies in place
                             columns.append(&mut more_columns);
-                            self.handle_parse_changed_data(table_name, kind, columns)
+                            self.handle_parse_changed_data(table_name.as_ref(), kind, columns)
                         }
                     },
                     _ => panic!("trying to parse an incomplete_column that's not a Column::IncompleteColumn {:?}", incomplete_column)
@@ -424,10 +428,10 @@ impl Parser {
         }
     }
 
-    fn handle_parse_changed_data(&mut self, table_name: String, kind: ChangeKind, columns: Vec<Column>) -> ParsedLine {
+    fn handle_parse_changed_data(&mut self, table_name: &str, kind: ChangeKind, columns: Vec<Column>) -> ParsedLine {
         let incomplete_parse = self.column_is_incomplete(&columns);
         let changed_data = ParsedLine::ChangedData {
-            table_name: table_name,
+            table_name: ArcIntern::new(table_name.to_owned()),
             kind: kind,
             columns: columns
         };

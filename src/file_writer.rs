@@ -1,15 +1,13 @@
-// use futures::{
-//     future::FutureExt, // for `.fuse()`
-//     pin_mut,
-//     select,
-// };
 use std::path::Path;
 use std::path::PathBuf;
 use std::fs;
+
 use crate::parser::{ParsedLine, ChangeKind, ColumnInfo};
 use std::collections::{HashMap};//{ HashMap, BTreeMap, HashSet };
+
 use itertools::Itertools;
-// use std::io::prelude::*;
+use internment::ArcIntern;
+
 use flate2::Compression;
 use flate2::write::GzEncoder;
 
@@ -45,7 +43,7 @@ impl CsvWriter {
             let new_value = CsvWriter::Finished;
             let old_value = std::mem::replace(self, new_value);
             if let CsvWriter::ReadyToWrite(writer) = old_value {
-                writer.into_inner().map(|gzip| gzip.finish().unwrap());
+                writer.into_inner().map(|gzip| gzip.finish().unwrap()).unwrap();
             }
         }
 
@@ -54,7 +52,7 @@ impl CsvWriter {
 
 pub struct FileStruct {
     pub file_name: PathBuf,
-    pub table_name: String,
+    pub table_name: ArcIntern<String>,
     pub kind: ChangeKind,
     pub columns: Option<Vec<ColumnInfo>>,
     file: CsvWriter,
@@ -68,12 +66,12 @@ impl FileStruct {
 }
 
 impl FileStruct {
-    fn new(path_name: PathBuf, kind: ChangeKind, table_name: String ) -> FileStruct {
+    fn new(path_name: PathBuf, kind: ChangeKind, table_name: &str ) -> FileStruct {
         FileStruct {
             file_name: path_name,
             file: CsvWriter::Uninitialized,
             kind: kind,
-            table_name: table_name,
+            table_name: ArcIntern::new(table_name.to_string()),
             written_header: false,
             columns: None
         }
@@ -90,11 +88,17 @@ impl FileStruct {
         if !self.written_header {
             if let CsvWriter::ReadyToWrite(_file) = &mut self.file {
                 if let ParsedLine::ChangedData{ columns,.. } = change {
-                    let strings: Vec<&str> = columns.iter().map(|x| x.column_name()).collect();
+                    let changed_column_info: Vec<ColumnInfo> = columns.iter()
+                        .filter(|x| x.is_changed_data_column())
+                        .map(|x| x.column_info().clone())
+                        .collect();
+                    let strings: Vec<&str> = changed_column_info.iter()
+                        .map(|x| x.column_name())
+                        .collect();
                     self.write(&strings);
+                    self.columns = Some(changed_column_info);
                     // let result = file.write_record(strings).expect("failed to write csv header");
                 }
-
             }
             self.written_header = true;
         }
@@ -150,10 +154,10 @@ impl FileWriter {
         fs::create_dir_all(owned_directory.as_path()).expect("panic creating directory");
         FileWriter {
             directory: owned_directory,
-            insert_file: FileStruct::new(directory.join(table_name.to_owned() + "_inserts.csv.gz"), ChangeKind::Insert, table_name.to_owned()),
+            insert_file: FileStruct::new(directory.join(table_name.to_owned() + "_inserts.csv.gz"), ChangeKind::Insert, table_name.as_ref()),
             // update_file: FileStruct::new(directory.join(table_name.to_owned() + "_updates.csv")),
             update_files: HashMap::new(),
-            delete_file: FileStruct::new(directory.join(table_name.to_owned() + "_deletes.csv.gz"), ChangeKind::Delete, table_name.to_owned())
+            delete_file: FileStruct::new(directory.join(table_name.to_owned() + "_deletes.csv.gz"), ChangeKind::Delete, table_name.as_ref())
         }
     }
     pub fn add_change(&mut self, change: &ParsedLine) {
@@ -195,9 +199,9 @@ impl FileWriter {
                 .or_insert_with(
                     ||
                         FileStruct::new(
-                            cloned_directory.join(table_name.to_owned() + "_" + &number_of_updates_that_exist.to_string() + "_updates.csv.gz"),
+                            cloned_directory.join(table_name.to_string() + "_" + &number_of_updates_that_exist.to_string() + "_updates.csv.gz"),
                             ChangeKind::Update,
-                            table_name.to_owned()
+                            table_name.as_ref()
                         )
                 )
                 .add_change(change);

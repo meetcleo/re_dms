@@ -1,5 +1,6 @@
 use crate::parser::{ ParsedLine, Column, ColumnValue, ChangeKind };
 use std::collections::{ HashMap, BTreeMap, HashSet };
+use internment::ArcIntern;
 
 use either::Either;
 use crate::file_writer;
@@ -141,7 +142,7 @@ struct Table {
 }
 
 struct TableHolder {
-    tables: HashMap<String, Table>
+    tables: HashMap<ArcIntern<String>, Table>
 }
 
 impl Table {
@@ -203,7 +204,7 @@ impl TableHolder {
 
 impl ChangeProcessing {
     pub fn new() -> ChangeProcessing {
-        let hash_map = HashMap::<String, Table>::new();
+        let hash_map = HashMap::new();
         ChangeProcessing { table_holder: TableHolder { tables: hash_map } }
     }
     pub fn add_change(&mut self, parsed_line: ParsedLine) {

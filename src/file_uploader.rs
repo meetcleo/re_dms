@@ -3,17 +3,13 @@
 use rusoto_core::{Region, ByteStream};
 use rusoto_s3::{S3, S3Client, PutObjectRequest};
 use tokio::fs::File;
-// use std::io::{self, BufReader};
 use tokio_util::codec;
-// use std::iter::Iterator;
 use futures::{TryStreamExt}; // , FutureExt
-// use std::io;
-// use std::io::prelude::*;
-// use std::fs::File;
+use internment::ArcIntern;
 
 
-use crate::file_writer::FileWriter;
-use crate::parser::ChangeKind;
+use crate::file_writer::{FileWriter, FileStruct};
+use crate::parser::{ChangeKind, ColumnInfo};
 
 pub struct FileUploader {
     s3_client: S3Client
@@ -23,7 +19,8 @@ pub struct FileUploader {
 pub struct CleoS3File {
     pub remote_filename: String,
     pub kind: ChangeKind,
-    pub table_name: String,
+    pub table_name: ArcIntern<String>,
+    pub columns: Vec<ColumnInfo>
 }
 impl CleoS3File {
     pub fn remote_path(&self) -> String {
@@ -41,7 +38,7 @@ impl FileUploader {
         FileUploader { s3_client: S3Client::new(Region::UsEast1) }
     }
     // Not actually async yet here
-    pub async fn upload_to_s3(&self, file_name: &str, kind: ChangeKind, table_name: &str) -> CleoS3File {
+    pub async fn upload_to_s3(&self, file_name: &str, file_struct: &FileStruct) -> CleoS3File {
         // println!("copying file {}", file_name);
         let local_filename =  file_name;
         let remote_filename = "mike-test/".to_owned() + file_name;
@@ -71,7 +68,16 @@ impl FileUploader {
             .await
             .expect("Failed to put test object");
         // println!("uploaded file {}", remote_filename);
-        CleoS3File { remote_filename: remote_filename.clone(), kind: kind, table_name: table_name.to_owned() }
+        if let Some(columns) = &file_struct.columns {
+            CleoS3File {
+                remote_filename: remote_filename.clone(),
+                kind: file_struct.kind,
+                table_name: file_struct.table_name.clone(),
+                columns: columns.clone()
+            }
+        } else {
+            panic!("columns not initialized on file {}", file_name);
+        }
     }
 
     // does all of these concurrently
@@ -88,7 +94,7 @@ impl FileUploader {
             .filter(|x| x.exists())
             .map(
             |file| async move {
-                self.upload_to_s3(file.file_name.to_str().unwrap(), file.kind, &file.table_name).await
+                self.upload_to_s3(file.file_name.to_str().unwrap(), &file).await
             }
         ).collect::<Vec<_>>();
         futures::future::join_all(s3_file_results).await
