@@ -14,6 +14,8 @@ mod file_writer;
 mod file_uploader;
 mod database_writer;
 
+use std::collections::{ HashSet };
+
 // TEMP
 
 #[tokio::main]
@@ -54,6 +56,14 @@ async fn main() {
 
     // TODO: select on these futures for some real good async sauce
     let s3_files: Vec<_> = futures::future::join_all(results).await.into_iter().flatten().collect();
+
+    // let mut type_set: HashSet<String> = HashSet::new();
+    // for s3_file in s3_files {
+    //     for column in s3_file.columns {
+    //         type_set.insert(column.column_type().to_string());
+    //     }
+    // }
+    // println!("{:?}", type_set);
 
     let ref database_writer = database_writer::DatabaseWriter::new();
     let table_imports = s3_files.iter().map(

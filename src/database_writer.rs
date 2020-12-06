@@ -49,10 +49,6 @@ impl DatabaseWriter {
 
     pub async fn import_table(&self, s3_file: &CleoS3File) {
         let CleoS3File{ kind, table_name,.. } = s3_file;
-        if kind == &ChangeKind::Update
-        {
-            return
-        }
         if ["public.transaction_descriptions", "public.user_relationships_timestamps", "transactions"].contains(&table_name.as_str()) {
             return
         }
@@ -91,10 +87,19 @@ impl DatabaseWriter {
             remote_filepath=&remote_filepath,
             credentials_string=&credentials_string);
 
-        let data_migration_query_string = self.query_for_change_kind(kind, staging_name.as_ref(), just_table_name.as_ref(), schema_name.as_ref());
+        let data_migration_query_string = self.query_for_change_kind(
+            kind,
+            staging_name.as_ref(),
+            just_table_name.as_ref(),
+            schema_name.as_ref(),
+            &s3_file.columns
+        );
         let drop_staging_table = format!("drop table if exists {}", &staging_name);
         // let insert_query = format!();
-        transaction.execute(create_staging_table.as_str(), &[]).await.unwrap();
+        let result = transaction.execute(create_staging_table.as_str(), &[]).await;
+        if let Err(err) = result {
+            error!("Received error: {} {} {} {:?}", table_name, remote_filepath, create_staging_table.as_str(),err);
+        }
         info!("CREATED STAGING TABLE {}", table_name);
         transaction.execute(copy_to_staging_table.as_str(), &[]).await.unwrap();
         info!("COPIED TO STAGING TABLE {}", table_name);
@@ -117,7 +122,6 @@ impl DatabaseWriter {
         let last_slash = &remote_filename[remote_filename.rfind('/').unwrap() + 1..];
         let dot_after_last_slash = &last_slash[last_slash.find('.').unwrap() + 1..];
         let dot_until_dot = &dot_after_last_slash[..dot_after_last_slash.find('.').unwrap()];
-        println!("{}", dot_until_dot);
         format!("{}_staging", dot_until_dot)
     }
 
@@ -130,20 +134,35 @@ impl DatabaseWriter {
                 format!(
                     "create temp table \"{}\" ({})",
                     &staging_name,
-                    columns.iter().map(|x| self.column_and_type_for_column(x)).collect::<Vec<_>>().join(",")
+                    columns.iter()
+                        .map(|x| self.column_and_type_for_column(x))
+                        .collect::<Vec<_>>()
+                        .join(",")
                 )
             }
-            _ => {
-                unreachable!()
+            ChangeKind::Update => {
+                format!(
+                    "create temp table \"{}\" ({})",
+                    &staging_name,
+                    columns.iter()
+                        .map(|x| self.column_and_type_for_column(x))
+                        .collect::<Vec<_>>()
+                        .join(",")
+                )
             }
         }
     }
 
+    // NOTE: if you have a column named "tag" it needs to be surrounded by quotes
     fn column_and_type_for_column(&self, column_info: &ColumnInfo) -> String {
-        column_info.column_name().to_string() + " " + self.column_type_mapping(column_info.column_type()).as_str()
+        format!(
+            "\"{column_name}\" {column_type}",
+            column_name=column_info.column_name(),
+         column_type=self.column_type_mapping(column_info.column_type()).as_str()
+        )
     }
 
-    fn query_for_change_kind(&self, kind: &ChangeKind, staging_name: &str, table_name: &str, schema_name: &str ) -> String {
+    fn query_for_change_kind(&self, kind: &ChangeKind, staging_name: &str, table_name: &str, schema_name: &str, columns: &Vec<ColumnInfo> ) -> String {
         match kind {
             ChangeKind::Insert => {
                 format!(
@@ -157,16 +176,32 @@ impl DatabaseWriter {
                 )
             },
             ChangeKind::Delete => {
-                let foo = format!(
+                format!(
                     "delete from \"{schema_name}\".\"{table_name}\" where id in (select id from \"{staging_name}\")",
                     schema_name=&schema_name,
                     table_name=&table_name,
                     staging_name=&staging_name
-                );
-                println!("{}", &foo);
-                foo
+                )
             }
-            _ => { unreachable!()}
+            ChangeKind::Update => {
+                // Don't update the id column
+                format!(
+                    "
+                    update \"{schema_name}\".\"{table_name}\" t
+                    set {columns_to_update} from \"{staging_name}\" s
+                    where t.id = s.id
+                    ",
+                    schema_name=&schema_name,
+                    table_name=&table_name,
+                    columns_to_update=columns.iter()
+                        .filter(|x| !x.is_id_column())
+                        .map(|x| x.column_name())
+                        .map(|x| format!("\"{}\" = s.\"{}\"",x,x))
+                        .collect::<Vec<_>>()
+                        .join(","),
+                    staging_name=&staging_name
+                )
+            }
         }
     }
 
@@ -174,6 +209,8 @@ impl DatabaseWriter {
         // TODO: for money if we care
         // const DEFAULT_PRECISION: i32 = 19; // 99_999_999_999_999_999.99
         // const DEFAULT_SCALE: i32 = 2;
+        // {"boolean", "double precision", "integer", "interval", "numeric", "public.hstore", "timestamp without time zone", "text", "character varying", "json", "bigint", "public.citext", "date", "uuid", "jsonb"}
+
         let return_type = match column_type {
             "text" => "CHARACTER VARYING(65535)",
             "json" => "CHARACTER VARYING(65535)",
@@ -182,6 +219,8 @@ impl DatabaseWriter {
             "oid" => "CHARACTER VARYING(65535)",
             "ARRAY" => "CHARACTER VARYING(65535)",
             "USER-DEFINED" => "CHARACTER VARYING(65535)",
+            "public.citext" => "CHARACTER VARYING(65535)",
+            "public.hstore" => "CHARACTER VARYING(65535)",
             "uuid" => "CHARACTER VARYING(36)",
             "interval" => "CHARACTER VARYING(65535)",
             _ => column_type
