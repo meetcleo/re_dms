@@ -4,6 +4,10 @@ use std::fmt;
 
 use internment::ArcIntern;
 
+pub type TableName = ArcIntern<String>;
+pub type ColumnName = ArcIntern<String>;
+pub type ColumnType = ArcIntern<String>;
+
 // define more config later
 struct ParserConfig { include_xids: bool }
 struct ParserState {
@@ -46,14 +50,14 @@ pub enum Column {
 // happy to clone it, it's only holds two pointers
 #[derive(Debug,Clone)]
 pub struct ColumnInfo {
-    name: ArcIntern<String>,
-    column_type: ArcIntern<String>
+    name: ColumnName,
+    column_type: ColumnType
 }
 
 impl ColumnInfo {
     pub fn column_name(&self) -> &str {self.name.as_ref()}
     pub fn column_type(&self) -> &str {self.column_type.as_ref()}
-    pub fn new<T: ToString>(name: T, column_type: T) -> ColumnInfo { ColumnInfo {name: ArcIntern::new(name.to_string()), column_type: ArcIntern::new(column_type.to_string())}}
+    pub fn new<T: ToString>(name: T, column_type: T) -> ColumnInfo { ColumnInfo {name: ColumnName::new(name.to_string()), column_type: ColumnType::new(column_type.to_string())}}
     pub fn is_id_column(&self) -> bool {self.name.as_ref() == "id"}
 }
 
@@ -126,7 +130,7 @@ pub enum ParsedLine {
     Begin(i64),
     // int is xid
     Commit(i64),
-    ChangedData { columns: Vec<Column>, table_name: ArcIntern<String>, kind: ChangeKind },
+    ChangedData { columns: Vec<Column>, table_name: TableName, kind: ChangeKind },
     TruncateTable, // TODO
     ContinueParse // this is to signify that we're halfway through parsing a change
 }

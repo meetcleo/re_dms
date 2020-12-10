@@ -1,10 +1,8 @@
-use crate::parser::{ ParsedLine, Column, ColumnValue, ChangeKind };
+use crate::parser::{ ParsedLine, Column, ColumnValue, ChangeKind, TableName };
 use std::collections::{ HashMap, BTreeMap, HashSet };
-use internment::ArcIntern;
 
 use either::Either;
 use crate::file_writer;
-
 
 #[allow(unused_imports)]
 use log::{debug, error, log_enabled, info, Level};
@@ -152,7 +150,7 @@ struct Table {
 }
 
 struct TableHolder {
-    tables: HashMap<ArcIntern<String>, Table>
+    tables: HashMap<TableName, Table>
 }
 
 impl Table {
@@ -206,7 +204,7 @@ impl Table {
 }
 
 impl TableHolder {
-    fn add_change(&mut self, parsed_line: ParsedLine) -> Option<(ArcIntern<String>, Table)> {
+    fn add_change(&mut self, parsed_line: ParsedLine) -> Option<(TableName, Table)> {
         if let ParsedLine::ChangedData{ref table_name, ..} = parsed_line {
             // these are cheap since this is an interned string
             let cloned = table_name.clone();
@@ -251,8 +249,8 @@ impl ChangeProcessing {
         );
     }
 
-    pub fn write_files_for_table(&self, table_name: ArcIntern<String>, table: Table) -> file_writer::FileWriter {
-        let mut file_writer = file_writer::FileWriter::new(table_name.as_ref());
+    pub fn write_files_for_table(&self, table_name: TableName, table: Table) -> file_writer::FileWriter {
+        let mut file_writer = file_writer::FileWriter::new(table_name.clone());
         table.changeset.values().for_each(
             |record| {
                 record.changes.iter().for_each(

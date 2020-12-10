@@ -3,11 +3,10 @@ use std::path::PathBuf;
 use std::fs;
 use glob::glob;
 
-use crate::parser::{ParsedLine, ChangeKind, ColumnInfo};
+use crate::parser::{ParsedLine, ChangeKind, ColumnInfo, TableName};
 use std::collections::{HashMap};//{ HashMap, BTreeMap, HashSet };
 
 use itertools::Itertools;
-use internment::ArcIntern;
 
 use flate2::Compression;
 use flate2::write::GzEncoder;
@@ -53,7 +52,7 @@ impl CsvWriter {
 
 pub struct FileStruct {
     pub file_name: PathBuf,
-    pub table_name: ArcIntern<String>,
+    pub table_name: TableName,
     pub kind: ChangeKind,
     pub columns: Option<Vec<ColumnInfo>>,
     file: CsvWriter,
@@ -61,13 +60,13 @@ pub struct FileStruct {
 }
 
 impl FileStruct {
-    pub fn new(directory_name: &Path, kind: ChangeKind, table_name: &str) -> FileStruct {
-        let new_file_name = Self::new_file_name(directory_name, kind, table_name);
+    pub fn new(directory_name: &Path, kind: ChangeKind, table_name: TableName) -> FileStruct {
+        let new_file_name = Self::new_file_name(directory_name, kind, table_name.as_str());
         let file_struct = FileStruct {
             file_name: new_file_name.to_path_buf(),
             file: CsvWriter::Uninitialized,
             kind: kind,
-            table_name: ArcIntern::new(table_name.to_string()),
+            table_name: table_name.clone(),
             written_header: false,
             columns: None
         };
@@ -182,17 +181,17 @@ impl FileStruct {
 
 // TODO: write iterator over files
 impl FileWriter {
-    pub fn new(table_name: &str) -> FileWriter {
+    pub fn new(table_name: TableName) -> FileWriter {
         let directory = Path::new("output");
         // create directory
         let owned_directory = directory.clone().to_owned();
         fs::create_dir_all(owned_directory.as_path()).expect("panic creating directory");
         FileWriter {
             directory: owned_directory,
-            insert_file: FileStruct::new(directory.clone(), ChangeKind::Insert, table_name.as_ref()),
+            insert_file: FileStruct::new(directory.clone(), ChangeKind::Insert, table_name.clone()),
             //FileStruct::new(directory.join(table_name.to_owned() + "_inserts.csv.gz"), ChangeKind::Insert, table_name.as_ref()),
             update_files: HashMap::new(),
-            delete_file: FileStruct::new(directory.clone(), ChangeKind::Delete, table_name.as_ref()),
+            delete_file: FileStruct::new(directory.clone(), ChangeKind::Delete, table_name.clone()),
             //FileStruct::new(directory.join(table_name.to_owned() + "_deletes.csv.gz"), ChangeKind::Delete, table_name.as_ref())
         }
     }
@@ -237,7 +236,7 @@ impl FileWriter {
                         FileStruct::new(
                             cloned_directory.as_path(),
                             ChangeKind::Update,
-                            table_name.as_ref()
+                            table_name.clone()
                         )
                 )
                 .add_change(change);

@@ -5,11 +5,10 @@ use rusoto_s3::{S3, S3Client, PutObjectRequest};
 use tokio::fs::File;
 use tokio_util::codec;
 use futures::{TryStreamExt}; // , FutureExt
-use internment::ArcIntern;
 
 
 use crate::file_writer::{FileWriter, FileStruct};
-use crate::parser::{ChangeKind, ColumnInfo};
+use crate::parser::{ChangeKind, ColumnInfo, TableName};
 
 pub struct FileUploader {
     s3_client: S3Client
@@ -19,7 +18,7 @@ pub struct FileUploader {
 pub struct CleoS3File {
     pub remote_filename: String,
     pub kind: ChangeKind,
-    pub table_name: ArcIntern<String>,
+    pub table_name: TableName,
     pub columns: Vec<ColumnInfo>
 }
 impl CleoS3File {
