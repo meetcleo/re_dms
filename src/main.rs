@@ -14,6 +14,7 @@ mod change_processing;
 mod file_writer;
 mod file_uploader;
 mod database_writer;
+mod file_uploader_stream;
 
 // use std::collections::{ HashSet };
 
@@ -22,9 +23,10 @@ mod database_writer;
 #[tokio::main]
 async fn main() {
     env_logger::init();
-    let (file_transmitter, file_receiver) = mpsc::channel();
+    let (file_transmitter, file_receiver) = mpsc::channel::<file_writer::FileWriter>();
     let mut parser = parser::Parser::new(true);
     let mut collector = change_processing::ChangeProcessing::new();
+    let file_uploader_stream_join_handle = file_uploader_stream::FileUploaderStream::spawn_file_uploader_stream(file_receiver);
     if let Ok(lines) = read_lines("./data/test_decoding.txt") {
         // Consumes the iterator, returns an (Optional) String
         for line in lines
@@ -42,6 +44,8 @@ async fn main() {
             }
         }
     }
+    // drop(file_transmitter);
+    // file_uploader_stream_join_handle.await;
 
     // collector.print_stats();
     // let mut files = collector.write_files_sync_batch();

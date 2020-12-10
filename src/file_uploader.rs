@@ -40,7 +40,7 @@ impl FileUploader {
     pub async fn upload_to_s3(&self, file_name: &str, file_struct: &FileStruct) -> CleoS3File {
         // println!("copying file {}", file_name);
         let local_filename =  file_name;
-        let remote_filename = "mike-test/".to_owned() + file_name;
+        let remote_filename = "mike-test-2/".to_owned() + file_name;
         // println!("remote key {}", remote_filename);
         // async
         println!("{}", local_filename);
@@ -53,7 +53,7 @@ impl FileUploader {
         // let mut buffer = Vec::new();
         // file.read_to_end(&mut buffer);
 
-        println!("{} {}", meta.len(), file_name);
+        // println!("{} {}", meta.len(), file_name);
         let put_request = PutObjectRequest {
             bucket: BUCKET_NAME.to_owned(),
             key: remote_filename.clone(),
@@ -66,7 +66,7 @@ impl FileUploader {
             .put_object(put_request)
             .await
             .expect("Failed to put test object");
-        // println!("uploaded file {}", remote_filename);
+        println!("uploaded file {}", remote_filename);
         if let Some(columns) = &file_struct.columns {
             CleoS3File {
                 remote_filename: remote_filename.clone(),

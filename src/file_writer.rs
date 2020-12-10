@@ -18,7 +18,8 @@ pub struct FileWriter {
     pub insert_file: FileStruct,
     // update_file: FileStruct,
     pub update_files: HashMap<String, FileStruct>,
-    pub delete_file: FileStruct
+    pub delete_file: FileStruct,
+    pub table_name: TableName
 }
 
 enum CsvWriter {
@@ -193,6 +194,7 @@ impl FileWriter {
             update_files: HashMap::new(),
             delete_file: FileStruct::new(directory.clone(), ChangeKind::Delete, table_name.clone()),
             //FileStruct::new(directory.join(table_name.to_owned() + "_deletes.csv.gz"), ChangeKind::Delete, table_name.as_ref())
+            table_name: table_name
         }
     }
     pub fn add_change(&mut self, change: &ParsedLine) {
