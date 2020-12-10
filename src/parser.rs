@@ -110,6 +110,16 @@ pub enum ChangeKind {
     Delete
 }
 
+impl std::string::ToString for ChangeKind {
+    fn to_string(&self) -> String {
+        match self {
+            Self::Insert => { "insert".to_string() },
+            Self::Update => { "update".to_string() },
+            Self::Delete => { "delete".to_string() }
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum ParsedLine {
     // int is xid

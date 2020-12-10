@@ -1,6 +1,7 @@
 use std::path::Path;
 use std::path::PathBuf;
 use std::fs;
+use glob::glob;
 
 use crate::parser::{ParsedLine, ChangeKind, ColumnInfo};
 use std::collections::{HashMap};//{ HashMap, BTreeMap, HashSet };
@@ -60,21 +61,56 @@ pub struct FileStruct {
 }
 
 impl FileStruct {
-    pub fn exists(&self) -> bool {
-        self.file.is_some()
-    }
-}
-
-impl FileStruct {
-    fn new(path_name: PathBuf, kind: ChangeKind, table_name: &str ) -> FileStruct {
-        FileStruct {
-            file_name: path_name,
+    pub fn new(directory_name: &Path, kind: ChangeKind, table_name: &str) -> FileStruct {
+        let new_file_name = Self::new_file_name(directory_name, kind, table_name);
+        let file_struct = FileStruct {
+            file_name: new_file_name.to_path_buf(),
             file: CsvWriter::Uninitialized,
             kind: kind,
             table_name: ArcIntern::new(table_name.to_string()),
             written_header: false,
             columns: None
-        }
+        };
+        // we touch the file when we create the struct created
+        let file = fs::File::create(new_file_name.as_path()).unwrap();
+        file_struct
+    }
+
+    // creates a new filename of the sort directory/n_table_name_inserts.csv.gz
+    // where n is a number
+    // TODO: do we just want to save the number and be passing it in somewhere I'm not super happy with thrashing our directory tree?
+    fn new_file_name(directory_name: &Path, kind: ChangeKind, table_name: &str) -> PathBuf {
+        let the_file_glob_pattern = ["*", table_name, kind.to_string().as_str()].join("_") + ".csv.gz";
+        let the_glob_pattern = directory_name.join(the_file_glob_pattern);
+
+        let current_file_number = glob(the_glob_pattern.to_str().unwrap())
+            .unwrap().map(|x| {
+                match x {
+                    Ok(path) => {
+                        let file_name = path.file_name().unwrap();
+                        // if it's not UTF-8 it can crash
+                        let file_name_str = file_name.to_str().unwrap();
+                        // filename is number_stuff.
+                        let (file_number_str, _) = file_name_str.split_once('_').unwrap();
+                        let file_number: i32 = file_number_str.parse::<i32>().unwrap();
+                        file_number
+                    },
+
+                    // if the path matched but was unreadable,
+                    // thereby preventing its contents from matching
+                    Err(e) => panic!("unreadable path. What did you do?"),
+                }
+            }
+        ).max().unwrap_or(0);
+        let new_file_number = current_file_number + 1;
+        let the_new_file_name = [new_file_number.to_string().as_str(), table_name, kind.to_string().as_str()].join("_") + ".csv.gz";
+        let the_new_file_name_and_directory = directory_name.join(the_new_file_name);
+        the_new_file_name_and_directory
+    }
+
+    // the file only has data in it if we've written the header
+    pub fn exists(&self) -> bool {
+        self.written_header
     }
 
     fn create_writer(&mut self) {
@@ -97,7 +133,6 @@ impl FileStruct {
                         .collect();
                     self.write(&strings);
                     self.columns = Some(changed_column_info);
-                    // let result = file.write_record(strings).expect("failed to write csv header");
                 }
             }
             self.written_header = true;
@@ -154,10 +189,11 @@ impl FileWriter {
         fs::create_dir_all(owned_directory.as_path()).expect("panic creating directory");
         FileWriter {
             directory: owned_directory,
-            insert_file: FileStruct::new(directory.join(table_name.to_owned() + "_inserts.csv.gz"), ChangeKind::Insert, table_name.as_ref()),
-            // update_file: FileStruct::new(directory.join(table_name.to_owned() + "_updates.csv")),
+            insert_file: FileStruct::new(directory.clone(), ChangeKind::Insert, table_name.as_ref()),
+            //FileStruct::new(directory.join(table_name.to_owned() + "_inserts.csv.gz"), ChangeKind::Insert, table_name.as_ref()),
             update_files: HashMap::new(),
-            delete_file: FileStruct::new(directory.join(table_name.to_owned() + "_deletes.csv.gz"), ChangeKind::Delete, table_name.as_ref())
+            delete_file: FileStruct::new(directory.clone(), ChangeKind::Delete, table_name.as_ref()),
+            //FileStruct::new(directory.join(table_name.to_owned() + "_deletes.csv.gz"), ChangeKind::Delete, table_name.as_ref())
         }
     }
     pub fn add_change(&mut self, change: &ParsedLine) {
@@ -181,9 +217,9 @@ impl FileWriter {
         for x in self.update_files.values_mut() {
             x.file.flush_and_close()
         }
-        // self.update_files.values_mut().map(|x| ).collect();
         self.delete_file.file.flush_and_close();
     }
+
     // update_files is a hash of our column names to our File
     fn add_change_to_update_file(&mut self, change: &ParsedLine) {
         let update_key: String = change.columns_for_changed_data()
@@ -199,7 +235,7 @@ impl FileWriter {
                 .or_insert_with(
                     ||
                         FileStruct::new(
-                            cloned_directory.join(table_name.to_string() + "_" + &number_of_updates_that_exist.to_string() + "_updates.csv.gz"),
+                            cloned_directory.as_path(),
                             ChangeKind::Update,
                             table_name.as_ref()
                         )

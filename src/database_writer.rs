@@ -49,7 +49,7 @@ impl DatabaseWriter {
 
     pub async fn import_table(&self, s3_file: &CleoS3File) {
         let CleoS3File{ kind, table_name,.. } = s3_file;
-        if ["public.transaction_descriptions", "public.user_relationships_timestamps", "transactions"].contains(&table_name.as_str()) {
+        if ["public.transaction_descriptions", "public.user_relationships_timestamps"].contains(&table_name.as_str()) {
             return
         }
         // temp tables are present in the session, so we still need to drop it at the end of the transaction
