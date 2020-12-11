@@ -5,9 +5,9 @@ use rusoto_s3::{S3, S3Client, PutObjectRequest};
 use tokio::fs::File;
 use tokio_util::codec;
 use futures::{TryStreamExt}; // , FutureExt
-// sync
-use std::fs;
-use std::io::Read;
+// // sync
+// use std::fs;
+// use std::io::Read;
 
 
 use crate::file_writer::{FileWriter, FileStruct};
@@ -72,7 +72,7 @@ impl FileUploader {
                     .put_object(put_request)
                     .await;
                 match maybe_uploaded {
-                    Ok(result) => {
+                    Ok(_result) => {
                         println!("uploaded file {}", remote_filename);
                     },
                     Err(result) => {

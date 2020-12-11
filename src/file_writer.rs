@@ -72,7 +72,7 @@ impl FileStruct {
             columns: None
         };
         // we touch the file when we create the struct created
-        let file = fs::File::create(new_file_name.as_path()).unwrap();
+        let _file = fs::File::create(new_file_name.as_path()).unwrap();
         file_struct
     }
 
@@ -98,7 +98,7 @@ impl FileStruct {
 
                     // if the path matched but was unreadable,
                     // thereby preventing its contents from matching
-                    Err(e) => panic!("unreadable path. What did you do?"),
+                    Err(_e) => panic!("unreadable path. What did you do?"),
                 }
             }
         ).max().unwrap_or(0);
@@ -229,7 +229,7 @@ impl FileWriter {
             .map(|x| x.column_name())
             .sorted()
             .join(",");
-        let number_of_updates_that_exist = self.update_files.len();
+        // let number_of_updates_that_exist = self.update_files.len();
         let cloned_directory = self.directory.clone();
         if let ParsedLine::ChangedData{table_name, ..} = change {
             self.update_files.entry(update_key)

@@ -7,14 +7,15 @@ use std::path::Path;
 
 // use std::io::prelude::*;
 // use std::fs;
-use std::sync::mpsc;
+use tokio::sync::mpsc;
 
 mod parser;
 mod change_processing;
 mod file_writer;
 mod file_uploader;
 mod database_writer;
-mod file_uploader_stream;
+mod file_uploader_threads;
+mod database_writer_threads;
 
 // use std::collections::{ HashSet };
 
@@ -23,10 +24,16 @@ mod file_uploader_stream;
 #[tokio::main]
 async fn main() {
     env_logger::init();
-    let (file_transmitter, file_receiver) = mpsc::channel::<file_writer::FileWriter>();
     let mut parser = parser::Parser::new(true);
     let mut collector = change_processing::ChangeProcessing::new();
-    let file_uploader_stream_join_handle = file_uploader_stream::FileUploaderStream::spawn_file_uploader_stream(file_receiver);
+    // initialize our channels
+    let (mut file_transmitter, file_receiver) = mpsc::channel::<file_writer::FileWriter>(1000);
+    let (database_transmitter, database_receiver) = mpsc::channel::<file_uploader::CleoS3File>(1000);
+    // initialize our file uploader stream
+    let file_uploader_threads_join_handle = file_uploader_threads::FileUploaderThreads::spawn_file_uploader_stream(file_receiver, database_transmitter);
+    // initialize our database importer stream
+    let database_writer_threads_join_handle = database_writer_threads::DatabaseWriterThreads::spawn_database_writer_stream(database_receiver);
+
     if let Ok(lines) = read_lines("./data/test_decoding.txt") {
         // Consumes the iterator, returns an (Optional) String
         for line in lines
@@ -37,47 +44,24 @@ async fn main() {
                     parser::ParsedLine::ContinueParse => {}, // Intentionally left blank, continue parsing
                     _ => {
                         if let Some(file) = collector.add_change(parsed_line) {
-                            file_transmitter.send(file);
+                            // TODO error handling
+                            file_transmitter.send(file).await;
                         }
                     }
                 }
             }
         }
     }
-    drop(file_transmitter);
-    file_uploader_stream_join_handle.await;
-
+    // TODO: drain the rest of the changes in the collector here
     // collector.print_stats();
-    // let mut files = collector.write_files_sync_batch();
-    // let file_uploader = &file_uploader::FileUploader::new();
 
-    // // TODO: we need to define a proper threading model,
-    // // currently we just do things in batches
-    // let results: Vec<_> = files.iter_mut().map(
-    //     |file| async move {
-    //         file.flush_all();
-    //         file_uploader.upload_table_to_s3(&file).await
-    //     }
-    // ).collect();
+    // make sure we close the channel to let things propogate
+    drop(file_transmitter);
+    // make sure we wait for our uploads to finish
+    file_uploader_threads_join_handle.await;
 
-    // // TODO: select on these futures for some real good async sauce
-    // let s3_files: Vec<_> = futures::future::join_all(results).await.into_iter().flatten().collect();
+    database_writer_threads_join_handle.await;
 
-    // // let mut type_set: HashSet<String> = HashSet::new();
-    // // for s3_file in s3_files {
-    // //     for column in s3_file.columns {
-    // //         type_set.insert(column.column_type().to_string());
-    // //     }
-    // // }
-    // // println!("{:?}", type_set);
-
-    // let ref database_writer = database_writer::DatabaseWriter::new();
-    // let table_imports = s3_files.iter().map(
-    //     |s3_file| async move {
-    //         database_writer.import_table(s3_file).await;
-    //     }
-    // );
-    // futures::future::join_all(table_imports).await;
 }
 
 // The output is wrapped in a Result to allow matching on errors
