@@ -134,6 +134,17 @@ impl ChangeSetWithColumnType {
             }
         }
     }
+
+    fn clear(&mut self) {
+        match self {
+            ChangeSetWithColumnType::IntColumnType(btree) => {
+                btree.clear();
+            }
+            ChangeSetWithColumnType::UuidColumnType(btree) => {
+                btree.clear();
+            }
+        }
+    }
 }
 
 // this holds the existing number of files that have been created for a table
@@ -262,21 +273,25 @@ impl ChangeProcessing {
         );
         file_writer
     }
-    // pub fn write_files_sync_batch(&self) -> Vec<file_writer::FileWriter> {
-    //     self.table_holder.tables.iter().map(
-    //         |(table_name, table)| {
-    //         let mut file_writer = file_writer::FileWriter::new(table_name);
-    //             table.changeset.values().for_each(
-    //                 |record| {
-    //                     record.changes.iter().for_each(
-    //                         |change| {
-    //                             file_writer.add_change(change);
-    //                         })
-    //                 }
 
-    //             );
-    //             file_writer
-    //         }
-    //     ).collect()
-    // }
+    // this drains every table from the changeset,
+    // writes the files, and returns them
+    pub fn drain_final_changes(&mut self) -> Vec<file_writer::FileWriter> {
+        let resulting_vec = self.table_holder.tables.drain().map(
+            |(table_name, table)| {
+            let mut file_writer = file_writer::FileWriter::new(table_name.clone());
+                table.changeset.values().for_each(
+                    |record| {
+                        record.changes.iter().for_each(
+                            |change| {
+                                file_writer.add_change(change);
+                            })
+                    }
+                );
+                file_writer
+            }
+        ).collect();
+        println!("DRAINED FINAL CHANGES!!!!! {}", self.table_holder.tables.len());
+        resulting_vec
+    }
 }

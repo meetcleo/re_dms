@@ -53,6 +53,10 @@ async fn main() {
         }
     }
     // TODO: drain the rest of the changes in the collector here
+    let files: Vec<_> = collector.drain_final_changes();
+    for file in files {
+        file_transmitter.send(file).await;
+    }
     // collector.print_stats();
 
     // make sure we close the channel to let things propogate
