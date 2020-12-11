@@ -1,5 +1,6 @@
-use parser::{ ParsedLine, Column, ColumnValue, ChangeKind };
+use crate::parser::{ ParsedLine, Column, ColumnValue, ChangeKind };
 use std::collections::{ HashMap, BTreeMap, HashSet };
+use internment::ArcIntern;
 
 use either::Either;
 use crate::file_writer;
@@ -66,13 +67,13 @@ impl ChangeSet {
                     // we ignore unchanged toast columns
                     // TODO: handle schema changes
                     let updated_column_names: HashSet<&str> = new_columns.iter().filter_map(
-                        |x| if let Column::ChangedColumn{key,..} = x {
-                            Some(key.as_ref())
+                        |x| if let Column::ChangedColumn{column_info,..} = x {
+                            Some(column_info.column_name())
                         } else { None }
                     ).collect();
                     let existing_column_names: HashSet<&str> = old_columns.iter().filter_map(
-                        |x| if let Column::ChangedColumn{key,..} = x {
-                            Some(key.as_ref())
+                        |x| if let Column::ChangedColumn{column_info,..} = x {
+                            Some(column_info.column_name())
                         } else { None }
                     ).collect();
                     if updated_column_names == existing_column_names {
@@ -80,7 +81,7 @@ impl ChangeSet {
                         *old_columns = new_columns;
                     } else {
                         // recreate the enum
-                        self.changes.push(ParsedLine::ChangedData {columns: new_columns, table_name: new_table_name, kind: new_kind})
+                        self.changes.push(ParsedLine::ChangedData { columns: new_columns, table_name: new_table_name, kind: new_kind })
                     }
                 }
             }
@@ -141,7 +142,7 @@ struct Table {
 }
 
 struct TableHolder {
-    tables: HashMap<String, Table>
+    tables: HashMap<ArcIntern<String>, Table>
 }
 
 impl Table {
@@ -203,7 +204,7 @@ impl TableHolder {
 
 impl ChangeProcessing {
     pub fn new() -> ChangeProcessing {
-        let hash_map = HashMap::<String, Table>::new();
+        let hash_map = HashMap::new();
         ChangeProcessing { table_holder: TableHolder { tables: hash_map } }
     }
     pub fn add_change(&mut self, parsed_line: ParsedLine) {
@@ -221,8 +222,8 @@ impl ChangeProcessing {
             }
         );
     }
-    pub fn write_files(&self) {
-        self.table_holder.tables.iter().for_each(
+    pub fn write_files(&self) -> Vec<file_writer::FileWriter> {
+        self.table_holder.tables.iter().map(
             |(table_name, table)| {
             let mut file_writer = file_writer::FileWriter::new(table_name);
                 table.changeset.values().for_each(
@@ -233,7 +234,9 @@ impl ChangeProcessing {
                             })
                     }
 
-                )
-            })
+                );
+                file_writer
+            }
+        ).collect()
     }
 }

@@ -2,12 +2,51 @@
 name = "re_dms"
 version = "0.1.0"
 authors = ["Michael Hauser-Raspe <michael@meetcleo.com>"]
+edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-log = "0.4.0"
-env_logger = "0.8.2"
+# general purpose tools
+itertools = "0.9"
 regex = "1.4.2"
 either = "1.6.1"
+log = "0.4.0"
+env_logger = "0.8.2"
 csv = "1.1"
+
+# dotenv
+dotenv = "0.15.0"
+
+# s3
+rusoto_core = "0.45.0"
+rusoto_s3 = "0.45.0"
+# rusoto uses tokio 0.2, try it for now
+# if we need another, look into
+# https://github.com/tokio-rs/tokio-compat
+
+# gzipping
+flate2 = "1.0.19"
+
+# async
+# highest tokio version that rusoto supports
+# TODO: think about tokio_compat / or switch to 
+tokio = { version = "0.2.9", features = ["full"] }
+# gotta stream those files to s3
+# let's get async up in here
+tokio-util = {version = "0.3.1", features = ["codec"] }
+futures = "0.3.1"
+
+# string internment
+internment = "0.4.1"
+
+# db connections
+# these are specific versions chosen to work with the tokio version above
+deadpool-postgres = { version = "0.5.6" }
+tokio-postgres = { version = "0.5.1", features = ["with-uuid-0_8"] }
+postgres-openssl = "0.3.0"
+openssl = "0.10"
+
+# serialisation
+serde = "1.0.117"
+config = "0.10.1"
