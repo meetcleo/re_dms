@@ -14,6 +14,9 @@ pub struct ChangeProcessing {
     table_holder: TableHolder
 }
 
+// CONFIG HACK:
+const CHANGES_PER_TABLE: usize = 100000;
+
 #[derive(Debug)]
 struct ChangeSet {
     // TODO
@@ -204,9 +207,11 @@ impl Table {
     }
 
     // TODO make this configurable, just for testing.
+    // NOTE: important config hack
     fn time_to_swap_tables(&self) -> bool{
-        return self.changeset.len() > 200
+        return self.changeset.len() >= CHANGES_PER_TABLE
     }
+
     fn get_stats(&self) -> (usize, usize) {
         let number_of_ids = self.changeset.len();
         let number_of_changes = self.changeset.values().fold(0, |acc, value| acc + value.changes.len());
