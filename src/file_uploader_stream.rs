@@ -16,7 +16,7 @@ impl FileUploaderStream {
 }
 
 pub struct TableStream {
-    sender: mpsc::Sender<FileWriter>,
+    sender: Option<mpsc::Sender<FileWriter>>,
     join_handle: Option<tokio::task::JoinHandle<()>>
 }
 
@@ -34,19 +34,21 @@ impl FileUploaderStream {
     pub async fn file_uploader_stream(receiver: mpsc::Receiver<FileWriter>) {
         let mut file_uploader_stream = FileUploaderStream::new();
         loop {
-            match receiver.recv() {
-                Ok(file_writer) => {
-                    let table_name = file_writer.table_name.clone();
-                    let sender = file_uploader_stream.get_sender(table_name);
-                    // TODO: handle error
-                    sender.sender.send(file_writer);
-                },
-                Err(..) => {
-                    println!("channel hung up");
-                    file_uploader_stream.join_all_table_threads();
-                    // TODO: shut down table_streams
-                    break
-                }
+
+            let received = receiver.recv();
+            if let Ok(file_writer) = received {
+                let table_name = file_writer.table_name.clone();
+                let sender = file_uploader_stream.get_sender(table_name);
+                // TODO: handle error
+                sender.sender.as_ref().map(|inner_sender| inner_sender.send(file_writer));
+            }
+            else {
+                println!("channel hung up main");
+                file_uploader_stream.join_all_table_threads().await;
+
+                println!("finished waiting on threads");
+                // TODO: shut down table_streams
+                break
             }
         }
     }
@@ -63,7 +65,8 @@ impl FileUploaderStream {
         self.table_streams
             .entry(table_name)
             .or_insert_with(|| {
-                let (sender, receiver) = mpsc::channel::<FileWriter>();
+                let (inner_sender, receiver) = mpsc::channel::<FileWriter>();
+                let sender = Some(inner_sender);
                 let join_handle = Some(tokio::spawn(Self::spawn_table_thread(receiver, cloned_uploader)));
                 TableStream { sender, join_handle }
             })
@@ -71,22 +74,31 @@ impl FileUploaderStream {
     pub async fn join_all_table_threads(&mut self) {
         let join_handles = self.table_streams.values_mut()
             .filter_map(
-                |x| std::mem::replace(&mut x.join_handle, None)
+                |x| {
+                    // drop every channel. we've should have alredy sent everything.
+                    x.sender = None;
+                    // get the join handle and remove it from the struct
+                    std::mem::replace(&mut x.join_handle, None)
+                }
             ).collect::<Vec<_>>();
+        println!("got all join_handles waiting");
         futures::future::join_all(join_handles).await;
+        println!("finished waiting on all join handles");
     }
 
     pub async fn spawn_table_thread(receiver: mpsc::Receiver<FileWriter>, uploader: Arc<FileUploader>) {
+        let mut last_table_name = None;
         loop {
             // need to do things this way rather than a match for the borrow checker
             let received = receiver.recv();
             if let Ok(mut file_writer) = received {
                 let table_name = file_writer.table_name.clone();
+                last_table_name = Some(table_name);
                 file_writer.flush_all();
                 uploader.upload_table_to_s3(&file_writer).await;
                 // println!("received: {:?}", file_writer.table_name.as_str());
             } else {
-                // println!("channel hung up");
+                println!("channel hung up: {:?}", last_table_name);
                 break
             }
         }

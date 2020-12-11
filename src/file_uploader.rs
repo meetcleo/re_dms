@@ -5,6 +5,9 @@ use rusoto_s3::{S3, S3Client, PutObjectRequest};
 use tokio::fs::File;
 use tokio_util::codec;
 use futures::{TryStreamExt}; // , FutureExt
+// sync
+use std::fs;
+use std::io::Read;
 
 
 use crate::file_writer::{FileWriter, FileStruct};
@@ -43,39 +46,51 @@ impl FileUploader {
         let remote_filename = "mike-test-2/".to_owned() + file_name;
         // println!("remote key {}", remote_filename);
         // async
-        println!("{}", local_filename);
+        // println!("{}", local_filename);
         let meta = ::std::fs::metadata(local_filename).unwrap();
-        let tokio_file = File::open(&local_filename).await.expect("fuck");
-        // async
-        let byte_stream = codec::FramedRead::new(tokio_file, codec::BytesCodec::new()).map_ok(|x| x.freeze() );
-        // sync
-        // let mut file = File::open(file_name).unwrap();
-        // let mut buffer = Vec::new();
-        // file.read_to_end(&mut buffer);
+        let tokio_file_result = File::open(&local_filename).await;
+        match tokio_file_result {
+            Ok(tokio_file) => {
+                // async
+                let byte_stream = codec::FramedRead::new(tokio_file, codec::BytesCodec::new()).map_ok(|x| x.freeze() );
+                // // sync
+                // let mut file = std::fs::File::open(file_name).unwrap();
+                // let mut buffer = Vec::new();
+                // file.read_to_end(&mut buffer);
 
-        // println!("{} {}", meta.len(), file_name);
-        let put_request = PutObjectRequest {
-            bucket: BUCKET_NAME.to_owned(),
-            key: remote_filename.clone(),
-            content_length: Some(meta.len() as i64),
-            body: Some(ByteStream::new(byte_stream).into()),
-            ..Default::default()
-        };
+                println!("{} {}", meta.len(), file_name);
+                let put_request = PutObjectRequest {
+                    bucket: BUCKET_NAME.to_owned(),
+                    key: remote_filename.clone(),
+                    content_length: Some(meta.len() as i64),
+                    body: Some(ByteStream::new(byte_stream).into()),
+                    // body: Some(buffer.into()),
+                    ..Default::default()
+                };
 
-        self.s3_client
-            .put_object(put_request)
-            .await
-            .expect("Failed to put test object");
-        println!("uploaded file {}", remote_filename);
-        if let Some(columns) = &file_struct.columns {
-            CleoS3File {
-                remote_filename: remote_filename.clone(),
-                kind: file_struct.kind,
-                table_name: file_struct.table_name.clone(),
-                columns: columns.clone()
-            }
-        } else {
-            panic!("columns not initialized on file {}", file_name);
+                let maybe_uploaded = self.s3_client
+                    .put_object(put_request)
+                    .await;
+                match maybe_uploaded {
+                    Ok(result) => {
+                        println!("uploaded file {}", remote_filename);
+                    },
+                    Err(result) => {
+                        panic!("Failed to upload file {} {:?}", remote_filename, result);
+                    }
+                }
+                if let Some(columns) = &file_struct.columns {
+                    CleoS3File {
+                        remote_filename: remote_filename.clone(),
+                        kind: file_struct.kind,
+                        table_name: file_struct.table_name.clone(),
+                        columns: columns.clone()
+                    }
+                } else {
+                    panic!("columns not initialized on file {}", file_name);
+                }
+            },
+            Err(err) => { panic!("problem with {:?} {:?}", file_name, err); }
         }
     }
 

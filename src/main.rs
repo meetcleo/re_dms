@@ -44,8 +44,8 @@ async fn main() {
             }
         }
     }
-    // drop(file_transmitter);
-    // file_uploader_stream_join_handle.await;
+    drop(file_transmitter);
+    file_uploader_stream_join_handle.await;
 
     // collector.print_stats();
     // let mut files = collector.write_files_sync_batch();
