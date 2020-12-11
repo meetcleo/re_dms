@@ -1,71 +1,125 @@
-// use futures::{
-//     future::FutureExt, // for `.fuse()`
-//     pin_mut,
-//     select,
-// };
 use std::path::Path;
 use std::path::PathBuf;
 use std::fs;
-use crate::parser::{ParsedLine, ChangeKind};
-// use std::collections::{HashMap};//{ HashMap, BTreeMap, HashSet };
-// use std::io::prelude::*;
+
+use crate::parser::{ParsedLine, ChangeKind, ColumnInfo};
+use std::collections::{HashMap};//{ HashMap, BTreeMap, HashSet };
+
+use itertools::Itertools;
+use internment::ArcIntern;
+
+use flate2::Compression;
+use flate2::write::GzEncoder;
 
 // we have one of these per table,
 // it will hold the files to write to and handle the writing
 pub struct FileWriter {
     directory: PathBuf,
-    insert_file: FileStruct,
-    update_file: FileStruct,
-    delete_file: FileStruct
+    pub insert_file: FileStruct,
+    // update_file: FileStruct,
+    pub update_files: HashMap<String, FileStruct>,
+    pub delete_file: FileStruct
+}
+
+enum CsvWriter {
+    Uninitialized,
+    ReadyToWrite(csv::Writer<flate2::write::GzEncoder<fs::File>>),
+    Finished
+}
+
+impl CsvWriter {
+    pub fn is_some(&self) -> bool {
+        match self {
+            CsvWriter::Uninitialized => false,
+            _ => true
+        }
+    }
+    pub fn is_none(&self) -> bool {
+        !self.is_some()
+    }
+    // move
+    pub fn flush_and_close(&mut self) {
+        if self.is_some() {
+            let new_value = CsvWriter::Finished;
+            let old_value = std::mem::replace(self, new_value);
+            if let CsvWriter::ReadyToWrite(writer) = old_value {
+                writer.into_inner().map(|gzip| gzip.finish().unwrap()).unwrap();
+            }
+        }
+
+    }
 }
 
 pub struct FileStruct {
-    file_name: PathBuf,
-    file: Option<csv::Writer<fs::File>>,
+    pub file_name: PathBuf,
+    pub table_name: ArcIntern<String>,
+    pub kind: ChangeKind,
+    pub columns: Option<Vec<ColumnInfo>>,
+    file: CsvWriter,
     written_header: bool
 }
 
 impl FileStruct {
-    fn new(path_name: PathBuf) -> FileStruct {
-        FileStruct { file_name: path_name, file: None, written_header: false}
+    pub fn exists(&self) -> bool {
+        self.file.is_some()
+    }
+}
+
+impl FileStruct {
+    fn new(path_name: PathBuf, kind: ChangeKind, table_name: &str ) -> FileStruct {
+        FileStruct {
+            file_name: path_name,
+            file: CsvWriter::Uninitialized,
+            kind: kind,
+            table_name: ArcIntern::new(table_name.to_string()),
+            written_header: false,
+            columns: None
+        }
     }
 
     fn create_writer(&mut self) {
-        // TEMP use flexible csv writer
-        let writer = csv::WriterBuilder::new().flexible(true).from_path(self.file_name.as_path()).expect("writer couldn't open file");
-        self.file = Some(writer);
+        let file = fs::File::create(self.file_name.as_path()).unwrap();
+        let writer = GzEncoder::new(file, Compression::default());
+        let csv_writer = csv::WriterBuilder::new().from_writer(writer);
+        self.file = CsvWriter::ReadyToWrite(csv_writer);
     }
 
     fn write_header(&mut self, change: &ParsedLine) {
-        if let Some(_file) = &mut self.file {
-            if let ParsedLine::ChangedData{ columns,.. } = change {
-                let strings: Vec<&str> = columns.iter().map(|x| x.column_name()).collect();
-                self.write(&strings);
-                // let result = file.write_record(strings).expect("failed to write csv header");
+        if !self.written_header {
+            if let CsvWriter::ReadyToWrite(_file) = &mut self.file {
+                if let ParsedLine::ChangedData{ columns,.. } = change {
+                    let changed_column_info: Vec<ColumnInfo> = columns.iter()
+                        .filter(|x| x.is_changed_data_column())
+                        .map(|x| x.column_info().clone())
+                        .collect();
+                    let strings: Vec<&str> = changed_column_info.iter()
+                        .map(|x| x.column_name())
+                        .collect();
+                    self.write(&strings);
+                    self.columns = Some(changed_column_info);
+                    // let result = file.write_record(strings).expect("failed to write csv header");
+                }
             }
-
+            self.written_header = true;
         }
-        self.written_header = true;
     }
 
     fn write_line(&mut self, change: &ParsedLine) {
         self.write_header(change);
-        if let Some(_file) = &mut self.file {
-            if let ParsedLine::ChangedData{ columns, table_name,.. } = change {
+        if let CsvWriter::ReadyToWrite(_file) = &mut self.file {
+            if let ParsedLine::ChangedData{ columns,.. } = change {
                 // need to own these strings
                 let strings: Vec<String> = columns
                     .iter()
                     .filter(|x| x.is_changed_data_column())
                     .map(
                         |x| {
-                            // x.column_name()
                             if let Some(value) = x.column_value_for_changed_column() {
                                 value.to_string()
                             } else {"".to_owned()} // remember blank as nulls
                         }
                     ).collect();
                 self.write(&strings);
-                // let result = file.write_record(strings).expect("failed to write csv header");
             }
 
         }
@@ -76,39 +130,34 @@ impl FileStruct {
         I: IntoIterator<Item = T>,
         T: AsRef<[u8]>,
     {
-        if let Some(file) = &mut self.file {
+        if let CsvWriter::ReadyToWrite(file) = &mut self.file {
+            // TODO handle error
             file.write_record(string).expect("failed to write file");
-            // file.write_all(string.as_bytes()).expect("write failed");
         } else {
             panic!("tried to write to file before creating it");
         }
     }
     fn add_change(&mut self, change: &ParsedLine) {
-        if self.file.is_some() {
-            if !self.written_header {
-                self.write_header(change)
-            }
-            self.write_line(change);
-        } else {
+        if self.file.is_none() {
             self.create_writer();
-            // TODO: danger recurse
-            self.add_change(change)
         }
+        self.write_line(change)
     }
 }
 
+// TODO: write iterator over files
 impl FileWriter {
     pub fn new(table_name: &str) -> FileWriter {
-        let directory = Path::new(".").join("output");
+        let directory = Path::new("output");
         // create directory
         let owned_directory = directory.clone().to_owned();
         fs::create_dir_all(owned_directory.as_path()).expect("panic creating directory");
         FileWriter {
             directory: owned_directory,
-            insert_file: FileStruct::new(directory.join(table_name.to_owned() + "_inserts.csv")),
-            update_file: FileStruct::new(directory.join(table_name.to_owned() + "_updates.csv")),
-            // update_files: HashMap::new(),
-            delete_file: FileStruct::new(directory.join(table_name.to_owned() + "_deletes.csv"))
+            insert_file: FileStruct::new(directory.join(table_name.to_owned() + "_inserts.csv.gz"), ChangeKind::Insert, table_name.as_ref()),
+            // update_file: FileStruct::new(directory.join(table_name.to_owned() + "_updates.csv")),
+            update_files: HashMap::new(),
+            delete_file: FileStruct::new(directory.join(table_name.to_owned() + "_deletes.csv.gz"), ChangeKind::Delete, table_name.as_ref())
         }
     }
     pub fn add_change(&mut self, change: &ParsedLine) {
@@ -118,7 +167,8 @@ impl FileWriter {
                     self.insert_file.add_change(change);
                 },
                 ChangeKind::Update => {
-                    self.update_file.add_change(change);
+
+                    self.add_change_to_update_file(change);
                 },
                 ChangeKind::Delete => {
                     self.delete_file.add_change(change);
@@ -126,6 +176,35 @@ impl FileWriter {
             }
         }
     }
+    pub fn flush_all(&mut self) {
+        self.insert_file.file.flush_and_close();
+        for x in self.update_files.values_mut() {
+            x.file.flush_and_close()
+        }
+        // self.update_files.values_mut().map(|x| ).collect();
+        self.delete_file.file.flush_and_close();
+    }
+    // update_files is a hash of our column names to our File
+    fn add_change_to_update_file(&mut self, change: &ParsedLine) {
+        let update_key: String = change.columns_for_changed_data()
+            .iter()
+            .filter(|x| x.is_changed_data_column())
+            .map(|x| x.column_name())
+            .sorted()
+            .join(",");
+        let number_of_updates_that_exist = self.update_files.len();
+        let cloned_directory = self.directory.clone();
+        if let ParsedLine::ChangedData{table_name, ..} = change {
+            self.update_files.entry(update_key)
+                .or_insert_with(
+                    ||
+                        FileStruct::new(
+                            cloned_directory.join(table_name.to_string() + "_" + &number_of_updates_that_exist.to_string() + "_updates.csv.gz"),
+                            ChangeKind::Update,
+                            table_name.as_ref()
+                        )
+                )
+                .add_change(change);
+        } else { panic!("non changed data passed to add_change_to_update_file") }
+    }
 }
-
-// fn collection_writer()
