@@ -2,7 +2,7 @@ use tokio::sync::mpsc;
 use std::sync::Arc;
 use std::collections::{ HashMap };
 
-use crate::file_uploader_threads::{GenericTableThread, GenericTableThreadSplitter};
+use crate::file_uploader_threads::{GenericTableThread, GenericTableThreadSplitter, DEFAULT_CHANNEL_SIZE};
 use crate::file_uploader::CleoS3File;
 use crate::database_writer::DatabaseWriter;
 use crate::parser::{TableName};
@@ -61,7 +61,7 @@ impl DatabaseWriterThreads {
         self.table_streams
             .entry(table_name)
             .or_insert_with(|| {
-                let (inner_sender, receiver) = mpsc::channel::<CleoS3File>(1000);
+                let (inner_sender, receiver) = mpsc::channel::<CleoS3File>(DEFAULT_CHANNEL_SIZE);
                 let sender = Some(inner_sender);
                 let join_handle = Some(tokio::spawn(Self::spawn_table_thread(receiver, cloned_uploader)));
                 DatabaseTableThread { sender, join_handle }

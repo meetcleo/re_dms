@@ -84,8 +84,8 @@ impl FileStruct {
         let the_glob_pattern = directory_name.join(the_file_glob_pattern);
 
         let current_file_number = glob(the_glob_pattern.to_str().unwrap())
-            .unwrap().map(|x| {
-                match x {
+            .unwrap().map(|file_path| {
+                match file_path {
                     Ok(path) => {
                         let file_name = path.file_name().unwrap();
                         // if it's not UTF-8 it can crash

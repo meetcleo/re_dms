@@ -17,6 +17,8 @@ mod database_writer;
 mod file_uploader_threads;
 mod database_writer_threads;
 
+use file_uploader_threads::DEFAULT_CHANNEL_SIZE;
+
 // use std::collections::{ HashSet };
 
 // TEMP
@@ -27,8 +29,8 @@ async fn main() {
     let mut parser = parser::Parser::new(true);
     let mut collector = change_processing::ChangeProcessing::new();
     // initialize our channels
-    let (mut file_transmitter, file_receiver) = mpsc::channel::<file_writer::FileWriter>(1000);
-    let (database_transmitter, database_receiver) = mpsc::channel::<file_uploader::CleoS3File>(1000);
+    let (mut file_transmitter, file_receiver) = mpsc::channel::<file_writer::FileWriter>(DEFAULT_CHANNEL_SIZE);
+    let (database_transmitter, database_receiver) = mpsc::channel::<file_uploader::CleoS3File>(DEFAULT_CHANNEL_SIZE);
     // initialize our file uploader stream
     let file_uploader_threads_join_handle = file_uploader_threads::FileUploaderThreads::spawn_file_uploader_stream(file_receiver, database_transmitter);
     // initialize our database importer stream

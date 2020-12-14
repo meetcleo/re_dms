@@ -6,6 +6,8 @@ use crate::parser::{TableName};
 use crate::file_writer::{FileWriter};
 use crate::file_uploader::{FileUploader, CleoS3File};
 
+pub const DEFAULT_CHANNEL_SIZE: usize = 1000;
+
 
 
 pub struct GenericTableThreadSplitter<SharedResource, ChannelType> {
@@ -29,9 +31,9 @@ impl<SharedResource,ChannelType> GenericTableThreadSplitter<SharedResource, Chan
     pub async fn join_all_table_threads(&mut self) {
         let join_handles = self.table_streams.values_mut()
             .filter_map(
-                |x| {
-                    // drop every channel. we've should have alredy sent everything.
-                    x.drop_sender_and_return_join_handle()
+                |table_thread| {
+                    // drop every channel. since we should have already sent everything.
+                    table_thread.drop_sender_and_return_join_handle()
                 }
             ).collect::<Vec<_>>();
         println!("got all join_handles file_uploader waiting");
@@ -99,7 +101,7 @@ impl FileUploaderThreads {
         self.table_streams
             .entry(table_name)
             .or_insert_with(|| {
-                let (inner_sender, receiver) = mpsc::channel::<FileWriter>(1000);
+                let (inner_sender, receiver) = mpsc::channel::<FileWriter>(DEFAULT_CHANNEL_SIZE);
                 let sender = Some(inner_sender);
                 let cloned_result_sender = result_sender.clone();
                 let join_handle = Some(tokio::spawn(Self::spawn_table_thread(receiver, cloned_uploader, cloned_result_sender)));

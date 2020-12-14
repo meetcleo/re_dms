@@ -230,7 +230,8 @@ impl TableHolder {
                 .add_change(parsed_line);
             if should_swap_table {
                 // unwrap should be safe here, we're single threaded and we just inserted here.
-                Some((other_cloned.clone(), self.tables.remove(&other_cloned).unwrap()))
+                let removed_table = self.tables.remove(&other_cloned).unwrap();
+                Some((other_cloned, removed_table))
             } else { None }
 
         } else {

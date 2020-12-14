@@ -52,7 +52,13 @@ impl FileUploader {
         match tokio_file_result {
             Ok(tokio_file) => {
                 // async
-                let byte_stream = codec::FramedRead::new(tokio_file, codec::BytesCodec::new()).map_ok(|x| x.freeze() );
+                // roughly equivalent to https://stackoverflow.com/questions/59318460/what-is-the-best-way-to-convert-an-asyncread-to-a-trystream-of-bytes
+                // but requires ignoring a lot if unimportant stuff.
+                // Essentially, we have an async file, and want an immutable bytestream that we can read from it.
+                // our s3 library can then stream that to s3. This means we pause the async task on every bit of both read and
+                // write IO and are very efficient.
+                // map_ok is a future combinator, that will apply the closure to each frame (freeze-ing the frame to make it immutable)
+                let byte_stream = codec::FramedRead::new(tokio_file, codec::BytesCodec::new()).map_ok(|frame| frame.freeze() );
                 // // sync
                 // let mut file = std::fs::File::open(file_name).unwrap();
                 // let mut buffer = Vec::new();
