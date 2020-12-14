@@ -144,6 +144,26 @@ impl ChangeSetWithColumnType {
         }
     }
 
+    // this will return the data, and leave an "emptied" changeset in it's place
+    fn empty_and_return(&mut self) -> Self {
+        let replacement = self.empty_clone();
+        std::mem::replace(self, replacement)
+    }
+
+    // will return the same "type" of ChangeSetWithColumnType, but empty
+    fn empty_clone(&self) -> Self {
+        match self {
+            ChangeSetWithColumnType::IntColumnType(..) => {
+                let btree = BTreeMap::<i64, ChangeSet>::new();
+                ChangeSetWithColumnType::IntColumnType(btree)
+            }
+            ChangeSetWithColumnType::UuidColumnType(..) => {
+                let btree = BTreeMap::<String, ChangeSet>::new();
+                ChangeSetWithColumnType::UuidColumnType(btree)
+            }
+        }
+    }
+
     fn clear(&mut self) {
         match self {
             ChangeSetWithColumnType::IntColumnType(btree) => {
@@ -188,22 +208,37 @@ impl Table {
         }
     }
 
-    // returns a bool if the table is "full" and ready to be written and uploaded
-    fn add_change(&mut self, parsed_line: ParsedLine) -> Option<Table> {
+    fn add_change(&mut self, parsed_line: ParsedLine) -> Option<(Table, Option<Vec<DdlChange>>)> {
 
         if self.has_ddl_changes(&parsed_line) {
-            // time_to_swap_tables is never true immediately after we swap tables here
+            // if we have ddl changes, send the table data off now, then send the ddl changes, then apply the change
+            let ddl_changes = self.ddl_changes(&parsed_line);
+            let returned_table = self.reset_and_return_table_data();
+            // remember to update to the new column info, as this will be the new schema for after we return our ddl_changes
+            self.column_info = parsed_line.column_info_set();
 
-            None
+            // time_to_swap_tables is never true immediately after we add the first new change here
+            // so we safely don't check it
+            self.add_change_to_changeset(parsed_line);
+
+            Some((returned_table, Some(ddl_changes)))
         } else {
+            // no ddl changes, add the line as normal
             self.add_change_to_changeset(parsed_line);
             if self.time_to_swap_tables() {
-                // unwrap should be safe here, we're single threaded and we just inserted here.
-                let removed_table = unimplemented!();
-                // let removed_table = self.tables.remove(&other_cloned).unwrap();
-                Some(removed_table)
+                // we don't actually remove the table
+                // we just clear any non-schema
+                let returned_table = self.reset_and_return_table_data();
+                Some((returned_table, None))
             } else { None }
         }
+    }
+
+    fn reset_and_return_table_data(&mut self) -> Table {
+        let column_info = self.column_info.clone();
+        let table_name = self.table_name.clone();
+        let changeset = self.changeset.empty_and_return();
+        Table { changeset, column_info, table_name }
     }
 
     fn add_change_to_changeset(&mut self, parsed_line: ParsedLine) {
@@ -269,12 +304,10 @@ impl Table {
 }
 
 impl TableHolder {
-    fn add_change(&mut self, parsed_line: ParsedLine) -> Option<Table> {
+    fn add_change(&mut self, parsed_line: ParsedLine) -> Option<(Table, Option<Vec<DdlChange>>)> {
         if let ParsedLine::ChangedData{ref table_name, ..} = parsed_line {
             // these are cheap since this is an interned string
-            let cloned = table_name.clone();
-            let other_cloned = table_name.clone();
-            self.tables.entry(cloned)
+            self.tables.entry(table_name.clone())
                 .or_insert_with(|| Table::new(&parsed_line))
                 .add_change(parsed_line)
         } else {
@@ -288,13 +321,13 @@ impl ChangeProcessing {
         let hash_map = HashMap::new();
         ChangeProcessing { table_holder: TableHolder { tables: hash_map } }
     }
-    pub fn add_change(&mut self, parsed_line: ParsedLine) -> Option<file_writer::FileWriter> {
+    pub fn add_change(&mut self, parsed_line: ParsedLine) -> Option<(file_writer::FileWriter, Option<Vec<DdlChange>>)> {
         match parsed_line {
             ParsedLine::Begin(_) | ParsedLine::Commit(_) | ParsedLine::TruncateTable => { None }, // TODO
             ParsedLine::ContinueParse => { None }, // need to be exhaustive
             ParsedLine::ChangedData{ .. } => {
                 self.table_holder.add_change(parsed_line).map(
-                    |returned_table| self.write_files_for_table(returned_table)
+                    |(returned_table, ddl_changes)| (self.write_files_for_table(returned_table), ddl_changes)
                 )
             }
         }
@@ -360,16 +393,24 @@ mod tests {
             Column::ChangedColumn {column_info: id_column_info.clone(), value: Some(ColumnValue::Integer(1))}
         ];
         let second_changed_columns = vec![
+            Column::ChangedColumn {column_info: id_column_info.clone(), value: Some(ColumnValue::Integer(1))}, // id column
+            Column::ChangedColumn {column_info: new_column_info.clone(), value: Some(ColumnValue::Integer(1))} // new column
+        ];
+        let third_changed_columns = vec![
             Column::ChangedColumn {column_info: id_column_info, value: Some(ColumnValue::Integer(1))}, // id column
             Column::ChangedColumn {column_info: new_column_info, value: Some(ColumnValue::Integer(1))} // new column
         ];
         let first_change = ParsedLine::ChangedData{kind: ChangeKind::Insert, table_name: table_name.clone(), columns: first_changed_columns};
-        let second_change = ParsedLine::ChangedData{kind: ChangeKind::Update, table_name: table_name, columns: second_changed_columns};
+        let second_change = ParsedLine::ChangedData{kind: ChangeKind::Update, table_name: table_name.clone(), columns: second_changed_columns};
+        // check we have the new schema and can keep adding changes
+        let third_change = ParsedLine::ChangedData{kind: ChangeKind::Update, table_name: table_name, columns: third_changed_columns};
         let mut change_processing = ChangeProcessing::new();
         let first_result = change_processing.add_change(first_change);
         let second_result = change_processing.add_change(second_change);
+        let third_result = change_processing.add_change(third_change);
         assert!(first_result.is_none());
-        // assert!(first_result.is_some())
+        assert!(second_result.is_some());
+        assert!(third_result.is_none());
     }
 
     #[test]
