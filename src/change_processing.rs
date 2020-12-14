@@ -1,4 +1,4 @@
-use crate::parser::{ ParsedLine, Column, ColumnValue, ChangeKind, TableName };
+use crate::parser::{ ParsedLine, Column, ColumnValue, ChangeKind, TableName, ColumnInfo };
 use std::collections::{ HashMap, BTreeMap, HashSet };
 
 use either::Either;
@@ -161,6 +161,7 @@ struct FileCounter {
 struct Table {
     // we want to have a changeset, but need to match on the enum type for the pkey of the column
     changeset: ChangeSetWithColumnType,
+    column_info: HashSet<ColumnInfo>
 }
 
 struct TableHolder {
@@ -172,7 +173,8 @@ impl Table {
         if let ParsedLine::ChangedData{..} = parsed_line {
             let id_column = parsed_line.find_id_column().column_value_unwrap();
             let changeset = ChangeSetWithColumnType::new(id_column);
-            Table { changeset }
+            let column_info = parsed_line.column_info_set();
+            Table { changeset, column_info }
         } else {
             panic!("Non changed data used to try and initialize a table {:?}", parsed_line)
         }
@@ -251,8 +253,7 @@ impl ChangeProcessing {
             ParsedLine::ContinueParse => { None }, // need to be exhaustive
             ParsedLine::ChangedData{ .. } => {
                 self.table_holder.add_change(parsed_line).map(
-                    |(table_name, returned_table)| self.write_files_for_table(table_name, returned_table
-                    )
+                    |(table_name, returned_table)| self.write_files_for_table(table_name, returned_table)
                 )
             }
         }
@@ -266,7 +267,7 @@ impl ChangeProcessing {
         );
     }
 
-    pub fn write_files_for_table(&self, table_name: TableName, table: Table) -> file_writer::FileWriter {
+    fn write_files_for_table(&self, table_name: TableName, table: Table) -> file_writer::FileWriter {
         let mut file_writer = file_writer::FileWriter::new(table_name.clone());
         table.changeset.values().for_each(
             |record| {
@@ -299,5 +300,38 @@ impl ChangeProcessing {
         ).collect();
         println!("DRAINED FINAL CHANGES!!!!! {}", self.table_holder.tables.len());
         resulting_vec
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parser::*;
+
+    // this is basically an integration test, but that's fine
+    #[test]
+    fn ddl_change_add_column() {
+        let table_name = TableName::new("foobar".to_string());
+        let id_column_info = ColumnInfo::new("id", "bigint");
+        let new_column_info = ColumnInfo::new("foobar", "bigint");
+        let first_changed_columns = vec![
+            Column::ChangedColumn {column_info: id_column_info.clone(), value: Some(ColumnValue::Integer(1))}
+        ];
+        let second_changed_columns = vec![
+            Column::ChangedColumn {column_info: id_column_info, value: Some(ColumnValue::Integer(1))}, // id column
+            Column::ChangedColumn {column_info: new_column_info, value: Some(ColumnValue::Integer(1))} // new column
+        ];
+        let first_change = ParsedLine::ChangedData{kind: ChangeKind::Insert, table_name: table_name.clone(), columns: first_changed_columns};
+        let second_change = ParsedLine::ChangedData{kind: ChangeKind::Update, table_name: table_name, columns: second_changed_columns};
+        let mut change_processing = ChangeProcessing::new();
+        let first_result = change_processing.add_change(first_change);
+        let second_result = change_processing.add_change(second_change);
+        assert!(first_result.is_none());
+        // assert!(first_result.is_some())
+    }
+
+    #[test]
+    fn ddl_change_remove_column() {
+
     }
 }
