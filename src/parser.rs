@@ -48,11 +48,11 @@ pub enum Column {
     IncompleteColumn { column_info: ColumnInfo, value: ColumnValue }
 }
 
-// happy to clone it, it's only holds two pointers
+// happy to clone it, it only holds two pointers
 #[derive(Debug,Clone,Hash,Eq,PartialEq)]
 pub struct ColumnInfo {
-    name: ColumnName,
-    column_type: ColumnType
+    pub name: ColumnName,
+    pub column_type: ColumnType
 }
 
 impl ColumnInfo {

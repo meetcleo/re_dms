@@ -1,5 +1,6 @@
 use crate::parser::{ ParsedLine, Column, ColumnValue, ChangeKind, TableName, ColumnInfo };
 use std::collections::{ HashMap, BTreeMap, HashSet };
+use itertools::Itertools;
 
 use either::Either;
 use crate::file_writer;
@@ -12,6 +13,11 @@ use log::{debug, error, log_enabled, info, Level};
 // channels later
 pub struct ChangeProcessing {
     table_holder: TableHolder
+}
+
+pub enum DdlChange {
+    AddColumn(ColumnInfo),
+    RemoveColumn(ColumnInfo)
 }
 
 // CONFIG HACK:
@@ -161,7 +167,8 @@ struct FileCounter {
 struct Table {
     // we want to have a changeset, but need to match on the enum type for the pkey of the column
     changeset: ChangeSetWithColumnType,
-    column_info: HashSet<ColumnInfo>
+    column_info: HashSet<ColumnInfo>,
+    table_name: TableName
 }
 
 struct TableHolder {
@@ -170,11 +177,12 @@ struct TableHolder {
 
 impl Table {
     fn new(parsed_line: &ParsedLine) -> Table {
-        if let ParsedLine::ChangedData{..} = parsed_line {
+        if let ParsedLine::ChangedData{table_name,..} = parsed_line {
             let id_column = parsed_line.find_id_column().column_value_unwrap();
             let changeset = ChangeSetWithColumnType::new(id_column);
             let column_info = parsed_line.column_info_set();
-            Table { changeset, column_info }
+            let table_name = table_name.clone();
+            Table { changeset, column_info, table_name }
         } else {
             panic!("Non changed data used to try and initialize a table {:?}", parsed_line)
         }
@@ -182,6 +190,11 @@ impl Table {
 
     // returns a bool if the table is "full" and ready to be written and uploaded
     fn add_change(&mut self, parsed_line: ParsedLine) -> bool {
+
+        self.time_to_swap_tables()
+    }
+
+    fn add_change_to_changeset(&mut self, parsed_line: ParsedLine) {
         if let ParsedLine::ChangedData{..} = parsed_line {
             let parsed_line_id = parsed_line.find_id_column();
             match parsed_line_id.column_value_unwrap() {
@@ -202,14 +215,36 @@ impl Table {
                 }
                 _ => panic!("foobar")
             };
-            self.time_to_swap_tables()
         } else {
             panic!("foobarbaz")
         }
     }
 
+    fn has_ddl_changes(&self, parsed_line: &ParsedLine) -> bool {
+        parsed_line.column_info_set() != self.column_info
+    }
+
+    fn ddl_changes(&self, parsed_line: &ParsedLine) -> Vec<DdlChange> {
+        let new_column_info = &parsed_line.column_info_set();
+        let old_column_info = &self.column_info;
+        if !self.has_ddl_changes(parsed_line) {
+            vec![]
+        } else if
+            new_column_info.iter().map(|info| info.name.clone()).collect_vec() ==
+            old_column_info.iter().map(|info| info.name.clone()).collect_vec()
+        {
+            panic!("changes to column type from: {:?} to {:?}", parsed_line.column_info_set(),&self.column_info)
+        } else {
+            let mut added_ddl = new_column_info.difference(old_column_info).map(|info| DdlChange::AddColumn(info.clone())).collect::<Vec<_>>();
+            let removed_ddl = old_column_info.difference(new_column_info).map(|info| DdlChange::RemoveColumn(info.clone())).collect::<Vec<_>>();
+            added_ddl.extend(removed_ddl);
+            added_ddl
+        }
+    }
+
     // TODO make this configurable, just for testing.
     // NOTE: important config hack
+    // NOTE: important that this cannot trigger when we only have one line (so we don't process a ddl change, and then swap tables after)
     fn time_to_swap_tables(&self) -> bool{
         return self.changeset.len() >= CHANGES_PER_TABLE
     }
@@ -227,15 +262,20 @@ impl TableHolder {
             // these are cheap since this is an interned string
             let cloned = table_name.clone();
             let other_cloned = table_name.clone();
-            let should_swap_table = self.tables.entry(cloned)
-                .or_insert_with(|| Table::new(&parsed_line))
-                .add_change(parsed_line);
-            if should_swap_table {
-                // unwrap should be safe here, we're single threaded and we just inserted here.
-                let removed_table = self.tables.remove(&other_cloned).unwrap();
-                Some((other_cloned, removed_table))
-            } else { None }
+            let table = self.tables.entry(cloned)
+                .or_insert_with(|| Table::new(&parsed_line));
+            if table.has_ddl_changes(&parsed_line) {
+                // time_to_swap_tables is never true immediately after we swap tables here
 
+                None
+            } else {
+                let should_swap_table = table.add_change(parsed_line);
+                if should_swap_table {
+                    // unwrap should be safe here, we're single threaded and we just inserted here.
+                    let removed_table = self.tables.remove(&other_cloned).unwrap();
+                    Some((other_cloned, removed_table))
+                } else { None }
+            }
         } else {
             None
         }
