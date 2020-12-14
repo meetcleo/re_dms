@@ -1,10 +1,8 @@
-use crate::parser::{ ParsedLine, Column, ColumnValue, ChangeKind };
+use crate::parser::{ ParsedLine, Column, ColumnValue, ChangeKind, TableName };
 use std::collections::{ HashMap, BTreeMap, HashSet };
-use internment::ArcIntern;
 
 use either::Either;
 use crate::file_writer;
-
 
 #[allow(unused_imports)]
 use log::{debug, error, log_enabled, info, Level};
@@ -15,6 +13,9 @@ use log::{debug, error, log_enabled, info, Level};
 pub struct ChangeProcessing {
     table_holder: TableHolder
 }
+
+// CONFIG HACK:
+const CHANGES_PER_TABLE: usize = 100000;
 
 #[derive(Debug)]
 struct ChangeSet {
@@ -71,13 +72,16 @@ impl ChangeSet {
                             Some(column_info.column_name())
                         } else { None }
                     ).collect();
+
                     let existing_column_names: HashSet<&str> = old_columns.iter().filter_map(
                         |x| if let Column::ChangedColumn{column_info,..} = x {
                             Some(column_info.column_name())
                         } else { None }
                     ).collect();
+
                     if updated_column_names == existing_column_names {
                         // use the new columns that are updated
+                        // TODO: bug, merge columns
                         *old_columns = new_columns;
                     } else {
                         // recreate the enum
@@ -133,16 +137,34 @@ impl ChangeSetWithColumnType {
             }
         }
     }
+
+    fn clear(&mut self) {
+        match self {
+            ChangeSetWithColumnType::IntColumnType(btree) => {
+                btree.clear();
+            }
+            ChangeSetWithColumnType::UuidColumnType(btree) => {
+                btree.clear();
+            }
+        }
+    }
+}
+
+// this holds the existing number of files that have been created for a table
+struct FileCounter {
+    update_files_count: i32,
+    insert_files_count: i32,
+    delete_files_count: i32
 }
 
 #[derive(Debug)]
 struct Table {
     // we want to have a changeset, but need to match on the enum type for the pkey of the column
-    changeset: ChangeSetWithColumnType
+    changeset: ChangeSetWithColumnType,
 }
 
 struct TableHolder {
-    tables: HashMap<ArcIntern<String>, Table>
+    tables: HashMap<TableName, Table>
 }
 
 impl Table {
@@ -155,10 +177,10 @@ impl Table {
             panic!("Non changed data used to try and initialize a table {:?}", parsed_line)
         }
     }
-    fn add_change(&mut self, parsed_line: ParsedLine) {
+
+    // returns a bool if the table is "full" and ready to be written and uploaded
+    fn add_change(&mut self, parsed_line: ParsedLine) -> bool {
         if let ParsedLine::ChangedData{..} = parsed_line {
-            // i'd rather not be allocating a string here for every search, but
-            // the borrow checker is being a PITA for the first time, so this'll have to do.
             let parsed_line_id = parsed_line.find_id_column();
             match parsed_line_id.column_value_unwrap() {
                 ColumnValue::Text(string) => {
@@ -178,10 +200,18 @@ impl Table {
                 }
                 _ => panic!("foobar")
             };
+            self.time_to_swap_tables()
         } else {
             panic!("foobarbaz")
         }
     }
+
+    // TODO make this configurable, just for testing.
+    // NOTE: important config hack
+    fn time_to_swap_tables(&self) -> bool{
+        return self.changeset.len() >= CHANGES_PER_TABLE
+    }
+
     fn get_stats(&self) -> (usize, usize) {
         let number_of_ids = self.changeset.len();
         let number_of_changes = self.changeset.values().fold(0, |acc, value| acc + value.changes.len());
@@ -190,14 +220,22 @@ impl Table {
 }
 
 impl TableHolder {
-    fn add_change(&mut self, parsed_line: ParsedLine) {
+    fn add_change(&mut self, parsed_line: ParsedLine) -> Option<(TableName, Table)> {
         if let ParsedLine::ChangedData{ref table_name, ..} = parsed_line {
-            // i'd rather not be allocating a string here for every search, but
-            // the borrow checker is being a PITA for the first time, so this'll have to do.
+            // these are cheap since this is an interned string
             let cloned = table_name.clone();
-            self.tables.entry(cloned)
+            let other_cloned = table_name.clone();
+            let should_swap_table = self.tables.entry(cloned)
                 .or_insert_with(|| Table::new(&parsed_line))
-                .add_change(parsed_line)
+                .add_change(parsed_line);
+            if should_swap_table {
+                // unwrap should be safe here, we're single threaded and we just inserted here.
+                let removed_table = self.tables.remove(&other_cloned).unwrap();
+                Some((other_cloned, removed_table))
+            } else { None }
+
+        } else {
+            None
         }
     }
 }
@@ -207,11 +245,16 @@ impl ChangeProcessing {
         let hash_map = HashMap::new();
         ChangeProcessing { table_holder: TableHolder { tables: hash_map } }
     }
-    pub fn add_change(&mut self, parsed_line: ParsedLine) {
+    pub fn add_change(&mut self, parsed_line: ParsedLine) -> Option<file_writer::FileWriter> {
         match parsed_line {
-            ParsedLine::Begin(_) | ParsedLine::Commit(_) | ParsedLine::TruncateTable => {}, // TODO
-            ParsedLine::ContinueParse => {}, // need to be exhaustive
-            ParsedLine::ChangedData{ .. } => { self.table_holder.add_change(parsed_line)}
+            ParsedLine::Begin(_) | ParsedLine::Commit(_) | ParsedLine::TruncateTable => { None }, // TODO
+            ParsedLine::ContinueParse => { None }, // need to be exhaustive
+            ParsedLine::ChangedData{ .. } => {
+                self.table_holder.add_change(parsed_line).map(
+                    |(table_name, returned_table)| self.write_files_for_table(table_name, returned_table
+                    )
+                )
+            }
         }
     }
     pub fn print_stats(&self) {
@@ -222,10 +265,27 @@ impl ChangeProcessing {
             }
         );
     }
-    pub fn write_files(&self) -> Vec<file_writer::FileWriter> {
-        self.table_holder.tables.iter().map(
+
+    pub fn write_files_for_table(&self, table_name: TableName, table: Table) -> file_writer::FileWriter {
+        let mut file_writer = file_writer::FileWriter::new(table_name.clone());
+        table.changeset.values().for_each(
+            |record| {
+                record.changes.iter().for_each(
+                    |change| {
+                        file_writer.add_change(change);
+                    })
+            }
+
+        );
+        file_writer
+    }
+
+    // this drains every table from the changeset,
+    // writes the files, and returns them
+    pub fn drain_final_changes(&mut self) -> Vec<file_writer::FileWriter> {
+        let resulting_vec = self.table_holder.tables.drain().map(
             |(table_name, table)| {
-            let mut file_writer = file_writer::FileWriter::new(table_name);
+            let mut file_writer = file_writer::FileWriter::new(table_name.clone());
                 table.changeset.values().for_each(
                     |record| {
                         record.changes.iter().for_each(
@@ -233,10 +293,11 @@ impl ChangeProcessing {
                                 file_writer.add_change(change);
                             })
                     }
-
                 );
                 file_writer
             }
-        ).collect()
+        ).collect();
+        println!("DRAINED FINAL CHANGES!!!!! {}", self.table_holder.tables.len());
+        resulting_vec
     }
 }

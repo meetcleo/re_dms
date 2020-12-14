@@ -7,27 +7,35 @@ use std::path::Path;
 
 // use std::io::prelude::*;
 // use std::fs;
+use tokio::sync::mpsc;
 
 mod parser;
 mod change_processing;
 mod file_writer;
 mod file_uploader;
 mod database_writer;
+mod file_uploader_threads;
+mod database_writer_threads;
 
-use std::collections::{ HashSet };
+use file_uploader_threads::DEFAULT_CHANNEL_SIZE;
+
+// use std::collections::{ HashSet };
 
 // TEMP
 
 #[tokio::main]
 async fn main() {
     env_logger::init();
-    // File hosts must exist in current path before this produces output
-    // let s3_file = file_uploader::CleoS3File {kind: parser::ChangeKind::Insert, remote_filename: "mike-test/output/public.users_inserts.csv".to_owned(), table_name: "public.users".to_owned() };
-    // let ref database_writer = database_writer::DatabaseWriter::new();
-    // database_writer.test().await;
-    // database_writer.import_table(&s3_file).await;
     let mut parser = parser::Parser::new(true);
     let mut collector = change_processing::ChangeProcessing::new();
+    // initialize our channels
+    let (mut file_transmitter, file_receiver) = mpsc::channel::<file_writer::FileWriter>(DEFAULT_CHANNEL_SIZE);
+    let (database_transmitter, database_receiver) = mpsc::channel::<file_uploader::CleoS3File>(DEFAULT_CHANNEL_SIZE);
+    // initialize our file uploader stream
+    let file_uploader_threads_join_handle = file_uploader_threads::FileUploaderThreads::spawn_file_uploader_stream(file_receiver, database_transmitter);
+    // initialize our database importer stream
+    let database_writer_threads_join_handle = database_writer_threads::DatabaseWriterThreads::spawn_database_writer_stream(database_receiver);
+
     if let Ok(lines) = read_lines("./data/test_decoding.txt") {
         // Consumes the iterator, returns an (Optional) String
         for line in lines
@@ -36,42 +44,31 @@ async fn main() {
                 let parsed_line = parser.parse(&ip);
                 match parsed_line {
                     parser::ParsedLine::ContinueParse => {}, // Intentionally left blank, continue parsing
-                    _ => { collector.add_change(parsed_line); }
+                    _ => {
+                        if let Some(file) = collector.add_change(parsed_line) {
+                            // TODO error handling
+                            file_transmitter.send(file).await;
+                        }
+                    }
                 }
             }
         }
     }
-    // collector.print_stats();
-    let mut files = collector.write_files();
-    let file_uploader = &file_uploader::FileUploader::new();
+    collector.print_stats();
 
-    // TODO: we need to define a proper threading model,
-    // currently we just do things in batches
-    let results: Vec<_> = files.iter_mut().map(
-        |file| async move {
-            file.flush_all();
-            file_uploader.upload_table_to_s3(&file).await
-        }
-    ).collect();
+    let files: Vec<_> = collector.drain_final_changes();
+    for file in files {
+        file_transmitter.send(file).await;
+    }
+    collector.print_stats();
 
-    // TODO: select on these futures for some real good async sauce
-    let s3_files: Vec<_> = futures::future::join_all(results).await.into_iter().flatten().collect();
+    // make sure we close the channel to let things propogate
+    drop(file_transmitter);
+    // make sure we wait for our uploads to finish
+    file_uploader_threads_join_handle.await;
 
-    // let mut type_set: HashSet<String> = HashSet::new();
-    // for s3_file in s3_files {
-    //     for column in s3_file.columns {
-    //         type_set.insert(column.column_type().to_string());
-    //     }
-    // }
-    // println!("{:?}", type_set);
+    database_writer_threads_join_handle.await;
 
-    let ref database_writer = database_writer::DatabaseWriter::new();
-    let table_imports = s3_files.iter().map(
-        |s3_file| async move {
-            database_writer.import_table(s3_file).await;
-        }
-    );
-    futures::future::join_all(table_imports).await;
 }
 
 // The output is wrapped in a Result to allow matching on errors
