@@ -2,6 +2,7 @@
 use log::{debug, error, log_enabled, info, Level};
 use std::fmt;
 
+use std::collections::{  HashSet };
 use internment::ArcIntern;
 
 pub type TableName = ArcIntern<String>;
@@ -48,15 +49,15 @@ pub enum Column {
 }
 
 // happy to clone it, it's only holds two pointers
-#[derive(Debug,Clone)]
+#[derive(Debug,Clone,Hash,Eq,PartialEq)]
 pub struct ColumnInfo {
     name: ColumnName,
     column_type: ColumnType
 }
 
 impl ColumnInfo {
-    pub fn column_name(&self) -> &str {self.name.as_ref()}
-    pub fn column_type(&self) -> &str {self.column_type.as_ref()}
+    pub fn column_name(&self) -> &str { self.name.as_ref() }
+    pub fn column_type(&self) -> &str { self.column_type.as_ref() }
     pub fn new<T: ToString>(name: T, column_type: T) -> ColumnInfo { ColumnInfo {name: ColumnName::new(name.to_string()), column_type: ColumnType::new(column_type.to_string())}}
     pub fn is_id_column(&self) -> bool {self.name.as_ref() == "id"}
 }
@@ -141,6 +142,16 @@ impl ParsedLine {
             ParsedLine::ChangedData { columns,.. } => {
                 // unwrap because this is the id column which _must_ be here
                 columns.iter().find(|&x| x.is_id_column()).unwrap()
+            },
+            _ => panic!("tried to find id column of non changed_data")
+        }
+    }
+
+    pub fn column_info_set(&self) -> HashSet<ColumnInfo> {
+        match self {
+            ParsedLine::ChangedData { columns,.. } => {
+                // unwrap because this is the id column which _must_ be here
+                columns.iter().map(|x| x.column_info().clone()).collect()
             },
             _ => panic!("tried to find id column of non changed_data")
         }
