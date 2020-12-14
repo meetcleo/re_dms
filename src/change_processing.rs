@@ -15,6 +15,7 @@ pub struct ChangeProcessing {
     table_holder: TableHolder
 }
 
+#[derive(Debug,Eq,PartialEq,Hash,Clone)]
 pub enum DdlChange {
     AddColumn(ColumnInfo),
     RemoveColumn(ColumnInfo)
@@ -332,6 +333,13 @@ impl ChangeProcessing {
             }
         }
     }
+    pub fn get_stats(&self) -> HashMap<&TableName, usize> {
+        self.table_holder.tables.iter().map(
+            |(table_name,table)| {
+                (table_name, table.get_stats().0)
+            }
+        ).collect()
+    }
     pub fn print_stats(&self) {
         self.table_holder.tables.iter().for_each(
             |(table_name,table)| {
@@ -382,6 +390,7 @@ impl ChangeProcessing {
 mod tests {
     use super::*;
     use crate::parser::*;
+    use maplit::{hashmap, hashset};
 
     // this is basically an integration test, but that's fine
     #[test]
@@ -397,24 +406,144 @@ mod tests {
             Column::ChangedColumn {column_info: new_column_info.clone(), value: Some(ColumnValue::Integer(1))} // new column
         ];
         let third_changed_columns = vec![
-            Column::ChangedColumn {column_info: id_column_info, value: Some(ColumnValue::Integer(1))}, // id column
-            Column::ChangedColumn {column_info: new_column_info, value: Some(ColumnValue::Integer(1))} // new column
+            Column::ChangedColumn {column_info: id_column_info, value: Some(ColumnValue::Integer(2))}, // id column
+            Column::ChangedColumn {column_info: new_column_info.clone(), value: Some(ColumnValue::Integer(1))} // new column
         ];
         let first_change = ParsedLine::ChangedData{kind: ChangeKind::Insert, table_name: table_name.clone(), columns: first_changed_columns};
         let second_change = ParsedLine::ChangedData{kind: ChangeKind::Update, table_name: table_name.clone(), columns: second_changed_columns};
         // check we have the new schema and can keep adding changes
-        let third_change = ParsedLine::ChangedData{kind: ChangeKind::Update, table_name: table_name, columns: third_changed_columns};
+        let third_change = ParsedLine::ChangedData{kind: ChangeKind::Update, table_name: table_name.clone(), columns: third_changed_columns};
         let mut change_processing = ChangeProcessing::new();
+        let blank_stats_hash = hashmap!();
+        assert_eq!(change_processing.get_stats(), blank_stats_hash);
         let first_result = change_processing.add_change(first_change);
+        let single_entry_stats_hash = hashmap!(&table_name => 1);
+        assert_eq!(change_processing.get_stats(), single_entry_stats_hash);
         let second_result = change_processing.add_change(second_change);
+        // we popped a record off, and then added another record, so should still have 1 in there
+        assert_eq!(change_processing.get_stats(), single_entry_stats_hash);
         let third_result = change_processing.add_change(third_change);
+        let double_entry_stats_hash = hashmap!(&table_name => 2);
+        assert_eq!(change_processing.get_stats(), double_entry_stats_hash);
         assert!(first_result.is_none());
         assert!(second_result.is_some());
         assert!(third_result.is_none());
+        // now lets assert stuff our second result is as we expect it to be
+        if let Some((file_writer::FileWriter {..}, ddl_changes)) = second_result {
+            assert!(ddl_changes.is_some());
+            if let Some(ddl_vec) = ddl_changes {
+                assert_eq!(ddl_vec.len(), 1);
+                assert_eq!(ddl_vec.first(), Some(&DdlChange::AddColumn(new_column_info.clone())))
+            }
+        } else {
+            panic!("second_result does not contain a table");
+        }
     }
 
     #[test]
     fn ddl_change_remove_column() {
+        let table_name = TableName::new("foobar".to_string());
+        let id_column_info = ColumnInfo::new("id", "bigint");
+        let removed_column_info = ColumnInfo::new("foobar", "bigint");
+        let first_changed_columns = vec![
+            Column::ChangedColumn {column_info: id_column_info.clone(), value: Some(ColumnValue::Integer(1))},
+            Column::ChangedColumn {column_info: removed_column_info.clone(), value: Some(ColumnValue::Integer(1))} // column to be removed
+        ];
+        let second_changed_columns = vec![
+            Column::ChangedColumn {column_info: id_column_info.clone(), value: Some(ColumnValue::Integer(1))}, // id column
+        ];
+        let third_changed_columns = vec![
+            Column::ChangedColumn {column_info: id_column_info, value: Some(ColumnValue::Integer(2))}, // id column
+        ];
+        let first_change = ParsedLine::ChangedData{kind: ChangeKind::Insert, table_name: table_name.clone(), columns: first_changed_columns};
+        let second_change = ParsedLine::ChangedData{kind: ChangeKind::Update, table_name: table_name.clone(), columns: second_changed_columns};
+        // check we have the new schema and can keep adding changes
+        let third_change = ParsedLine::ChangedData{kind: ChangeKind::Update, table_name: table_name.clone(), columns: third_changed_columns};
+        let mut change_processing = ChangeProcessing::new();
+        let blank_stats_hash = hashmap!();
+        assert_eq!(change_processing.get_stats(), blank_stats_hash);
+        let first_result = change_processing.add_change(first_change);
+        let single_entry_stats_hash = hashmap!(&table_name => 1);
+        assert_eq!(change_processing.get_stats(), single_entry_stats_hash);
+        let second_result = change_processing.add_change(second_change);
+        // we popped a record off, and then added another record, so should still have 1 in there
+        assert_eq!(change_processing.get_stats(), single_entry_stats_hash);
+        let third_result = change_processing.add_change(third_change);
+        let double_entry_stats_hash = hashmap!(&table_name => 2);
+        assert_eq!(change_processing.get_stats(), double_entry_stats_hash);
+        assert!(first_result.is_none());
+        assert!(second_result.is_some());
+        assert!(third_result.is_none());
+        // now lets assert stuff our second result is as we expect it to be
+        if let Some((file_writer::FileWriter {..}, ddl_changes)) = second_result {
+            assert!(ddl_changes.is_some());
+            if let Some(ddl_vec) = ddl_changes {
+                assert_eq!(ddl_vec.len(), 1);
+                assert_eq!(ddl_vec.first(), Some(&DdlChange::RemoveColumn(removed_column_info.clone())))
+            }
+        } else {
+            panic!("second_result does not contain a table");
+        }
+    }
 
+    #[test]
+    fn ddl_changes_add_and_remove_multiple_columns() {
+        let table_name = TableName::new("foobar".to_string());
+        let id_column_info = ColumnInfo::new("id", "bigint");
+        let new_column_info = ColumnInfo::new("foobar", "bigint");
+        let new_column_2_info = ColumnInfo::new("baz", "bigint");
+        let removed_column_info = ColumnInfo::new("quux", "bigint");
+        let removed_column_2_info = ColumnInfo::new("aardvark", "bigint");
+        let first_changed_columns = vec![
+            Column::ChangedColumn {column_info: id_column_info.clone(), value: Some(ColumnValue::Integer(1))},
+            Column::ChangedColumn {column_info: removed_column_info.clone(), value: Some(ColumnValue::Integer(1))}, // removed_column
+            Column::ChangedColumn {column_info: removed_column_2_info.clone(), value: Some(ColumnValue::Integer(1))} // removed_column_2
+        ];
+        let second_changed_columns = vec![
+            Column::ChangedColumn {column_info: id_column_info.clone(), value: Some(ColumnValue::Integer(1))}, // id column
+            Column::ChangedColumn {column_info: new_column_info.clone(), value: Some(ColumnValue::Integer(1))}, // new column
+            Column::ChangedColumn {column_info: new_column_2_info.clone(), value: Some(ColumnValue::Integer(1))} // new column
+        ];
+        let third_changed_columns = vec![
+            Column::ChangedColumn {column_info: id_column_info, value: Some(ColumnValue::Integer(2))}, // id column
+            Column::ChangedColumn {column_info: new_column_info.clone(), value: Some(ColumnValue::Integer(1))}, // new column
+            Column::ChangedColumn {column_info: new_column_2_info.clone(), value: Some(ColumnValue::Integer(1))} // new column
+        ];
+        let first_change = ParsedLine::ChangedData{kind: ChangeKind::Insert, table_name: table_name.clone(), columns: first_changed_columns};
+        let second_change = ParsedLine::ChangedData{kind: ChangeKind::Update, table_name: table_name.clone(), columns: second_changed_columns};
+        // check we have the new schema and can keep adding changes
+        let third_change = ParsedLine::ChangedData{kind: ChangeKind::Update, table_name: table_name.clone(), columns: third_changed_columns};
+        let mut change_processing = ChangeProcessing::new();
+        let blank_stats_hash = hashmap!();
+        assert_eq!(change_processing.get_stats(), blank_stats_hash);
+        let first_result = change_processing.add_change(first_change);
+        let single_entry_stats_hash = hashmap!(&table_name => 1);
+        assert_eq!(change_processing.get_stats(), single_entry_stats_hash);
+        let second_result = change_processing.add_change(second_change);
+        // we popped a record off, and then added another record, so should still have 1 in there
+        assert_eq!(change_processing.get_stats(), single_entry_stats_hash);
+        let third_result = change_processing.add_change(third_change);
+        let double_entry_stats_hash = hashmap!(&table_name => 2);
+        assert_eq!(change_processing.get_stats(), double_entry_stats_hash);
+        assert!(first_result.is_none());
+        assert!(second_result.is_some());
+        assert!(third_result.is_none());
+        // now lets assert stuff our second result is as we expect it to be
+        if let Some((file_writer::FileWriter {..}, ddl_changes)) = second_result {
+            assert!(ddl_changes.is_some());
+            if let Some(ddl_vec) = ddl_changes {
+                assert_eq!(ddl_vec.len(), 4);
+                let returned_ddl_set: HashSet<DdlChange> = ddl_vec.iter().map(|x| x.clone()).collect();
+                let expected_ddl_set = hashset! {
+                    DdlChange::AddColumn(new_column_info.clone()),
+                    DdlChange::AddColumn(new_column_2_info.clone()),
+                    DdlChange::RemoveColumn(removed_column_info.clone()),
+                    DdlChange::RemoveColumn(removed_column_2_info.clone()),
+                };
+                assert_eq!(returned_ddl_set, expected_ddl_set);
+            }
+        } else {
+            panic!("second_result does not contain a table");
+        }
     }
 }
