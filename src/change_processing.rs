@@ -189,9 +189,21 @@ impl Table {
     }
 
     // returns a bool if the table is "full" and ready to be written and uploaded
-    fn add_change(&mut self, parsed_line: ParsedLine) -> bool {
+    fn add_change(&mut self, parsed_line: ParsedLine) -> Option<Table> {
 
-        self.time_to_swap_tables()
+        if self.has_ddl_changes(&parsed_line) {
+            // time_to_swap_tables is never true immediately after we swap tables here
+
+            None
+        } else {
+            self.add_change_to_changeset(parsed_line);
+            if self.time_to_swap_tables() {
+                // unwrap should be safe here, we're single threaded and we just inserted here.
+                let removed_table = unimplemented!();
+                // let removed_table = self.tables.remove(&other_cloned).unwrap();
+                Some(removed_table)
+            } else { None }
+        }
     }
 
     fn add_change_to_changeset(&mut self, parsed_line: ParsedLine) {
@@ -257,25 +269,14 @@ impl Table {
 }
 
 impl TableHolder {
-    fn add_change(&mut self, parsed_line: ParsedLine) -> Option<(TableName, Table)> {
+    fn add_change(&mut self, parsed_line: ParsedLine) -> Option<Table> {
         if let ParsedLine::ChangedData{ref table_name, ..} = parsed_line {
             // these are cheap since this is an interned string
             let cloned = table_name.clone();
             let other_cloned = table_name.clone();
-            let table = self.tables.entry(cloned)
-                .or_insert_with(|| Table::new(&parsed_line));
-            if table.has_ddl_changes(&parsed_line) {
-                // time_to_swap_tables is never true immediately after we swap tables here
-
-                None
-            } else {
-                let should_swap_table = table.add_change(parsed_line);
-                if should_swap_table {
-                    // unwrap should be safe here, we're single threaded and we just inserted here.
-                    let removed_table = self.tables.remove(&other_cloned).unwrap();
-                    Some((other_cloned, removed_table))
-                } else { None }
-            }
+            self.tables.entry(cloned)
+                .or_insert_with(|| Table::new(&parsed_line))
+                .add_change(parsed_line)
         } else {
             None
         }
@@ -293,7 +294,7 @@ impl ChangeProcessing {
             ParsedLine::ContinueParse => { None }, // need to be exhaustive
             ParsedLine::ChangedData{ .. } => {
                 self.table_holder.add_change(parsed_line).map(
-                    |(table_name, returned_table)| self.write_files_for_table(table_name, returned_table)
+                    |returned_table| self.write_files_for_table(returned_table)
                 )
             }
         }
@@ -307,7 +308,8 @@ impl ChangeProcessing {
         );
     }
 
-    fn write_files_for_table(&self, table_name: TableName, table: Table) -> file_writer::FileWriter {
+    fn write_files_for_table(&self, table: Table) -> file_writer::FileWriter {
+        let table_name = table.table_name;
         let mut file_writer = file_writer::FileWriter::new(table_name.clone());
         table.changeset.values().for_each(
             |record| {
