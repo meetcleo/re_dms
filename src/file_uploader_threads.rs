@@ -79,9 +79,9 @@ impl FileUploaderThreads {
                 if let Some(ref mut inner_sender) = sender.sender {
                     inner_sender.send(file_writer).await;
                 }
-                // sender.sender.as_ref().map(|inner_sender| async move {
-                //     inner_sender
-                // });
+                sender.sender.as_ref().map(|inner_sender| async move {
+                    inner_sender
+                });
             }
             else {
                 println!("channel hung up main");
@@ -115,15 +115,22 @@ impl FileUploaderThreads {
         loop {
             // need to do things this way rather than a match for the borrow checker
             let received = receiver.recv().await;
-            if let Some(mut file_writer) = received {
-                let table_name = file_writer.table_name();
+            if let Some(mut change) = received {
+                let table_name = change.table_name();
                 last_table_name = Some(table_name);
-                // file_writer.flush_all();
-                // let s3_files = uploader.upload_table_to_s3(&file_writer).await;
-                // for s3_file in s3_files {
-                //     // TODO handle errors
-                //     result_sender.send(s3_file).await;
-                // }
+                match change {
+                    change_processing::ChangeProcessingResult::TableChanges(mut file_writer) => {
+                        file_writer.flush_all();
+                        let s3_files = uploader.upload_table_to_s3(&file_writer).await;
+                        for s3_file in s3_files {
+                            // TODO handle errors
+                            result_sender.send(s3_file).await;
+                        }
+                    },
+                    change_processing::ChangeProcessingResult::DdlChange(ddl_change) => {
+                        // result_sender.send(ddl_change).await;
+                    }
+                }
             } else {
                 // println!("channel hung up: {:?}", last_table_name);
                 drop(result_sender);
