@@ -47,11 +47,9 @@ async fn main() {
                     _ => {
                         if let Some(change_vec) = collector.add_change(parsed_line) {
                             for change in change_vec {
+                                // TODO error handling
                                 file_transmitter.send(change).await;
                             }
-                            // if let Some(change_processing::ChangeProcessingResult::TableChanges(file)) = change_vec.pop() {
-                            //     // TODO error handling
-                            // }
                         }
                     }
                 }
@@ -60,11 +58,11 @@ async fn main() {
     }
     collector.print_stats();
 
-    let files: Vec<_> = collector.drain_final_changes();
-    // TODO
-    // for file in files {
-    //     file_transmitter.send(file).await;
-    // }
+    let final_changes: Vec<_> = collector.drain_final_changes();
+    for change in final_changes {
+        // TODO error handling
+        file_transmitter.send(change).await;
+    }
     collector.print_stats();
 
     // make sure we close the channel to let things propogate
