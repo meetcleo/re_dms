@@ -80,9 +80,7 @@ impl DatabaseWriterThreads {
                         uploader.import_table(&cleo_s3_file).await;
                     },
                     UploaderStageResult::DdlChange(ddl_change) => {
-                        panic!("There shouldn't be any ddl changes {:?}", ddl_change);
-                        // TODO
-                        // uploader.handle_ddl(&ddl_change).await;
+                        uploader.handle_ddl(&ddl_change).await;
                     }
                 }
             } else {

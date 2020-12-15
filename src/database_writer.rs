@@ -10,8 +10,8 @@ use std::env;
 use log::{debug, error, log_enabled, info, Level};
 
 use crate::file_uploader::CleoS3File;
-use crate::parser::{ChangeKind, ColumnInfo};
-
+use crate::parser::{ChangeKind, ColumnInfo, TableName};
+use crate::change_processing::DdlChange;
 
 pub struct DatabaseWriter {
     connection_pool: Pool
@@ -45,6 +45,39 @@ impl DatabaseWriter {
         let builder = SslConnector::builder(SslMethod::tls()).expect("fuck");
         let connector = MakeTlsConnector::new(builder.build());
         cfg.pg.create_pool(connector).unwrap()
+    }
+
+    pub async fn handle_ddl(&self, ddl_change: &DdlChange) {
+        let alter_table_statement = match ddl_change {
+            DdlChange::AddColumn(column_info, table_name) => { self.add_column_statement(column_info, table_name)},
+            DdlChange::RemoveColumn(column_info, table_name) => { self.remove_column_statement(column_info, table_name)},
+        };
+        info!("alter table statement: {}", alter_table_statement.as_str());
+        let client = self.connection_pool.get().await.unwrap();
+
+        let result = client.execute(alter_table_statement.as_str(), &[]).await;
+
+        info!("alter table finished: {}", alter_table_statement.as_str());
+    }
+
+    fn add_column_statement(&self, column_info: &ColumnInfo, table_name: &TableName) -> String {
+        let (schema_name, just_table_name) = table_name.split_once('.').unwrap();
+        let column_name_and_type = self.column_and_type_for_column(column_info);
+        format!("alter table \"{schema_name}\".\"{just_table_name}\" add column {column_name_and_type}",
+                schema_name=&schema_name,
+                just_table_name=&just_table_name,
+                column_name_and_type=&column_name_and_type
+        )
+    }
+
+    fn remove_column_statement(&self, column_info: &ColumnInfo, table_name: &TableName) -> String {
+        let (schema_name, just_table_name) = table_name.split_once('.').unwrap();
+        // TODO: foreign keys
+        format!("alter table \"{schema_name}\".\"{just_table_name}\" drop column \"{column_name}\"",
+                schema_name=&schema_name,
+                just_table_name=&just_table_name,
+                column_name=&column_info.name
+        )
     }
 
     pub async fn import_table(&self, s3_file: &CleoS3File) {
