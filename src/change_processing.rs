@@ -17,8 +17,17 @@ pub struct ChangeProcessing {
 
 #[derive(Debug,Eq,PartialEq,Hash,Clone)]
 pub enum DdlChange {
-    AddColumn(ColumnInfo),
-    RemoveColumn(ColumnInfo)
+    AddColumn(ColumnInfo, TableName),
+    RemoveColumn(ColumnInfo, TableName)
+}
+
+impl DdlChange {
+    pub fn table_name(&self) -> TableName {
+        match self {
+            Self::AddColumn(.., table_name) => { table_name.clone() },
+            Self::RemoveColumn(.., table_name) => { table_name.clone() }
+        }
+    }
 }
 
 // CONFIG HACK:
@@ -35,6 +44,16 @@ struct ChangeSet {
 pub enum ChangeProcessingResult {
     TableChanges(file_writer::FileWriter),
     DdlChange(DdlChange)
+}
+
+impl ChangeProcessingResult {
+    // give an owned one, it's just copying a pointer cheap
+    pub fn table_name(&self) -> TableName {
+        match self {
+            Self::TableChanges(file_writer) => { file_writer.table_name.clone() },
+            Self::DdlChange(ddl_change) => { ddl_change.table_name() }
+        }
+    }
 }
 
 impl ChangeSet {
@@ -290,8 +309,8 @@ impl Table {
         {
             panic!("changes to column type from: {:?} to {:?}", parsed_line.column_info_set(),&self.column_info)
         } else {
-            let mut added_ddl = new_column_info.difference(old_column_info).map(|info| DdlChange::AddColumn(info.clone())).collect::<Vec<_>>();
-            let removed_ddl = old_column_info.difference(new_column_info).map(|info| DdlChange::RemoveColumn(info.clone())).collect::<Vec<_>>();
+            let mut added_ddl = new_column_info.difference(old_column_info).map(|info| DdlChange::AddColumn(info.clone(), self.table_name.clone())).collect::<Vec<_>>();
+            let removed_ddl = old_column_info.difference(new_column_info).map(|info| DdlChange::RemoveColumn(info.clone(), self.table_name.clone())).collect::<Vec<_>>();
             added_ddl.extend(removed_ddl);
             added_ddl
         }
@@ -454,7 +473,7 @@ mod tests {
             let table_change = change_vec.remove(0);
             assert_matches!(table_change, ChangeProcessingResult::TableChanges(..));
             let ddl_change = change_vec.remove(0);
-            if let ChangeProcessingResult::DdlChange(DdlChange::AddColumn(column_info)) = ddl_change {
+            if let ChangeProcessingResult::DdlChange(DdlChange::AddColumn(column_info, TableName)) = ddl_change {
                 assert_eq!(column_info, new_column_info);
             } else {
                 panic!("doesn't match add_column");
@@ -507,7 +526,7 @@ mod tests {
             assert_matches!(table_change, ChangeProcessingResult::TableChanges(..));
             let ddl_change = change_vec.remove(0);
 
-            if let ChangeProcessingResult::DdlChange(DdlChange::RemoveColumn(column_info)) = ddl_change {
+            if let ChangeProcessingResult::DdlChange(DdlChange::RemoveColumn(column_info,..)) = ddl_change {
                 assert_eq!(column_info, removed_column_info);
             } else {
                 panic!("doesn't match remove_column");
@@ -571,10 +590,10 @@ mod tests {
                 else { panic!("found element that's not ddl change");}
             }).collect();
             let expected_ddl_set = hashset! {
-                DdlChange::AddColumn(new_column_info.clone()),
-                DdlChange::AddColumn(new_column_2_info.clone()),
-                DdlChange::RemoveColumn(removed_column_info.clone()),
-                DdlChange::RemoveColumn(removed_column_2_info.clone()),
+                DdlChange::AddColumn(new_column_info.clone(), table_name.clone()),
+                DdlChange::AddColumn(new_column_2_info.clone(), table_name.clone()),
+                DdlChange::RemoveColumn(removed_column_info.clone(), table_name.clone()),
+                DdlChange::RemoveColumn(removed_column_2_info.clone(), table_name.clone()),
             };
             assert_eq!(returned_ddl_set, expected_ddl_set);
         } else {
