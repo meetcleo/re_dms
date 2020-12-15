@@ -45,9 +45,11 @@ async fn main() {
                 match parsed_line {
                     parser::ParsedLine::ContinueParse => {}, // Intentionally left blank, continue parsing
                     _ => {
-                        if let Some((file, maybe_ddl_changes)) = collector.add_change(parsed_line) {
-                            // TODO error handling
-                            file_transmitter.send(file).await;
+                        if let Some(ref mut change_vec) = collector.add_change(parsed_line) {
+                            if let Some(change_processing::ChangeProcessingResult::TableChanges(file)) = change_vec.pop() {
+                                // TODO error handling
+                                file_transmitter.send(file).await;
+                            }
                         }
                     }
                 }

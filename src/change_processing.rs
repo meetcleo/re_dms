@@ -30,6 +30,13 @@ struct ChangeSet {
     changes: Vec<ParsedLine>
 }
 
+
+#[derive(Debug)]
+pub enum ChangeProcessingResult {
+    TableChanges(file_writer::FileWriter),
+    DdlChange(DdlChange)
+}
+
 impl ChangeSet {
     fn new() -> ChangeSet {
         ChangeSet { changes: vec![] }
@@ -322,13 +329,23 @@ impl ChangeProcessing {
         let hash_map = HashMap::new();
         ChangeProcessing { table_holder: TableHolder { tables: hash_map } }
     }
-    pub fn add_change(&mut self, parsed_line: ParsedLine) -> Option<(file_writer::FileWriter, Option<Vec<DdlChange>>)> {
+    pub fn add_change(&mut self, parsed_line: ParsedLine) -> Option<Vec<ChangeProcessingResult>> {
         match parsed_line {
             ParsedLine::Begin(_) | ParsedLine::Commit(_) | ParsedLine::TruncateTable => { None }, // TODO
             ParsedLine::ContinueParse => { None }, // need to be exhaustive
             ParsedLine::ChangedData{ .. } => {
+                // map here unpacks the option
+                // NOTE: this means that we must return a table if we want to return a ddl result
                 self.table_holder.add_change(parsed_line).map(
-                    |(returned_table, ddl_changes)| (self.write_files_for_table(returned_table), ddl_changes)
+                    |(returned_table, maybe_ddl_changes)| {
+                        let mut start_vec = vec![ChangeProcessingResult::TableChanges(self.write_files_for_table(returned_table))];
+                        if let Some(ddl_changes) = maybe_ddl_changes {
+                            for ddl_change in ddl_changes {
+                                start_vec.push(ChangeProcessingResult::DdlChange(ddl_change))
+                            }
+                        }
+                        start_vec
+                    }
                 )
             }
         }
@@ -391,6 +408,7 @@ mod tests {
     use super::*;
     use crate::parser::*;
     use maplit::{hashmap, hashset};
+    use assert_matches::assert_matches;
 
     // this is basically an integration test, but that's fine
     #[test]
@@ -419,7 +437,7 @@ mod tests {
         let first_result = change_processing.add_change(first_change);
         let single_entry_stats_hash = hashmap!(&table_name => 1);
         assert_eq!(change_processing.get_stats(), single_entry_stats_hash);
-        let second_result = change_processing.add_change(second_change);
+        let mut second_result = change_processing.add_change(second_change);
         // we popped a record off, and then added another record, so should still have 1 in there
         assert_eq!(change_processing.get_stats(), single_entry_stats_hash);
         let third_result = change_processing.add_change(third_change);
@@ -429,12 +447,18 @@ mod tests {
         assert!(second_result.is_some());
         assert!(third_result.is_none());
         // now lets assert stuff our second result is as we expect it to be
-        if let Some((file_writer::FileWriter {..}, ddl_changes)) = second_result {
-            assert!(ddl_changes.is_some());
-            if let Some(ddl_vec) = ddl_changes {
-                assert_eq!(ddl_vec.len(), 1);
-                assert_eq!(ddl_vec.first(), Some(&DdlChange::AddColumn(new_column_info.clone())))
-            }
+        if let Some(ref mut change_vec) = second_result {
+            // table change and ddl change
+            assert_eq!(change_vec.len(), 2);
+
+            let table_change = change_vec.remove(0);
+            assert_matches!(table_change, ChangeProcessingResult::TableChanges(..));
+            let ddl_change = change_vec.remove(0);
+            if let ChangeProcessingResult::DdlChange(DdlChange::AddColumn(column_info)) = ddl_change {
+                assert_eq!(column_info, new_column_info);
+            } else {
+                panic!("doesn't match add_column");
+            };
         } else {
             panic!("second_result does not contain a table");
         }
@@ -465,7 +489,7 @@ mod tests {
         let first_result = change_processing.add_change(first_change);
         let single_entry_stats_hash = hashmap!(&table_name => 1);
         assert_eq!(change_processing.get_stats(), single_entry_stats_hash);
-        let second_result = change_processing.add_change(second_change);
+        let mut second_result = change_processing.add_change(second_change);
         // we popped a record off, and then added another record, so should still have 1 in there
         assert_eq!(change_processing.get_stats(), single_entry_stats_hash);
         let third_result = change_processing.add_change(third_change);
@@ -475,11 +499,18 @@ mod tests {
         assert!(second_result.is_some());
         assert!(third_result.is_none());
         // now lets assert stuff our second result is as we expect it to be
-        if let Some((file_writer::FileWriter {..}, ddl_changes)) = second_result {
-            assert!(ddl_changes.is_some());
-            if let Some(ddl_vec) = ddl_changes {
-                assert_eq!(ddl_vec.len(), 1);
-                assert_eq!(ddl_vec.first(), Some(&DdlChange::RemoveColumn(removed_column_info.clone())))
+        if let Some(ref mut change_vec) = second_result {
+            // table change and ddl change
+            assert_eq!(change_vec.len(), 2);
+
+            let table_change = change_vec.remove(0);
+            assert_matches!(table_change, ChangeProcessingResult::TableChanges(..));
+            let ddl_change = change_vec.remove(0);
+
+            if let ChangeProcessingResult::DdlChange(DdlChange::RemoveColumn(column_info)) = ddl_change {
+                assert_eq!(column_info, removed_column_info);
+            } else {
+                panic!("doesn't match remove_column");
             }
         } else {
             panic!("second_result does not contain a table");
@@ -519,7 +550,7 @@ mod tests {
         let first_result = change_processing.add_change(first_change);
         let single_entry_stats_hash = hashmap!(&table_name => 1);
         assert_eq!(change_processing.get_stats(), single_entry_stats_hash);
-        let second_result = change_processing.add_change(second_change);
+        let mut second_result = change_processing.add_change(second_change);
         // we popped a record off, and then added another record, so should still have 1 in there
         assert_eq!(change_processing.get_stats(), single_entry_stats_hash);
         let third_result = change_processing.add_change(third_change);
@@ -529,19 +560,23 @@ mod tests {
         assert!(second_result.is_some());
         assert!(third_result.is_none());
         // now lets assert stuff our second result is as we expect it to be
-        if let Some((file_writer::FileWriter {..}, ddl_changes)) = second_result {
-            assert!(ddl_changes.is_some());
-            if let Some(ddl_vec) = ddl_changes {
-                assert_eq!(ddl_vec.len(), 4);
-                let returned_ddl_set: HashSet<DdlChange> = ddl_vec.iter().map(|x| x.clone()).collect();
-                let expected_ddl_set = hashset! {
-                    DdlChange::AddColumn(new_column_info.clone()),
-                    DdlChange::AddColumn(new_column_2_info.clone()),
-                    DdlChange::RemoveColumn(removed_column_info.clone()),
-                    DdlChange::RemoveColumn(removed_column_2_info.clone()),
-                };
-                assert_eq!(returned_ddl_set, expected_ddl_set);
-            }
+        if let Some(ref mut change_vec) = second_result {
+            assert_eq!(change_vec.len(), 5);
+            // assert!(ddl_changes.is_some());
+            let table_change = change_vec.remove(0);
+            assert_matches!(table_change, ChangeProcessingResult::TableChanges(..));
+
+            let returned_ddl_set: HashSet<DdlChange> = change_vec.iter().map(|x| {
+                if let ChangeProcessingResult::DdlChange(ddl_change) = x { ddl_change.clone() }
+                else { panic!("found element that's not ddl change");}
+            }).collect();
+            let expected_ddl_set = hashset! {
+                DdlChange::AddColumn(new_column_info.clone()),
+                DdlChange::AddColumn(new_column_2_info.clone()),
+                DdlChange::RemoveColumn(removed_column_info.clone()),
+                DdlChange::RemoveColumn(removed_column_2_info.clone()),
+            };
+            assert_eq!(returned_ddl_set, expected_ddl_set);
         } else {
             panic!("second_result does not contain a table");
         }

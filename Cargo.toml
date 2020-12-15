@@ -54,3 +54,5 @@ config = "0.10.1"
 
 # hashmap literal macro
 maplit = "1.0.2"
+assert_matches = "1.4.0"
+
