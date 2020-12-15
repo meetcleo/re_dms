@@ -402,7 +402,7 @@ impl ChangeProcessing {
 
     // this drains every table from the changeset,
     // writes the files, and returns them
-    pub fn drain_final_changes(&mut self) -> Vec<file_writer::FileWriter> {
+    pub fn drain_final_changes(&mut self) -> Vec<ChangeProcessingResult> {
         let resulting_vec = self.table_holder.tables.drain().map(
             |(table_name, table)| {
             let mut file_writer = file_writer::FileWriter::new(table_name.clone());
@@ -414,7 +414,7 @@ impl ChangeProcessing {
                             })
                     }
                 );
-                file_writer
+                ChangeProcessingResult::TableChanges(file_writer)
             }
         ).collect();
         println!("DRAINED FINAL CHANGES!!!!! {}", self.table_holder.tables.len());

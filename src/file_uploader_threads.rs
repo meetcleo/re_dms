@@ -3,13 +3,15 @@ use std::sync::Arc;
 use std::collections::{ HashMap };
 
 use crate::parser::{TableName};
-use crate::file_writer::{FileWriter};
 use crate::file_uploader::{FileUploader, CleoS3File};
 use crate::change_processing;
 
 pub const DEFAULT_CHANNEL_SIZE: usize = 1000;
 
-
+pub enum UploaderStageResult {
+    S3File(CleoS3File),
+    DdlChange(change_processing::DdlChange)
+}
 
 pub struct GenericTableThreadSplitter<SharedResource, ChannelType> {
     // need to make this public so that type aliases of this type can see it
@@ -64,11 +66,11 @@ impl FileUploaderThreads {
         FileUploaderThreads {shared_resource, table_streams}
     }
 
-    pub fn spawn_file_uploader_stream(receiver: mpsc::Receiver<change_processing::ChangeProcessingResult>, result_sender: mpsc::Sender<CleoS3File>) -> tokio::task::JoinHandle<()> {
+    pub fn spawn_file_uploader_stream(receiver: mpsc::Receiver<change_processing::ChangeProcessingResult>, result_sender: mpsc::Sender<UploaderStageResult>) -> tokio::task::JoinHandle<()> {
         tokio::spawn(FileUploaderThreads::file_uploader_stream(receiver, result_sender))
     }
 
-    pub async fn file_uploader_stream(mut receiver: mpsc::Receiver<change_processing::ChangeProcessingResult>, result_sender: mpsc::Sender<CleoS3File>) {
+    pub async fn file_uploader_stream(mut receiver: mpsc::Receiver<change_processing::ChangeProcessingResult>, result_sender: mpsc::Sender<UploaderStageResult>) {
         let mut file_uploader_stream = FileUploaderThreads::new();
         loop {
             let received = receiver.recv().await;
@@ -97,7 +99,7 @@ impl FileUploaderThreads {
     // will either get a sender to a async thread
     // for the table_name.
     // if one doesn't exist will spawn one
-    pub fn get_sender(&mut self, table_name: TableName, result_sender: &mpsc::Sender<CleoS3File>) -> &mut FileTableThread {
+    pub fn get_sender(&mut self, table_name: TableName, result_sender: &mpsc::Sender<UploaderStageResult>) -> &mut FileTableThread {
         let cloned_uploader = self.get_shared_resource();
         self.table_streams
             .entry(table_name)
@@ -110,12 +112,12 @@ impl FileUploaderThreads {
             })
     }
 
-    pub async fn spawn_table_thread(mut receiver: mpsc::Receiver<change_processing::ChangeProcessingResult>, uploader: Arc<FileUploader>, mut result_sender: mpsc::Sender<CleoS3File>) {
+    pub async fn spawn_table_thread(mut receiver: mpsc::Receiver<change_processing::ChangeProcessingResult>, uploader: Arc<FileUploader>, mut result_sender: mpsc::Sender<UploaderStageResult>) {
         let mut last_table_name = None;
         loop {
             // need to do things this way rather than a match for the borrow checker
             let received = receiver.recv().await;
-            if let Some(mut change) = received {
+            if let Some(change) = received {
                 let table_name = change.table_name();
                 last_table_name = Some(table_name);
                 match change {
@@ -124,11 +126,14 @@ impl FileUploaderThreads {
                         let s3_files = uploader.upload_table_to_s3(&file_writer).await;
                         for s3_file in s3_files {
                             // TODO handle errors
-                            result_sender.send(s3_file).await;
+                            let result_change = UploaderStageResult::S3File(s3_file);
+                            result_sender.send(result_change).await;
                         }
                     },
                     change_processing::ChangeProcessingResult::DdlChange(ddl_change) => {
-                        // result_sender.send(ddl_change).await;
+                        // rewrap into the output enum
+                        let result_change = UploaderStageResult::DdlChange(ddl_change);
+                        result_sender.send(result_change).await;
                     }
                 }
             } else {

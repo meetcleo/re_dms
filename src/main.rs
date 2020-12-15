@@ -30,7 +30,7 @@ async fn main() {
     let mut collector = change_processing::ChangeProcessing::new();
     // initialize our channels
     let (mut file_transmitter, file_receiver) = mpsc::channel::<change_processing::ChangeProcessingResult>(DEFAULT_CHANNEL_SIZE);
-    let (database_transmitter, database_receiver) = mpsc::channel::<file_uploader::CleoS3File>(DEFAULT_CHANNEL_SIZE);
+    let (database_transmitter, database_receiver) = mpsc::channel::<file_uploader_threads::UploaderStageResult>(DEFAULT_CHANNEL_SIZE);
     // initialize our file uploader stream
     let file_uploader_threads_join_handle = file_uploader_threads::FileUploaderThreads::spawn_file_uploader_stream(file_receiver, database_transmitter);
     // initialize our database importer stream
