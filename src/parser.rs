@@ -147,11 +147,14 @@ impl ParsedLine {
         }
     }
 
-    pub fn column_info_set(&self) -> HashSet<ColumnInfo> {
+    pub fn column_info_set(&self) -> Option<HashSet<ColumnInfo>> {
         match self {
-            ParsedLine::ChangedData { columns,.. } => {
-                // unwrap because this is the id column which _must_ be here
-                columns.iter().map(|x| x.column_info().clone()).collect()
+            ParsedLine::ChangedData { columns, kind,.. } => {
+                if kind == &ChangeKind::Delete {
+                    None
+                } else {
+                    Some(columns.iter().map(|x| x.column_info().clone()).collect())
+                }
             },
             _ => panic!("tried to find id column of non changed_data")
         }
