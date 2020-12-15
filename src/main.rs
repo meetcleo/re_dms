@@ -36,7 +36,7 @@ async fn main() {
     // initialize our database importer stream
     let database_writer_threads_join_handle = database_writer_threads::DatabaseWriterThreads::spawn_database_writer_stream(database_receiver);
 
-    if let Ok(lines) = read_lines("./data/test_decoding.txt") {
+    if let Ok(lines) = read_lines("./data/test_decoding_remove_column.txt") {
         // Consumes the iterator, returns an (Optional) String
         for line in lines //.take(30)
         {
