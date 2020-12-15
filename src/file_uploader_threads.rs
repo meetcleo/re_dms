@@ -13,6 +13,16 @@ pub enum UploaderStageResult {
     DdlChange(change_processing::DdlChange)
 }
 
+impl UploaderStageResult {
+    // clone, table name is cheap
+    pub fn table_name(&self) -> TableName {
+        match self {
+            Self::S3File(cleo_s3_file) => { cleo_s3_file.table_name.clone() },
+            Self::DdlChange(ddl_change) => { ddl_change.table_name()}
+        }
+    }
+}
+
 pub struct GenericTableThreadSplitter<SharedResource, ChannelType> {
     // need to make this public so that type aliases of this type can see it
     // TODO: is there a better way?
