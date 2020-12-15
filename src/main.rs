@@ -38,7 +38,7 @@ async fn main() {
 
     if let Ok(lines) = read_lines("./data/test_decoding.txt") {
         // Consumes the iterator, returns an (Optional) String
-        for line in lines
+        for line in lines //.take(30)
         {
             if let Ok(ip) = line {
                 let parsed_line = parser.parse(&ip);

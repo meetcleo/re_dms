@@ -214,7 +214,7 @@ struct FileCounter {
 struct Table {
     // we want to have a changeset, but need to match on the enum type for the pkey of the column
     changeset: ChangeSetWithColumnType,
-    column_info: HashSet<ColumnInfo>,
+    column_info: Option<HashSet<ColumnInfo>>,
     table_name: TableName
 }
 
@@ -269,6 +269,7 @@ impl Table {
     }
 
     fn add_change_to_changeset(&mut self, parsed_line: ParsedLine) {
+        self.update_column_info_if_unset(&parsed_line);
         if let ParsedLine::ChangedData{..} = parsed_line {
             let parsed_line_id = parsed_line.find_id_column();
             match parsed_line_id.column_value_unwrap() {
@@ -294,13 +295,24 @@ impl Table {
         }
     }
 
+    fn update_column_info_if_unset(&mut self, parsed_line: &ParsedLine) {
+        if self.column_info.is_some() || parsed_line.column_info_set().is_none() {
+            return
+        } else {
+            self.column_info = parsed_line.column_info_set();
+        }
+    }
+
     fn has_ddl_changes(&self, parsed_line: &ParsedLine) -> bool {
-        parsed_line.column_info_set() != self.column_info
+        let incoming_column_info = parsed_line.column_info_set();
+        incoming_column_info.is_some() &&
+            self.column_info.is_some() &&
+            incoming_column_info != self.column_info
     }
 
     fn ddl_changes(&self, parsed_line: &ParsedLine) -> Vec<DdlChange> {
-        let new_column_info = &parsed_line.column_info_set();
-        let old_column_info = &self.column_info;
+        let new_column_info = &parsed_line.column_info_set().unwrap();
+        let old_column_info = &self.column_info.clone().unwrap();
         if !self.has_ddl_changes(parsed_line) {
             vec![]
         } else if
