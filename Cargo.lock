@@ -1387,6 +1387,7 @@ dependencies = [
  "glob",
  "internment",
  "itertools",
+ "lazy_static",
  "log",
  "maplit",
  "openssl",
