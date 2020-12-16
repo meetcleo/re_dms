@@ -23,7 +23,7 @@ pub struct Parser {
     parse_state: ParserState,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq, Hash)]
 pub enum ColumnValue {
     Boolean(bool),
     Integer(i64),
@@ -58,7 +58,7 @@ impl fmt::Display for ColumnValue {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq, Hash)]
 pub enum Column {
     UnchangedToastColumn {
         column_info: ColumnInfo,
@@ -145,7 +145,7 @@ impl Column {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub enum ChangeKind {
     Insert,
     Update,
@@ -162,7 +162,7 @@ impl std::string::ToString for ChangeKind {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Hash, Eq, PartialEq)]
 pub enum ParsedLine {
     // int is xid
     Begin(i64),
@@ -330,7 +330,6 @@ impl Parser {
     pub fn parse(&mut self, string: &String) -> ParsedLine {
         match string {
             x if { x.starts_with("BEGIN") } => self.parse_begin(x),
-
             x if { x.starts_with("COMMIT") } => self.parse_commit(x),
             x if { x.starts_with("table") } => self.parse_change(x),
             x if { self.parse_state.currently_parsing.is_some() } => self.continue_parse(x),
@@ -480,7 +479,7 @@ impl Parser {
                 mut columns,
             }) => {
                 let incomplete_column = columns.pop().unwrap();
-                assert!(matches!(incomplete_column, Column::IncompleteColumn {..}));
+                assert!(matches!(incomplete_column, Column::IncompleteColumn { .. }));
                 match incomplete_column {
                     Column::IncompleteColumn { column_info: ColumnInfo{name, column_type}, value: incomplete_value } => {
                         let (continued_column_value, rest) = ColumnValue::parse(string, &column_type, true);
@@ -621,5 +620,201 @@ mod tests {
         assert!(!is_quote_escaped(&string, 0));
         assert!(!is_quote_escaped(&string, string.len()));
         assert!(is_quote_escaped(&string, 2));
+    }
+
+    use std::{collections::HashMap, hash::Hash};
+    // https://stackoverflow.com/questions/42748277/how-do-i-test-for-the-equality-of-two-unordered-lists
+    fn my_eq<T>(a: &[T], b: &[T]) -> bool
+    where
+        T: Eq + Hash + std::fmt::Debug,
+    {
+        fn count<T>(items: &[T]) -> HashMap<&T, usize>
+        where
+            T: Eq + Hash + std::fmt::Debug,
+        {
+            let mut cnt = HashMap::new();
+            for i in items {
+                *cnt.entry(i).or_insert(0) += 1
+            }
+            cnt
+        }
+
+        //println!("a {:?}", a);
+
+        count(a) == count(b)
+    }
+
+    #[test]
+    fn parsing_works() {
+        use std::fs::File;
+        use std::io::{self, BufRead};
+
+        let mut parser = Parser::new(true);
+        let mut collector = Vec::new();
+        let file =
+            File::open("./test/parser.txt").expect("couldn't find file containing test data");
+        let lines = io::BufReader::new(file).lines();
+        for line in lines {
+            if let Ok(ip) = line {
+                let parsed_line = parser.parse(&ip);
+                match parsed_line {
+                    ParsedLine::ContinueParse => {}
+                    _ => {
+                        collector.push(parsed_line);
+                    }
+                }
+            }
+        }
+        assert!(my_eq(&collector, &vec![
+            ParsedLine::Begin(11989965),
+            ParsedLine::ChangedData { columns: vec![
+                Column::ChangedColumn { column_info: ColumnInfo::new("id".to_string(), "bigint".to_string()), value: Some(ColumnValue::Integer(376)) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("account_id".to_string(), "integer" .to_string()), value: Some(ColumnValue::Integer(1)) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("category".to_string(), "character varying".to_string()), value: None },
+                Column::ChangedColumn { column_info: ColumnInfo::new("currency_code".to_string(), "character varying".to_string()), value: Some(ColumnValue::Text("USD".to_string())) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("amount".to_string(), "numeric".to_string()), value: Some(ColumnValue::Numeric("4.0".to_string())) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("description".to_string(), "character varying".to_string()), value: Some(ColumnValue::Text("Salary".to_string())) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("made_on".to_string(), "date".to_string()), value: Some(ColumnValue::Text("2020-09-17".to_string())) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("duplicated".to_string(), "boolean".to_string()), value: None },
+                Column::ChangedColumn { column_info: ColumnInfo::new("mode".to_string(), "character varying".to_string()), value: None },
+                Column::ChangedColumn { column_info: ColumnInfo::new("created_at".to_string(), "timestamp without time zone".to_string()), value: Some(ColumnValue::Text("2020-10-09 15:24:40.655714".to_string())) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("updated_at".to_string(), "timestamp without time zone".to_string()), value: Some(ColumnValue::Text("2020-11-27 15:31:21.771279".to_string())) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("status".to_string(), "character varying".to_string()), value: None },
+                Column::ChangedColumn { column_info: ColumnInfo::new("corrected_made_on".to_string(), "date".to_string()), value: Some(ColumnValue::Text("2020-09-17".to_string())) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("categorized_by_user".to_string(), "boolean".to_string()), value: None },
+                Column::ChangedColumn { column_info: ColumnInfo::new("uuid".to_string(), "uuid".to_string()), value: Some(ColumnValue::Text("a510bcf8-42f1-4ec2-bcbe-04e0e709e014".to_string())) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("marked_as_duplicate".to_string(), "boolean".to_string()), value: Some(ColumnValue::Boolean(false)) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("transaction_category_id".to_string(), "integer".to_string()), value: Some(ColumnValue::Integer(11)) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("bill_id".to_string(), "integer".to_string()), value: None },
+                Column::ChangedColumn { column_info: ColumnInfo::new("last_enriched_at".to_string(), "timestamp without time zone".to_string()), value: Some(ColumnValue::Text("2020-10-09 15:24:55.371552".to_string())) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("user_id".to_string(), "integer".to_string()), value: Some(ColumnValue::Integer(1)) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("external_transaction_id".to_string(), "character varying".to_string()), value: None },
+                Column::ChangedColumn { column_info: ColumnInfo::new("login_provider_additional_attributes".to_string(), "jsonb".to_string()), value: None },
+                Column::ChangedColumn { column_info: ColumnInfo::new("extra".to_string(), "jsonb".to_string()), value: Some(ColumnValue::Text("{}".to_string())) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("recurring_income_id".to_string(), "uuid".to_string()), value: None }
+                ],
+                table_name: ArcIntern::new("public.transactions".to_string()),
+                kind: ChangeKind::Update },
+            ParsedLine::Commit(11989965),
+            ParsedLine::Begin(4220773504),
+            ParsedLine::ChangedData { columns: vec![
+                Column::ChangedColumn { column_info: ColumnInfo::new("id".to_string(), "integer".to_string()), value: Some(ColumnValue::Integer(1111111)) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("first_name".to_string(), "character varying".to_string()), value: Some(ColumnValue::Text("joshy".to_string())) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("last_name".to_string(), "character varying".to_string()), value: Some(ColumnValue::Text("joshy".to_string())) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("email".to_string(), "character varying".to_string()), value: Some(ColumnValue::Text("joshy@live.com".to_string())) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("created_at".to_string(), "timestamp without time zone".to_string()), value: Some(ColumnValue::Text("2020-11-27 14:57:30.303466".to_string())) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("updated_at".to_string(), "timestamp without time zone".to_string()), value: Some(ColumnValue::Text("2020-11-27 15:35:28.542551".to_string())) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("saltedge_customer_id".to_string(), "character varying".to_string()), value: None },
+                Column::ChangedColumn { column_info: ColumnInfo::new("admin".to_string(), "boolean".to_string()), value: Some(ColumnValue::Boolean(false)) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("uuid".to_string(), "uuid".to_string()), value: Some(ColumnValue::Text("ad46edc6-914e-485a-8445-b6a5451d113b".to_string())) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("password_hash".to_string(), "character varying".to_string()), value: Some(ColumnValue::Text("$2a$12$q2VDJ4MKnKXM7SiP4OIfseCTXFKDDfJQcuQv0yGQC31bWL/8ytBE.".to_string())) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("password_salt".to_string(), "character varying".to_string()), value: Some(ColumnValue::Text("$2a$1x$q2VDJ4MKnKXM7SiP4OIfse".to_string())) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("phone_number".to_string(), "character varying".to_string()), value: Some(ColumnValue::Text("6125478788".to_string())) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("password_reset_token".to_string(), "character varying".to_string()), value: None },
+                Column::ChangedColumn { column_info: ColumnInfo::new("password_reset_sent_at".to_string(), "timestamp without time zone".to_string()), value: None },
+                Column::ChangedColumn { column_info: ColumnInfo::new("introduction_text_sent".to_string(), "boolean".to_string()), value: None },
+                Column::ChangedColumn { column_info: ColumnInfo::new("fb_cleo_uid".to_string(), "bigint".to_string()), value: None },
+                Column::ChangedColumn { column_info: ColumnInfo::new("facebook_photo_url".to_string(), "character varying".to_string()), value: None },
+                Column::ChangedColumn { column_info: ColumnInfo::new("fb_timezone".to_string(), "integer".to_string()), value: Some(ColumnValue::Integer(0)) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("state".to_string(), "public.hstore".to_string()), value: Some(ColumnValue::Text("\"latest_app_version\"=>\"1.60.0\", \"onboarding_bot_b_group\"=>\"true\", \"is_in_initial_onboarding_flow\"=>\"false\", \"latest_app_version_updated_at\"=>\"2020-11-27T14:59:03+00:00\", \"notification_settings_b_group\"=>\"true\", \"sent_dwolla_customer_created_verified_combo_email\"=>\"true\"".to_string())) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("messenger_blocked_date".to_string(), "timestamp without time zone".to_string()), value: None },
+                Column::ChangedColumn { column_info: ColumnInfo::new("interactions_count".to_string(), "integer".to_string()), value: Some(ColumnValue::Integer(166)) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("last_interaction_at".to_string(), "timestamp without time zone".to_string()), value: Some(ColumnValue::Text("2020-11-27 15:35:28.542551".to_string())) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("broadcast_queues_count".to_string(), "integer".to_string()), value: Some(ColumnValue::Integer(0)) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("onboarding_state".to_string(), "integer".to_string()), value: Some(ColumnValue::Integer(6)) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("date_of_birth".to_string(), "date".to_string()), value: Some(ColumnValue::Text("1966-08-11".to_string())) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("nationality".to_string(), "character varying".to_string()), value: None },
+                Column::ChangedColumn { column_info: ColumnInfo::new("address".to_string(), "jsonb".to_string()), value: Some(ColumnValue::Text("{\"city\": \"Minneapolis\", \"line_1\": \"929 Portland Ave\", \"postcode\": \"55414\", \"us_state\": \"MN\"}".to_string())) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("indexed_settings".to_string(), "jsonb".to_string()), value: None },
+                Column::ChangedColumn { column_info: ColumnInfo::new("user_salary_date_estimate".to_string(), "date".to_string()), value: None },
+                Column::ChangedColumn { column_info: ColumnInfo::new("referred_from".to_string(), "character varying".to_string()), value: Some(ColumnValue::Text("app".to_string())) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("accounts_count".to_string(), "integer".to_string()), value: Some(ColumnValue::Integer(3)) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("notification_threshold".to_string(), "integer".to_string()), value: Some(ColumnValue::Integer(1)) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("notification_frequency_setting".to_string(), "integer".to_string()), value: Some(ColumnValue::Integer(0)) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("gender".to_string(), "character varying".to_string()), value: None },
+                Column::ChangedColumn { column_info: ColumnInfo::new("watch_category_id".to_string(), "integer".to_string()), value: None },
+                Column::ChangedColumn { column_info: ColumnInfo::new("utm_params".to_string(), "jsonb".to_string()), value: Some(ColumnValue::Text("{}".to_string())) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("beta_tester".to_string(), "boolean".to_string()), value: Some(ColumnValue::Boolean(false)) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("signup_country_alpha_2".to_string(), "character varying".to_string()), value: Some(ColumnValue::Text("US".to_string())) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("fb_locale".to_string(), "character varying".to_string()), value: None },
+                Column::ChangedColumn { column_info: ColumnInfo::new("time_zone".to_string(), "character varying".to_string()), value: Some(ColumnValue::Text("Central Time (US & Canada)".to_string())) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("invite_code".to_string(), "character varying".to_string()), value: Some(ColumnValue::Text("cleo-12345".to_string())) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("pending_deletion".to_string(), "boolean".to_string()), value: None },
+                Column::ChangedColumn { column_info: ColumnInfo::new("last_transaction_corrected_made_on".to_string(), "date".to_string()), value: Some(ColumnValue::Text("2020-11-25".to_string())) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("profile_photo_file_name".to_string(), "character varying".to_string()), value: None },
+                Column::ChangedColumn { column_info: ColumnInfo::new("profile_photo_content_type".to_string(), "character varying".to_string()), value: None },
+                Column::ChangedColumn { column_info: ColumnInfo::new("profile_photo_file_size".to_string(), "integer".to_string()), value: None },
+                Column::ChangedColumn { column_info: ColumnInfo::new("profile_photo_updated_at".to_string(), "timestamp without time zone".to_string()), value: None },
+                Column::ChangedColumn { column_info: ColumnInfo::new("last_transaction_created_at".to_string(), "timestamp without time zone".to_string()), value: Some(ColumnValue::Text("2020-11-27 15:18:13.956393".to_string())) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("last_bot_response_at".to_string(), "timestamp without time zone".to_string()), value: Some(ColumnValue::Text("2020-11-27 15:28:27.51497".to_string())) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("silhouette_profile_picture".to_string(), "boolean".to_string()), value: None },
+                Column::ChangedColumn { column_info: ColumnInfo::new("deleted".to_string(), "boolean".to_string()), value: Some(ColumnValue::Boolean(false)) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("deleted_at".to_string(), "timestamp without time zone".to_string()), value: None },
+                Column::ChangedColumn { column_info: ColumnInfo::new("chosen_name".to_string(), "character varying".to_string()), value: None },
+                Column::ChangedColumn { column_info: ColumnInfo::new("product_country".to_string(), "character varying".to_string()), value: Some(ColumnValue::Text("US".to_string())) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("last_bot_request_at".to_string(), "timestamp without time zone".to_string()), value: Some(ColumnValue::Text("2020-11-27 15:28:27.279173".to_string())) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("last_messenger_request_at".to_string(), "timestamp without time zone".to_string()), value: None }],
+                table_name: ArcIntern::new("public.users".to_string()),
+                kind: ChangeKind::Update },
+            ParsedLine::Commit(4220773504),
+            ParsedLine::Begin(4220773503),
+            ParsedLine::ChangedData { columns: vec![
+                Column::ChangedColumn { column_info: ColumnInfo::new("id".to_string(), "uuid".to_string()), value: Some(ColumnValue::Text("188101f7-1c30-44c9-88e5-1be3b024470e".to_string())) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("user_id".to_string(), "bigint".to_string()), value: Some(ColumnValue::Integer(1111111)) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("created_at".to_string(), "timestamp without time zone".to_string()), value: Some(ColumnValue::Text("2020-11-27 15:35:28.540886".to_string())) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("updated_at".to_string(), "timestamp without time zone".to_string()), value: Some(ColumnValue::Text("2020-11-27 15:35:28.540886".to_string())) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("closed_at".to_string(), "timestamp without time zone".to_string()), value: None }],
+                table_name: ArcIntern::new("public.app_sessions".to_string()),
+                kind: ChangeKind::Insert },
+            ParsedLine::Commit(4220773503),
+            ParsedLine::Begin(4220773509),
+            ParsedLine::ChangedData { columns: vec![
+                Column::ChangedColumn { column_info: ColumnInfo::new("id".to_string(), "bigint".to_string()), value: Some(ColumnValue::Integer(474344529)) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("state".to_string(), "integer".to_string()), value: Some(ColumnValue::Integer(0)) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("body".to_string(), "jsonb".to_string()), value: Some(ColumnValue::Text("{\"_id\": {\"$oid\": \"5bf5400ac96f865d7af4ce84\"}, \"info\": {\"balance\": {\"amount\": 14113.18, \"currency\": \"USD\"}, \"nickname\": \"Facilitator Fee \", \"bank_code\": \"EBT\", \"document_id\": null, \"name_on_account\": \" \", \"monthly_withdrawals_remaining\": null}, \"type\": \"DEPOSIT-US\", \"_rest\": {\"_id\": \"5bf5400ac96f865d7af4ce84\", \"info\": {\"balance\": {\"amount\": 14113.18, \"currency\": \"USD\"}, \"nickname\": \"Facilitator Fee \", \"bank_code\": \"EBT\", \"document_id\": null, \"name_on_account\": \" \"}, \"type\": \"DEPOSIT-US\", \"extra\": {\"note\": \"Np8W0ePvWl\", \"other\": {}, \"supp_id\": \"\"}, \"client\": {\"id\": \"5be9f21accc480002a5fc952\", \"name\": \"Cleo\"}, \"allowed\": \"CREDIT-AND-DEBIT\", \"user_id\": \"4bc70ef055930d3611c1ca41\", \"timeline\": [{\"date\": 1542799370499, \"note\": \"Node created.\"}], \"is_active\": true}, \"extra\": {\"note\": \"Dp8W0ePvVl\", \"other\": {}, \"supp_id\": \"\"}, \"action\": \"callback\", \"client\": {\"id\": \"5be9f21accc480002a5fc952\", \"name\": \"Cleo\"}, \"allowed\": \"CREDIT-AND-DEBIT\", \"user_id\": \"4bc70ef055930d3611c1ca41\", \"timeline\": [{\"date\": {\"$date\": 1542799370499}, \"note\": \"Node created.\"}], \"is_active\": true, \"controller\": \"webhooks/XXXXXX\", \"XXXXXX\": {\"_id\": {\"$oid\": \"5bf5400ac96f865d7af4ce84\"}, \"info\": {\"balance\": {\"amount\": 14113.18, \"currency\": \"USD\"}, \"nickname\": \"Facilitator Fee \", \"bank_code\": \"EBT\", \"document_id\": null, \"name_on_account\": \" \", \"monthly_withdrawals_remaining\": null}, \"type\": \"DEPOSIT-US\", \"_rest\": {\"_id\": \"5bf5400ac96f865d7af4ce84\", \"info\": {\"balance\": {\"amount\": 14113.18, \"currency\": \"USD\"}, \"nickname\": \"Facilitator Fee \", \"bank_code\": \"EBT\", \"document_id\": null, \"name_on_account\": \" \"}, \"type\": \"DEPOSIT-US\", \"extra\": {\"note\": \"Dp8W0ePvVl\", \"other\": {}, \"supp_id\": \"\"}, \"client\": {\"id\": \"5be9f21accc480002a5fc952\", \"name\": \"Cleo\"}, \"allowed\": \"CREDIT-AND-DEBIT\", \"user_id\": \"4bc70ef055930d3611c1ca41\", \"timeline\": [{\"date\": 1542799370499, \"note\": \"Node created.\"}], \"is_active\": true}, \"extra\": {\"note\": \"Dp8W0ePvVl\", \"other\": {}, \"supp_id\": \"\"}, \"client\": {\"id\": \"5be9f21accc480002a5fc952\", \"name\": \"Cleo\"}, \"allowed\": \"CREDIT-AND-DEBIT\", \"user_id\": \"4bc70ef055930d3611c1ca41\", \"timeline\": [{\"date\": {\"$date\": 1542799370499}, \"note\": \"Node created.\"}], \"is_active\": true, \"webhook_meta\": {\"date\": {\"$date\": 1606491327981}, \"log_id\": \"5fc11cc07a80b2506dd7c491\", \"function\": \"NODE|PATCH\", \"updated_by\": \"SELF\"}}, \"webhook_meta\": {\"date\": {\"$date\": 1606491327981}, \"log_id\": \"5fc11cc07a80b2506dd7c491\", \"function\": \"NODE|PATCH\", \"updated_by\": \"SELF\"}}".to_string())) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("controller".to_string(), "character varying".to_string()), value: Some(ColumnValue::Text("webhooks/XXXXXX".to_string())) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("action".to_string(), "character varying".to_string()), value: Some(ColumnValue::Text("callback".to_string())) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("worker".to_string(), "character varying".to_string()), value: Some(ColumnValue::Text("WebhookWorkers::XXXXXXWorker".to_string())) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("object_reference".to_string(), "character varying".to_string()), value: Some(ColumnValue::Text("5bf5400ac96f865d7af4ce84".to_string())) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("object_status".to_string(), "character varying".to_string()), value: Some(ColumnValue::Text("CREDIT-AND-DEBIT".to_string())) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("processing_started_at".to_string(), "timestamp without time zone".to_string()), value: None },
+                Column::ChangedColumn { column_info: ColumnInfo::new("processing_completed_at".to_string(), "timestamp without time zone".to_string()), value: None },
+                Column::ChangedColumn { column_info: ColumnInfo::new("created_at".to_string(), "timestamp without time zone".to_string()), value: Some(ColumnValue::Text("2020-11-27 15:35:28.553047".to_string())) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("updated_at".to_string(), "timestamp without time zone".to_string()), value: Some(ColumnValue::Text("2020-11-27 15:35:28.553047".to_string())) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("processing_failed_at".to_string(), "timestamp without time zone".to_string()), value: None },
+                Column::ChangedColumn { column_info: ColumnInfo::new("exception_message".to_string(), "character varying".to_string()), value: None }],
+                table_name: ArcIntern::new("public.webhooks_incoming_webhooks".to_string()),
+                kind: ChangeKind::Insert },
+            ParsedLine::Commit(4220773509),
+            ParsedLine::Begin(4220773508),
+            ParsedLine::ChangedData { columns: vec![
+                Column::ChangedColumn { column_info: ColumnInfo::new("id".to_string(), "integer".to_string()), value: Some(ColumnValue::Integer(508629076)) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("category".to_string(), "character varying".to_string()), value: Some(ColumnValue::Text("intercom".to_string())) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("user_id".to_string(), "integer".to_string()), value: Some(ColumnValue::Integer(2569262)) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("created_at".to_string(), "timestamp without time zone".to_string()), value: Some(ColumnValue::Text("2020-11-27 15:35:28.55155".to_string())) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("updated_at".to_string(), "timestamp without time zone".to_string()), value: Some(ColumnValue::Text("2020-11-27 15:35:28.55155".to_string())) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("extra".to_string(), "jsonb".to_string()), value: None },
+                Column::ChangedColumn { column_info: ColumnInfo::new("visitor_id".to_string(), "uuid".to_string()), value: None }],
+                table_name: ArcIntern::new("public.interactions".to_string()),
+                kind: ChangeKind::Insert },
+            ParsedLine::Commit(4220773508),
+            ParsedLine::Begin(4220773511),
+            ParsedLine::ChangedData { columns: vec![
+                Column::ChangedColumn { column_info: ColumnInfo::new("id".to_string(), "uuid".to_string()), value: Some(ColumnValue::Text("5fe0cb5c-d92b-46ef-84bf-c02018ff19ca".to_string())) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("user_id".to_string(), "bigint".to_string()), value: Some(ColumnValue::Integer(3871635)) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("flow_root_id".to_string(), "bigint".to_string()), value: Some(ColumnValue::Integer(12741)) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("channel".to_string(), "character varying".to_string()), value: Some(ColumnValue::Text("app_notifications_enabled".to_string())) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("did_not_send_reason".to_string(), "character varying".to_string()), value: None },
+                Column::ChangedColumn { column_info: ColumnInfo::new("kicked_off_at".to_string(), "timestamp without time zone".to_string()), value: Some(ColumnValue::Text("2020-11-27 14:10:44".to_string())) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("notification_sent_at".to_string(), "timestamp without time zone".to_string()), value: Some(ColumnValue::Text("2020-11-27 15:35:28.550426".to_string())) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("notification_date".to_string(), "date".to_string()), value: Some(ColumnValue::Text("2020-11-27".to_string())) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("active_user".to_string(), "boolean".to_string()), value: Some(ColumnValue::Boolean(true)) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("disconnected_user".to_string(), "boolean".to_string()), value: Some(ColumnValue::Boolean(false)) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("created_at".to_string(), "timestamp without time zone".to_string()), value: Some(ColumnValue::Text("2020-11-27 15:33:03.202097".to_string())) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("updated_at".to_string(), "timestamp without time zone".to_string()), value: Some(ColumnValue::Text("2020-11-27 15:35:28.55719".to_string())) }],
+                table_name: ArcIntern::new("public.notification_sending_logs".to_string()),
+                kind: ChangeKind::Update },
+            ParsedLine::Commit(4220773511),
+            ]));
     }
 }
