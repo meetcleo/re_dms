@@ -2,16 +2,15 @@ use tokio::sync::mpsc;
 use std::sync::Arc;
 use std::collections::{ HashMap };
 
-use crate::file_uploader_threads::{GenericTableThread, GenericTableThreadSplitter, DEFAULT_CHANNEL_SIZE};
-use crate::file_uploader::CleoS3File;
+use crate::file_uploader_threads::{GenericTableThread, GenericTableThreadSplitter, DEFAULT_CHANNEL_SIZE, UploaderStageResult};
 use crate::database_writer::DatabaseWriter;
 use crate::parser::{TableName};
 
 // manages the thread-per-table and the fanout
-pub type DatabaseTableThread = GenericTableThread<CleoS3File>;
+pub type DatabaseTableThread = GenericTableThread<UploaderStageResult>;
 
 // single thread handle
-pub type DatabaseWriterThreads = GenericTableThreadSplitter<DatabaseWriter, CleoS3File>;
+pub type DatabaseWriterThreads = GenericTableThreadSplitter<DatabaseWriter, UploaderStageResult>;
 
 
 impl DatabaseWriterThreads {
@@ -21,17 +20,17 @@ impl DatabaseWriterThreads {
         DatabaseWriterThreads {shared_resource, table_streams}
     }
 
-    pub fn spawn_database_writer_stream(receiver: mpsc::Receiver<CleoS3File>) -> tokio::task::JoinHandle<()> {
+    pub fn spawn_database_writer_stream(receiver: mpsc::Receiver<UploaderStageResult>) -> tokio::task::JoinHandle<()> {
         tokio::spawn(DatabaseWriterThreads::database_uploader_stream(receiver))
     }
 
-    pub async fn database_uploader_stream(mut receiver: mpsc::Receiver<CleoS3File>) {
+    pub async fn database_uploader_stream(mut receiver: mpsc::Receiver<UploaderStageResult>) {
         let mut database_uploader_stream = DatabaseWriterThreads::new();
         loop {
 
             let received = receiver.recv().await;
             if let Some(s3_file) = received {
-                let table_name = s3_file.table_name.clone();
+                let table_name = s3_file.table_name();
                 let sender = database_uploader_stream.get_sender(table_name);
                 // TODO: handle error
                 if let Some(ref mut inner_sender) = sender.sender {
@@ -61,22 +60,29 @@ impl DatabaseWriterThreads {
         self.table_streams
             .entry(table_name)
             .or_insert_with(|| {
-                let (inner_sender, receiver) = mpsc::channel::<CleoS3File>(DEFAULT_CHANNEL_SIZE);
+                let (inner_sender, receiver) = mpsc::channel::<UploaderStageResult>(DEFAULT_CHANNEL_SIZE);
                 let sender = Some(inner_sender);
                 let join_handle = Some(tokio::spawn(Self::spawn_table_thread(receiver, cloned_uploader)));
                 DatabaseTableThread { sender, join_handle }
             })
     }
 
-    pub async fn spawn_table_thread(mut receiver: mpsc::Receiver<CleoS3File>, uploader: Arc<DatabaseWriter>) {
+    pub async fn spawn_table_thread(mut receiver: mpsc::Receiver<UploaderStageResult>, uploader: Arc<DatabaseWriter>) {
         let mut last_table_name = None;
         loop {
             // need to do things this way rather than a match for the borrow checker
             let received = receiver.recv().await;
-            if let Some(s3_file) = received {
-                let table_name = s3_file.table_name.clone();
+            if let Some(uploader_stage_result) = received {
+                let table_name = uploader_stage_result.table_name();
                 last_table_name = Some(table_name);
-                uploader.import_table(&s3_file).await;
+                match uploader_stage_result {
+                    UploaderStageResult::S3File(cleo_s3_file) => {
+                        uploader.import_table(&cleo_s3_file).await;
+                    },
+                    UploaderStageResult::DdlChange(ddl_change) => {
+                        uploader.handle_ddl(&ddl_change).await;
+                    }
+                }
             } else {
                 println!("channel hung up: {:?}", last_table_name);
                 break;
