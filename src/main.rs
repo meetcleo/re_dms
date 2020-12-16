@@ -29,25 +29,27 @@ async fn main() {
     let mut parser = parser::Parser::new(true);
     let mut collector = change_processing::ChangeProcessing::new();
     // initialize our channels
-    let (mut file_transmitter, file_receiver) = mpsc::channel::<file_writer::FileWriter>(DEFAULT_CHANNEL_SIZE);
-    let (database_transmitter, database_receiver) = mpsc::channel::<file_uploader::CleoS3File>(DEFAULT_CHANNEL_SIZE);
+    let (mut file_transmitter, file_receiver) = mpsc::channel::<change_processing::ChangeProcessingResult>(DEFAULT_CHANNEL_SIZE);
+    let (database_transmitter, database_receiver) = mpsc::channel::<file_uploader_threads::UploaderStageResult>(DEFAULT_CHANNEL_SIZE);
     // initialize our file uploader stream
     let file_uploader_threads_join_handle = file_uploader_threads::FileUploaderThreads::spawn_file_uploader_stream(file_receiver, database_transmitter);
     // initialize our database importer stream
     let database_writer_threads_join_handle = database_writer_threads::DatabaseWriterThreads::spawn_database_writer_stream(database_receiver);
 
-    if let Ok(lines) = read_lines("./data/test_decoding.txt") {
+    if let Ok(lines) = read_lines("./data/test_decoding_remove_column.txt") {
         // Consumes the iterator, returns an (Optional) String
-        for line in lines
+        for line in lines //.take(30)
         {
             if let Ok(ip) = line {
                 let parsed_line = parser.parse(&ip);
                 match parsed_line {
                     parser::ParsedLine::ContinueParse => {}, // Intentionally left blank, continue parsing
                     _ => {
-                        if let Some(file) = collector.add_change(parsed_line) {
-                            // TODO error handling
-                            file_transmitter.send(file).await;
+                        if let Some(change_vec) = collector.add_change(parsed_line) {
+                            for change in change_vec {
+                                // TODO error handling
+                                file_transmitter.send(change).await;
+                            }
                         }
                     }
                 }
@@ -56,9 +58,10 @@ async fn main() {
     }
     collector.print_stats();
 
-    let files: Vec<_> = collector.drain_final_changes();
-    for file in files {
-        file_transmitter.send(file).await;
+    let final_changes: Vec<_> = collector.drain_final_changes();
+    for change in final_changes {
+        // TODO error handling
+        file_transmitter.send(change).await;
     }
     collector.print_stats();
 

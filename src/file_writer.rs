@@ -13,6 +13,7 @@ use flate2::write::GzEncoder;
 
 // we have one of these per table,
 // it will hold the files to write to and handle the writing
+#[derive(Debug)]
 pub struct FileWriter {
     directory: PathBuf,
     pub insert_file: FileStruct,
@@ -22,6 +23,7 @@ pub struct FileWriter {
     pub table_name: TableName
 }
 
+#[derive(Debug)]
 enum CsvWriter {
     Uninitialized,
     ReadyToWrite(csv::Writer<flate2::write::GzEncoder<fs::File>>),
@@ -51,6 +53,7 @@ impl CsvWriter {
     }
 }
 
+#[derive(Debug)]
 pub struct FileStruct {
     pub file_name: PathBuf,
     pub table_name: TableName,
