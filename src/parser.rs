@@ -646,7 +646,7 @@ mod tests {
 
     use std::{collections::HashMap, hash::Hash};
     // https://stackoverflow.com/questions/42748277/how-do-i-test-for-the-equality-of-two-unordered-lists
-    fn my_eq<T>(a: &[T], b: &[T]) -> bool
+    fn equal_unordered_list<T>(a: &[T], b: &[T]) -> bool
     where
         T: Eq + Hash + std::fmt::Debug,
     {
@@ -687,7 +687,7 @@ mod tests {
                 }
             }
         }
-        assert!(my_eq(&collector, &vec![
+        assert!(equal_unordered_list(&collector, &vec![
             ParsedLine::Begin(11989965),
             ParsedLine::ChangedData { columns: vec![
                 Column::ChangedColumn { column_info: ColumnInfo::new("id".to_string(), "bigint".to_string()), value: Some(ColumnValue::Integer(376)) },
