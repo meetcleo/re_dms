@@ -434,7 +434,7 @@ impl ChangeProcessing {
                 self.table_holder.add_change(parsed_line).map(
                     |(returned_table, maybe_ddl_changes)| {
                         let mut start_vec = vec![ChangeProcessingResult::TableChanges(
-                            self.write_files_for_table(returned_table),
+                            Self::write_files_for_table(returned_table),
                         )];
                         if let Some(ddl_changes) = maybe_ddl_changes {
                             for ddl_change in ddl_changes {
@@ -464,7 +464,7 @@ impl ChangeProcessing {
             });
     }
 
-    fn write_files_for_table(&self, table: Table) -> file_writer::FileWriter {
+    fn write_files_for_table(table: Table) -> file_writer::FileWriter {
         let table_name = table.table_name;
         let mut file_writer = file_writer::FileWriter::new(table_name.clone());
         table.changeset.values().for_each(|record| {
@@ -482,13 +482,8 @@ impl ChangeProcessing {
             .table_holder
             .tables
             .drain()
-            .map(|(table_name, table)| {
-                let mut file_writer = file_writer::FileWriter::new(table_name.clone());
-                table.changeset.values().for_each(|record| {
-                    record.changes.iter().for_each(|change| {
-                        file_writer.add_change(change);
-                    })
-                });
+            .map(|(_table_name, table)| {
+                let file_writer = Self::write_files_for_table(table);
                 ChangeProcessingResult::TableChanges(file_writer)
             })
             .collect();
