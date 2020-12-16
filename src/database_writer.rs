@@ -1,4 +1,4 @@
-use deadpool_postgres::{ManagerConfig, Pool, RecyclingMethod};
+use deadpool_postgres::{Client, ManagerConfig, Pool, RecyclingMethod};
 use openssl::ssl::{SslConnector, SslMethod};
 use postgres_openssl::MakeTlsConnector;
 use serde::Deserialize;
@@ -11,7 +11,7 @@ use log::{debug, error, info, log_enabled, Level};
 
 use crate::change_processing::DdlChange;
 use crate::file_uploader::CleoS3File;
-use crate::parser::{ChangeKind, ColumnInfo, TableName};
+use crate::parser::{ChangeKind, ColumnInfo, SchemaAndTable, TableName};
 
 pub struct DatabaseWriter {
     connection_pool: Pool,
@@ -67,7 +67,7 @@ impl DatabaseWriter {
     }
 
     fn add_column_statement(&self, column_info: &ColumnInfo, table_name: &TableName) -> String {
-        let (schema_name, just_table_name) = table_name.split_once('.').unwrap();
+        let (schema_name, just_table_name) = table_name.schema_and_table_name();
         let column_name_and_type = self.column_and_type_for_column(column_info);
         format!(
             "alter table \"{schema_name}\".\"{just_table_name}\" add column {column_name_and_type}",
@@ -78,7 +78,7 @@ impl DatabaseWriter {
     }
 
     fn remove_column_statement(&self, column_info: &ColumnInfo, table_name: &TableName) -> String {
-        let (schema_name, just_table_name) = table_name.split_once('.').unwrap();
+        let (schema_name, just_table_name) = table_name.schema_and_table_name();
         // TODO: foreign keys
         format!(
             "alter table \"{schema_name}\".\"{just_table_name}\" drop column \"{column_name}\"",
@@ -106,9 +106,10 @@ impl DatabaseWriter {
         // let transaction = client.transaction().await.unwrap();
         let transaction = client;
         info!("GOT CONNECTION {}", table_name);
-        let (schema_name, just_table_name) = table_name.split_once('.').unwrap();
+        let (schema_name, just_table_name) = table_name.schema_and_table_name();
         assert!(!table_name.contains('"'));
         let staging_name = self.staging_name(s3_file);
+        self.create_table_if_not_exists(s3_file, &transaction).await;
         let create_staging_table = self.query_for_create_staging_table(
             kind,
             &s3_file.columns,
@@ -191,6 +192,42 @@ impl DatabaseWriter {
         info!("INSERTED {} {}", &remote_filepath, table_name);
     }
 
+    async fn create_table_if_not_exists(&self, s3_file: &CleoS3File, database_client: &Client) {
+        let (schema_name, just_table_name) = s3_file.table_name.schema_and_table_name();
+        let query = "
+            SELECT EXISTS (
+                SELECT 1 FROM information_schema.tables
+                WHERE  table_schema = $1
+                    AND    table_name   = $2
+            );";
+        let row = database_client
+            .query_one(query, &[&schema_name, &just_table_name])
+            .await
+            .unwrap();
+        let result: bool = row.get(0);
+        if !result {
+            // check this isn't a delete command, because if it is,
+            // we've got no table so job done (good thing because there's no schema)
+            if s3_file.kind == ChangeKind::Delete {
+                error!("Delete when there's no table {:?}!", s3_file.table_name);
+                return;
+            }
+            info!("table {} does not exist creating...", s3_file.table_name);
+            // TODO: distkey
+            let create_table_query = format!(
+                "create table \"{schema_name}\".\"{just_table_name}\" ({columns}) SORTKEY(id)",
+                schema_name = schema_name,
+                just_table_name = just_table_name,
+                columns = self.values_description_for_table(&s3_file.columns)
+            );
+            let row = database_client
+                .execute(create_table_query.as_str(), &[])
+                .await
+                .unwrap();
+            info!("finished creating table {} ", s3_file.table_name);
+        } // else the table exists and do nothing
+    }
+
     fn staging_name<'a>(&self, s3_file: &'a CleoS3File) -> String {
         // s3://bucket/path/schema.table_name_insert.tar.gz -> table_name_insert_staging
         //                         ^^^^^^^^^^^^^^^^^
@@ -220,25 +257,25 @@ impl DatabaseWriter {
                 format!(
                     "create temp table \"{}\" ({})",
                     &staging_name,
-                    columns
-                        .iter()
-                        .map(|x| self.column_and_type_for_column(x))
-                        .collect::<Vec<_>>()
-                        .join(",")
+                    self.values_description_for_table(columns)
                 )
             }
             ChangeKind::Update => {
                 format!(
                     "create temp table \"{}\" ({})",
                     &staging_name,
-                    columns
-                        .iter()
-                        .map(|x| self.column_and_type_for_column(x))
-                        .collect::<Vec<_>>()
-                        .join(",")
+                    self.values_description_for_table(columns)
                 )
             }
         }
+    }
+
+    fn values_description_for_table(&self, columns: &Vec<ColumnInfo>) -> String {
+        columns
+            .iter()
+            .map(|x| self.column_and_type_for_column(x))
+            .collect::<Vec<_>>()
+            .join(",")
     }
 
     // NOTE: if you have a column named "tag" it needs to be surrounded by quotes

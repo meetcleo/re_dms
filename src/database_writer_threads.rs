@@ -46,7 +46,6 @@ impl DatabaseWriterThreads {
                 database_uploader_stream.join_all_table_threads().await;
 
                 println!("finished waiting on threads");
-                // TODO: shut down table_streams
                 break;
             }
         }
