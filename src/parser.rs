@@ -3,11 +3,18 @@ use log::{debug, error, info, log_enabled, Level};
 use std::fmt;
 
 use internment::ArcIntern;
+use lazy_static::lazy_static;
+use regex::Regex;
 use std::collections::HashSet;
 
 pub type TableName = ArcIntern<String>;
 pub type ColumnName = ArcIntern<String>;
 pub type ColumnType = ArcIntern<String>;
+
+lazy_static! {
+    static ref PARSE_COLUMN_REGEX: regex::Regex = Regex::new(r"(^[^\[^\]]+)\[([^:]+)\]:").unwrap();
+    static ref COLUMN_TYPE_REGEX: regex::Regex = Regex::new(r"^.+\[\]$").unwrap();
+}
 
 // for tablename
 pub trait SchemaAndTable {
@@ -251,6 +258,7 @@ impl ColumnValue {
                 "json" => ColumnValue::parse_text(string, continue_parse),
                 "public.hstore" => ColumnValue::parse_text(string, continue_parse),
                 "interval" => ColumnValue::parse_text(string, continue_parse),
+                "array" => ColumnValue::parse_text(string, continue_parse),
                 _ => panic!("Unknown column type: {:?}", column_type),
             };
             (Some(column_value), rest_of_string)
@@ -443,23 +451,27 @@ impl Parser {
     }
 
     fn parse_column<'a>(&self, string: &'a str) -> (Column, &'a str) {
-        let column_name = slice_until_char(string, '[').unwrap();
-        // + 1 for '['
-        assert_eq!(&string[column_name.len()..column_name.len() + 1], "[");
-        let string_without_column_name = &string[column_name.len() + 1..];
+        let re = &PARSE_COLUMN_REGEX;
+        let captures = re.captures(string).unwrap();
+
+        let column_name = captures
+            .get(1)
+            .expect("couldn't match column_name")
+            .as_str();
+        let column_type = captures
+            .get(2)
+            .expect("couldn't match column_type")
+            .as_str();
+        // For array types, remove the inner type specification - we treat all array types as text
+        let column_type = &COLUMN_TYPE_REGEX
+            .replace_all(column_type, "array")
+            .to_string();
+        let string_without_column_type =
+            &string[captures.get(0).map_or("", |m| m.as_str()).len() + 0..];
 
         debug!("column_name: {}", column_name);
-
-        let column_type = slice_until_char(string_without_column_name, ']').unwrap();
-
         debug!("column_type: {}", column_type);
-
-        // + 2 for ']:'
-        assert_eq!(
-            &string_without_column_name[column_type.len()..column_type.len() + 2],
-            "]:"
-        );
-        let string_without_column_type = &string_without_column_name[column_type.len() + 2..];
+        debug!("string_without_column_type: {}", string_without_column_type);
 
         let (column_value, rest) =
             ColumnValue::parse(string_without_column_type, column_type, false);
@@ -635,9 +647,37 @@ mod tests {
         assert!(is_quote_escaped(&string, 2));
     }
 
+    #[test]
+    fn parses_array_type() {
+        let mut parser = Parser::new(true);
+        let line = "table public.users: UPDATE: id[bigint]:123 foobar[text]:'foobar string' baz_array[character varying[]]:'{\"foo\", \"bar\", \"baz\"}'";
+        let result = parser.parse(&line.to_string());
+        assert_eq!(
+            result,
+            ParsedLine::ChangedData {
+                columns: vec![
+                    Column::ChangedColumn {
+                        column_info: ColumnInfo::new("id".to_string(), "bigint".to_string()),
+                        value: Some(ColumnValue::Integer(123))
+                    },
+                    Column::ChangedColumn {
+                        column_info: ColumnInfo::new("foobar".to_string(), "text".to_string()),
+                        value: Some(ColumnValue::Text("foobar string".to_string()))
+                    },
+                    Column::ChangedColumn {
+                        column_info: ColumnInfo::new("baz_array".to_string(), "array".to_string()),
+                        value: Some(ColumnValue::Text("{\"foo\", \"bar\", \"baz\"}".to_string()))
+                    }
+                ],
+                table_name: ArcIntern::new("public.users".to_string()),
+                kind: ChangeKind::Update
+            }
+        );
+    }
+
     use std::{collections::HashMap, hash::Hash};
     // https://stackoverflow.com/questions/42748277/how-do-i-test-for-the-equality-of-two-unordered-lists
-    fn my_eq<T>(a: &[T], b: &[T]) -> bool
+    fn equal_unordered_list<T>(a: &[T], b: &[T]) -> bool
     where
         T: Eq + Hash + std::fmt::Debug,
     {
@@ -678,7 +718,7 @@ mod tests {
                 }
             }
         }
-        assert!(my_eq(&collector, &vec![
+        assert!(equal_unordered_list(&collector, &vec![
             ParsedLine::Begin(11989965),
             ParsedLine::ChangedData { columns: vec![
                 Column::ChangedColumn { column_info: ColumnInfo::new("id".to_string(), "bigint".to_string()), value: Some(ColumnValue::Integer(376)) },
