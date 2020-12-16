@@ -454,8 +454,14 @@ impl Parser {
         let re = &PARSE_COLUMN_REGEX;
         let captures = re.captures(string).unwrap();
 
-        let column_name = captures.get(1).map_or("", |m| m.as_str());
-        let column_type = captures.get(2).map_or("", |m| m.as_str());
+        let column_name = captures
+            .get(1)
+            .expect("couldn't match column_name")
+            .as_str();
+        let column_type = captures
+            .get(2)
+            .expect("couldn't match column_type")
+            .as_str();
         // For array types, remove the inner type specification - we treat all array types as text
         let column_type = &COLUMN_TYPE_REGEX
             .replace_all(column_type, "array")
