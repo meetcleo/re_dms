@@ -13,7 +13,7 @@ pub type ColumnType = ArcIntern<String>;
 
 lazy_static! {
     static ref PARSE_COLUMN_REGEX: regex::Regex = Regex::new(r"(^[^\[^\]]+)\[([^:]+)\]:").unwrap();
-    static ref COLUMN_TYPE_REGEX: regex::Regex = Regex::new(r"\[.+\]").unwrap();
+    static ref COLUMN_TYPE_REGEX: regex::Regex = Regex::new(r"^.+\[\]$").unwrap();
 }
 
 // for tablename
@@ -456,8 +456,10 @@ impl Parser {
 
         let column_name = captures.get(1).map_or("", |m| m.as_str());
         let column_type = captures.get(2).map_or("", |m| m.as_str());
-        // For array types, remove the inner type specification (treat it as varchar)
-        let column_type = &COLUMN_TYPE_REGEX.replace_all(column_type, "").to_string();
+        // For array types, remove the inner type specification - we treat all array types as text
+        let column_type = &COLUMN_TYPE_REGEX
+            .replace_all(column_type, "array")
+            .to_string();
         let string_without_column_type =
             &string[captures.get(0).map_or("", |m| m.as_str()).len() + 0..];
 
@@ -642,7 +644,7 @@ mod tests {
     #[test]
     fn parses_array_type() {
         let mut parser = Parser::new(true);
-        let line = "table: public.users: UPDATE: id[bigint]:123 foobar[text]:'foobar string' baz_array[array[text]]:'{\"foo\", \"bar\", \"baz\"}'";
+        let line = "table: public.users: UPDATE: id[bigint]:123 foobar[text]:'foobar string' baz_array[character varying[]]:'{\"foo\", \"bar\", \"baz\"}'";
         let result = parser.parse(&line.to_string());
         println!("{:?}", result);
     }
