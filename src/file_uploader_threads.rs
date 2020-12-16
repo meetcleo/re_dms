@@ -1,24 +1,24 @@
-use tokio::sync::mpsc;
+use std::collections::HashMap;
 use std::sync::Arc;
-use std::collections::{ HashMap };
+use tokio::sync::mpsc;
 
-use crate::parser::{TableName};
-use crate::file_uploader::{FileUploader, CleoS3File};
 use crate::change_processing;
+use crate::file_uploader::{CleoS3File, FileUploader};
+use crate::parser::TableName;
 
 pub const DEFAULT_CHANNEL_SIZE: usize = 1000;
 
 pub enum UploaderStageResult {
     S3File(CleoS3File),
-    DdlChange(change_processing::DdlChange)
+    DdlChange(change_processing::DdlChange),
 }
 
 impl UploaderStageResult {
     // clone, table name is cheap
     pub fn table_name(&self) -> TableName {
         match self {
-            Self::S3File(cleo_s3_file) => { cleo_s3_file.table_name.clone() },
-            Self::DdlChange(ddl_change) => { ddl_change.table_name()}
+            Self::S3File(cleo_s3_file) => cleo_s3_file.table_name.clone(),
+            Self::DdlChange(ddl_change) => ddl_change.table_name(),
         }
     }
 }
@@ -30,25 +30,27 @@ pub struct GenericTableThreadSplitter<SharedResource, ChannelType> {
     pub table_streams: HashMap<TableName, GenericTableThread<ChannelType>>,
 }
 // this holds a task, and channel for each table and streams the uploads to them.
-pub type FileUploaderThreads = GenericTableThreadSplitter<FileUploader, change_processing::ChangeProcessingResult>;
+pub type FileUploaderThreads =
+    GenericTableThreadSplitter<FileUploader, change_processing::ChangeProcessingResult>;
 
 // this holds the task reference and the channel to send to for it.
 pub struct GenericTableThread<ChannelType> {
     pub sender: Option<mpsc::Sender<ChannelType>>,
-    pub join_handle: Option<tokio::task::JoinHandle<()>>
+    pub join_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
 pub type FileTableThread = GenericTableThread<change_processing::ChangeProcessingResult>;
 
-impl<SharedResource,ChannelType> GenericTableThreadSplitter<SharedResource, ChannelType> {
+impl<SharedResource, ChannelType> GenericTableThreadSplitter<SharedResource, ChannelType> {
     pub async fn join_all_table_threads(&mut self) {
-        let join_handles = self.table_streams.values_mut()
-            .filter_map(
-                |table_thread| {
-                    // drop every channel. since we should have already sent everything.
-                    table_thread.drop_sender_and_return_join_handle()
-                }
-            ).collect::<Vec<_>>();
+        let join_handles = self
+            .table_streams
+            .values_mut()
+            .filter_map(|table_thread| {
+                // drop every channel. since we should have already sent everything.
+                table_thread.drop_sender_and_return_join_handle()
+            })
+            .collect::<Vec<_>>();
         println!("got all join_handles file_uploader waiting");
         futures::future::join_all(join_handles).await;
         println!("finished waiting on all file_uploader join handles");
@@ -73,14 +75,26 @@ impl FileUploaderThreads {
     pub fn new() -> FileUploaderThreads {
         let shared_resource = Arc::new(FileUploader::new());
         let table_streams = HashMap::new();
-        FileUploaderThreads {shared_resource, table_streams}
+        FileUploaderThreads {
+            shared_resource,
+            table_streams,
+        }
     }
 
-    pub fn spawn_file_uploader_stream(receiver: mpsc::Receiver<change_processing::ChangeProcessingResult>, result_sender: mpsc::Sender<UploaderStageResult>) -> tokio::task::JoinHandle<()> {
-        tokio::spawn(FileUploaderThreads::file_uploader_stream(receiver, result_sender))
+    pub fn spawn_file_uploader_stream(
+        receiver: mpsc::Receiver<change_processing::ChangeProcessingResult>,
+        result_sender: mpsc::Sender<UploaderStageResult>,
+    ) -> tokio::task::JoinHandle<()> {
+        tokio::spawn(FileUploaderThreads::file_uploader_stream(
+            receiver,
+            result_sender,
+        ))
     }
 
-    pub async fn file_uploader_stream(mut receiver: mpsc::Receiver<change_processing::ChangeProcessingResult>, result_sender: mpsc::Sender<UploaderStageResult>) {
+    pub async fn file_uploader_stream(
+        mut receiver: mpsc::Receiver<change_processing::ChangeProcessingResult>,
+        result_sender: mpsc::Sender<UploaderStageResult>,
+    ) {
         let mut file_uploader_stream = FileUploaderThreads::new();
         loop {
             let received = receiver.recv().await;
@@ -91,17 +105,17 @@ impl FileUploaderThreads {
                 if let Some(ref mut inner_sender) = sender.sender {
                     inner_sender.send(file_writer).await;
                 }
-                sender.sender.as_ref().map(|inner_sender| async move {
-                    inner_sender
-                });
-            }
-            else {
+                sender
+                    .sender
+                    .as_ref()
+                    .map(|inner_sender| async move { inner_sender });
+            } else {
                 println!("channel hung up main");
                 file_uploader_stream.join_all_table_threads().await;
 
                 println!("finished waiting on threads");
                 // TODO: shut down table_streams
-                break
+                break;
             }
         }
     }
@@ -109,20 +123,34 @@ impl FileUploaderThreads {
     // will either get a sender to a async thread
     // for the table_name.
     // if one doesn't exist will spawn one
-    pub fn get_sender(&mut self, table_name: TableName, result_sender: &mpsc::Sender<UploaderStageResult>) -> &mut FileTableThread {
+    pub fn get_sender(
+        &mut self,
+        table_name: TableName,
+        result_sender: &mpsc::Sender<UploaderStageResult>,
+    ) -> &mut FileTableThread {
         let cloned_uploader = self.get_shared_resource();
-        self.table_streams
-            .entry(table_name)
-            .or_insert_with(|| {
-                let (inner_sender, receiver) = mpsc::channel::<change_processing::ChangeProcessingResult>(DEFAULT_CHANNEL_SIZE);
-                let sender = Some(inner_sender);
-                let cloned_result_sender = result_sender.clone();
-                let join_handle = Some(tokio::spawn(Self::spawn_table_thread(receiver, cloned_uploader, cloned_result_sender)));
-                FileTableThread { sender, join_handle }
-            })
+        self.table_streams.entry(table_name).or_insert_with(|| {
+            let (inner_sender, receiver) =
+                mpsc::channel::<change_processing::ChangeProcessingResult>(DEFAULT_CHANNEL_SIZE);
+            let sender = Some(inner_sender);
+            let cloned_result_sender = result_sender.clone();
+            let join_handle = Some(tokio::spawn(Self::spawn_table_thread(
+                receiver,
+                cloned_uploader,
+                cloned_result_sender,
+            )));
+            FileTableThread {
+                sender,
+                join_handle,
+            }
+        })
     }
 
-    pub async fn spawn_table_thread(mut receiver: mpsc::Receiver<change_processing::ChangeProcessingResult>, uploader: Arc<FileUploader>, mut result_sender: mpsc::Sender<UploaderStageResult>) {
+    pub async fn spawn_table_thread(
+        mut receiver: mpsc::Receiver<change_processing::ChangeProcessingResult>,
+        uploader: Arc<FileUploader>,
+        mut result_sender: mpsc::Sender<UploaderStageResult>,
+    ) {
         let mut last_table_name = None;
         loop {
             // need to do things this way rather than a match for the borrow checker
@@ -139,7 +167,7 @@ impl FileUploaderThreads {
                             let result_change = UploaderStageResult::S3File(s3_file);
                             result_sender.send(result_change).await;
                         }
-                    },
+                    }
                     change_processing::ChangeProcessingResult::DdlChange(ddl_change) => {
                         // rewrap into the output enum
                         let result_change = UploaderStageResult::DdlChange(ddl_change);
