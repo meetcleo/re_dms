@@ -1,22 +1,27 @@
 #[allow(unused_imports)]
-use log::{debug, error, log_enabled, info, Level};
+use log::{debug, error, info, log_enabled, Level};
 use std::fmt;
 
-use std::collections::{  HashSet };
 use internment::ArcIntern;
+use std::collections::HashSet;
 
 pub type TableName = ArcIntern<String>;
 pub type ColumnName = ArcIntern<String>;
 pub type ColumnType = ArcIntern<String>;
 
 // define more config later
-struct ParserConfig { include_xids: bool }
+struct ParserConfig {
+    include_xids: bool,
+}
 struct ParserState {
-    currently_parsing: Option<ParsedLine>
+    currently_parsing: Option<ParsedLine>,
 }
 
 // define config later
-pub struct Parser { config: ParserConfig, parse_state: ParserState }
+pub struct Parser {
+    config: ParserConfig,
+    parse_state: ParserState,
+}
 
 #[derive(Debug)]
 pub enum ColumnValue {
@@ -25,41 +30,72 @@ pub enum ColumnValue {
     Numeric(String),
     Text(String),
     IncompleteText(String),
-    UnchangedToast
+    UnchangedToast,
 }
 
 impl fmt::Display for ColumnValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ColumnValue::UnchangedToast => { write!(f, "unchanged-toast-datum") },
-            ColumnValue::Boolean(x) => { write!(f,"{}", x)},
-            ColumnValue::Integer(x) => { write!(f,"{}", x)},
-            ColumnValue::Numeric(x) => { write!(f,"{}", x)},
-            ColumnValue::Text(x) => { write!(f,"{}", x)},
-            ColumnValue::IncompleteText(x) => { write!(f,"{}", x)},
+            ColumnValue::UnchangedToast => {
+                write!(f, "unchanged-toast-datum")
+            }
+            ColumnValue::Boolean(x) => {
+                write!(f, "{}", x)
+            }
+            ColumnValue::Integer(x) => {
+                write!(f, "{}", x)
+            }
+            ColumnValue::Numeric(x) => {
+                write!(f, "{}", x)
+            }
+            ColumnValue::Text(x) => {
+                write!(f, "{}", x)
+            }
+            ColumnValue::IncompleteText(x) => {
+                write!(f, "{}", x)
+            }
         }
     }
 }
 
 #[derive(Debug)]
 pub enum Column {
-    UnchangedToastColumn { column_info: ColumnInfo },
-    ChangedColumn { column_info: ColumnInfo, value: Option<ColumnValue> },
-    IncompleteColumn { column_info: ColumnInfo, value: ColumnValue }
+    UnchangedToastColumn {
+        column_info: ColumnInfo,
+    },
+    ChangedColumn {
+        column_info: ColumnInfo,
+        value: Option<ColumnValue>,
+    },
+    IncompleteColumn {
+        column_info: ColumnInfo,
+        value: ColumnValue,
+    },
 }
 
 // happy to clone it, it only holds two pointers
-#[derive(Debug,Clone,Hash,Eq,PartialEq)]
+#[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub struct ColumnInfo {
     pub name: ColumnName,
-    pub column_type: ColumnType
+    pub column_type: ColumnType,
 }
 
 impl ColumnInfo {
-    pub fn column_name(&self) -> &str { self.name.as_ref() }
-    pub fn column_type(&self) -> &str { self.column_type.as_ref() }
-    pub fn new<T: ToString>(name: T, column_type: T) -> ColumnInfo { ColumnInfo {name: ColumnName::new(name.to_string()), column_type: ColumnType::new(column_type.to_string())}}
-    pub fn is_id_column(&self) -> bool {self.name.as_ref() == "id"}
+    pub fn column_name(&self) -> &str {
+        self.name.as_ref()
+    }
+    pub fn column_type(&self) -> &str {
+        self.column_type.as_ref()
+    }
+    pub fn new<T: ToString>(name: T, column_type: T) -> ColumnInfo {
+        ColumnInfo {
+            name: ColumnName::new(name.to_string()),
+            column_type: ColumnType::new(column_type.to_string()),
+        }
+    }
+    pub fn is_id_column(&self) -> bool {
+        self.name.as_ref() == "id"
+    }
 }
 
 impl Column {
@@ -68,39 +104,40 @@ impl Column {
     }
     pub fn column_info(&self) -> &ColumnInfo {
         match self {
-            Column::UnchangedToastColumn{ column_info,.. } => column_info,
-            Column::ChangedColumn{ column_info,.. } => column_info,
-            Column::IncompleteColumn{ column_info,.. } => column_info,
+            Column::UnchangedToastColumn { column_info, .. } => column_info,
+            Column::ChangedColumn { column_info, .. } => column_info,
+            Column::IncompleteColumn { column_info, .. } => column_info,
         }
     }
     // for when you _know_ a column has a value, used for id columns
     pub fn column_value_unwrap(&self) -> &ColumnValue {
         match self {
-            Column::ChangedColumn{value, ..} => {
-                match value {
-                    Some(inner) => inner,
-                    None => panic!("panic!")
-                }
+            Column::ChangedColumn { value, .. } => match value {
+                Some(inner) => inner,
+                None => panic!("panic!"),
             },
-            Column::IncompleteColumn{value, ..} => {
-                &value
-            },
-            Column::UnchangedToastColumn{..} => { panic!("tried to get value for unchanged_toast_column") }
+            Column::IncompleteColumn { value, .. } => &value,
+            Column::UnchangedToastColumn { .. } => {
+                panic!("tried to get value for unchanged_toast_column")
+            }
         }
     }
 
     pub fn column_value_for_changed_column(&self) -> Option<&ColumnValue> {
         match self {
-            Column::ChangedColumn{value,..} => {
-                value.as_ref()
-            },
-            _ => { panic!("column_value_for_changed_column called on non-changed-column {:?}", self)}
+            Column::ChangedColumn { value, .. } => value.as_ref(),
+            _ => {
+                panic!(
+                    "column_value_for_changed_column called on non-changed-column {:?}",
+                    self
+                )
+            }
         }
     }
     pub fn is_changed_data_column(&self) -> bool {
         match self {
-            Column::ChangedColumn{..} => true,
-            _ => false
+            Column::ChangedColumn { .. } => true,
+            _ => false,
         }
     }
     pub fn is_id_column(&self) -> bool {
@@ -108,19 +145,19 @@ impl Column {
     }
 }
 
-#[derive(Clone,Copy,Debug,PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ChangeKind {
     Insert,
     Update,
-    Delete
+    Delete,
 }
 
 impl std::string::ToString for ChangeKind {
     fn to_string(&self) -> String {
         match self {
-            Self::Insert => { "insert".to_string() },
-            Self::Update => { "update".to_string() },
-            Self::Delete => { "delete".to_string() }
+            Self::Insert => "insert".to_string(),
+            Self::Update => "update".to_string(),
+            Self::Delete => "delete".to_string(),
         }
     }
 }
@@ -131,47 +168,53 @@ pub enum ParsedLine {
     Begin(i64),
     // int is xid
     Commit(i64),
-    ChangedData { columns: Vec<Column>, table_name: TableName, kind: ChangeKind },
+    ChangedData {
+        columns: Vec<Column>,
+        table_name: TableName,
+        kind: ChangeKind,
+    },
     TruncateTable, // TODO
-    ContinueParse // this is to signify that we're halfway through parsing a change
+    ContinueParse, // this is to signify that we're halfway through parsing a change
 }
 
 impl ParsedLine {
     pub fn find_id_column(&self) -> &Column {
         match self {
-            ParsedLine::ChangedData { columns,.. } => {
+            ParsedLine::ChangedData { columns, .. } => {
                 // unwrap because this is the id column which _must_ be here
                 columns.iter().find(|&x| x.is_id_column()).unwrap()
-            },
-            _ => panic!("tried to find id column of non changed_data")
+            }
+            _ => panic!("tried to find id column of non changed_data"),
         }
     }
 
     pub fn column_info_set(&self) -> Option<HashSet<ColumnInfo>> {
         match self {
-            ParsedLine::ChangedData { columns, kind,.. } => {
+            ParsedLine::ChangedData { columns, kind, .. } => {
                 if kind == &ChangeKind::Delete {
                     None
                 } else {
                     Some(columns.iter().map(|x| x.column_info().clone()).collect())
                 }
-            },
-            _ => panic!("tried to find id column of non changed_data")
+            }
+            _ => panic!("tried to find id column of non changed_data"),
         }
     }
     // panic if called on something that's not ChangedData
     pub fn columns_for_changed_data(&self) -> &Vec<Column> {
         match self {
-            ParsedLine::ChangedData {columns, ..} => {
-                columns
-            },
-            _ => panic!("changed columns for changed data called on non-changed data")
+            ParsedLine::ChangedData { columns, .. } => columns,
+            _ => panic!("changed columns for changed data called on non-changed data"),
         }
     }
 }
 
 impl ColumnValue {
-    fn parse<'a>(string: &'a str, column_type: &str, continue_parse: bool) -> (Option<ColumnValue>, &'a str) {
+    fn parse<'a>(
+        string: &'a str,
+        column_type: &str,
+        continue_parse: bool,
+    ) -> (Option<ColumnValue>, &'a str) {
         const NULL_STRING: &str = "null";
         if string.starts_with(NULL_STRING) {
             let (_start, rest) = ColumnValue::split_until_char_or_end(string, ' ');
@@ -195,7 +238,7 @@ impl ColumnValue {
                 "json" => ColumnValue::parse_text(string, continue_parse),
                 "public.hstore" => ColumnValue::parse_text(string, continue_parse),
                 "interval" => ColumnValue::parse_text(string, continue_parse),
-                _ => panic!("Unknown column type: {:?}", column_type)
+                _ => panic!("Unknown column type: {:?}", column_type),
             };
             (Some(column_value), rest_of_string)
         }
@@ -209,7 +252,7 @@ impl ColumnValue {
         if string.starts_with("unchanged-toast-datum") {
             let (start, rest) = ColumnValue::split_until_char_or_end(string, ' ');
             assert_eq!(start, "unchanged-toast-datum");
-            return (ColumnValue::UnchangedToast, rest)
+            return (ColumnValue::UnchangedToast, rest);
         }
         if !continue_parse {
             assert_eq!(&string[0..1], "'");
@@ -231,11 +274,11 @@ impl ColumnValue {
                     let escaped = is_escaped(without_first_quote, total_index);
                     if !escaped {
                         complete_text = true;
-                        break
+                        break;
                     }
                     // move past and keep looking
                     total_index += 1;
-                },
+                }
                 None => {
                     total_index = without_first_quote.len();
                     break;
@@ -255,12 +298,8 @@ impl ColumnValue {
     }
     fn split_until_char_or_end(string: &str, character: char) -> (&str, &str) {
         match string.split_once(character) {
-            Some((start, rest)) => {
-                (start, rest)
-            }
-            None => {
-                string.split_at(string.len())
-            }
+            Some((start, rest)) => (start, rest),
+            None => string.split_at(string.len()),
         }
     }
     fn parse_numeric<'a>(string: &'a str) -> (ColumnValue, &'a str) {
@@ -272,8 +311,7 @@ impl ColumnValue {
         let bool_value = match start {
             "true" => true,
             "false" => false,
-            _ => panic!("Unknown boolvalue {:?}", start)
-
+            _ => panic!("Unknown boolvalue {:?}", start),
         };
         (ColumnValue::Boolean(bool_value), rest)
     }
@@ -283,13 +321,16 @@ impl Parser {
     pub fn new(include_xids: bool) -> Parser {
         Parser {
             config: ParserConfig { include_xids },
-            parse_state: ParserState { currently_parsing: None }
+            parse_state: ParserState {
+                currently_parsing: None,
+            },
         }
     }
 
     pub fn parse(&mut self, string: &String) -> ParsedLine {
         match string {
-            x if { x.starts_with("BEGIN")} => self.parse_begin(x),
+            x if { x.starts_with("BEGIN") } => self.parse_begin(x),
+
             x if { x.starts_with("COMMIT") } => self.parse_commit(x),
             x if { x.starts_with("table") } => self.parse_change(x),
             x if { self.parse_state.currently_parsing.is_some() } => self.continue_parse(x),
@@ -335,8 +376,12 @@ impl Parser {
         // fuck you if you put a colon in a table name, you psychopath
         let table_name = slice_until_colon_or_end(string_without_tag);
         // + 2 for colon + space
-        assert_eq!(&string_without_tag[table_name.len()..table_name.len() + 2], ": ");
-        let string_without_table = &string_without_tag[table_name.len() + 2..string_without_tag.len()];
+        assert_eq!(
+            &string_without_tag[table_name.len()..table_name.len() + 2],
+            ": "
+        );
+        let string_without_table =
+            &string_without_tag[table_name.len() + 2..string_without_tag.len()];
         let kind_string = slice_until_colon_or_end(string_without_table);
 
         // TODO: split early here for truncate columns
@@ -346,15 +391,19 @@ impl Parser {
         debug!("table: {:?} change: {:?}", table_name, kind_string);
 
         // + 2 for colon + space
-        assert_eq!(&string_without_table[kind_string.len()..kind_string.len() + 2], ": ");
-        let string_without_kind = &string_without_table[kind_string.len() + 2..string_without_table.len()];
+        assert_eq!(
+            &string_without_table[kind_string.len()..kind_string.len() + 2],
+            ": "
+        );
+        let string_without_kind =
+            &string_without_table[kind_string.len() + 2..string_without_table.len()];
 
         let columns = self.parse_columns(string_without_kind);
         self.handle_parse_changed_data(table_name, kind, columns)
     }
 
     fn column_is_incomplete(&self, columns: &Vec<Column>) -> bool {
-        if let Some(Column::IncompleteColumn{..}) = columns.last() {
+        if let Some(Column::IncompleteColumn { .. }) = columns.last() {
             true
         } else {
             false
@@ -366,7 +415,7 @@ impl Parser {
             "INSERT" => ChangeKind::Insert,
             "UPDATE" => ChangeKind::Update,
             "DELETE" => ChangeKind::Delete,
-            _ => panic!("Unknown change kind: {}", string)
+            _ => panic!("Unknown change kind: {}", string),
         }
     }
 
@@ -394,15 +443,27 @@ impl Parser {
         debug!("column_type: {}", column_type);
 
         // + 2 for ']:'
-        assert_eq!(&string_without_column_name[column_type.len()..column_type.len() + 2], "]:");
+        assert_eq!(
+            &string_without_column_name[column_type.len()..column_type.len() + 2],
+            "]:"
+        );
         let string_without_column_type = &string_without_column_name[column_type.len() + 2..];
 
-        let (column_value, rest) = ColumnValue::parse(string_without_column_type, column_type, false);
+        let (column_value, rest) =
+            ColumnValue::parse(string_without_column_type, column_type, false);
         let column_info = ColumnInfo::new(column_name, column_type);
         let column = match column_value {
-            Some(ColumnValue::UnchangedToast) => Column::UnchangedToastColumn { column_info: column_info},
-            Some(ColumnValue::IncompleteText(string)) => Column::IncompleteColumn { column_info: column_info, value: ColumnValue::IncompleteText(string) },
-            _ => Column::ChangedColumn { column_info: column_info, value: column_value }
+            Some(ColumnValue::UnchangedToast) => Column::UnchangedToastColumn {
+                column_info: column_info,
+            },
+            Some(ColumnValue::IncompleteText(string)) => Column::IncompleteColumn {
+                column_info: column_info,
+                value: ColumnValue::IncompleteText(string),
+            },
+            _ => Column::ChangedColumn {
+                column_info: column_info,
+                value: column_value,
+            },
         };
         debug!("parse_column: returned: {:?}", column);
         (column, rest)
@@ -413,8 +474,11 @@ impl Parser {
         let incomplete_change = self.parse_state.currently_parsing.take();
         self.parse_state.currently_parsing = None;
         match incomplete_change {
-            Some(ParsedLine::ChangedData {kind, table_name, mut columns}) => {
-
+            Some(ParsedLine::ChangedData {
+                kind,
+                table_name,
+                mut columns,
+            }) => {
                 let incomplete_column = columns.pop().unwrap();
                 assert!(matches!(incomplete_column, Column::IncompleteColumn {..}));
                 match incomplete_column {
@@ -451,17 +515,25 @@ impl Parser {
                     },
                     _ => panic!("trying to parse an incomplete_column that's not a Column::IncompleteColumn {:?}", incomplete_column)
                 }
-            },
-            _ => panic!("Trying to continue parsing a {:?} rather than a ParsedLine::ChangedData", incomplete_change)
+            }
+            _ => panic!(
+                "Trying to continue parsing a {:?} rather than a ParsedLine::ChangedData",
+                incomplete_change
+            ),
         }
     }
 
-    fn handle_parse_changed_data(&mut self, table_name: &str, kind: ChangeKind, columns: Vec<Column>) -> ParsedLine {
+    fn handle_parse_changed_data(
+        &mut self,
+        table_name: &str,
+        kind: ChangeKind,
+        columns: Vec<Column>,
+    ) -> ParsedLine {
         let incomplete_parse = self.column_is_incomplete(&columns);
         let changed_data = ParsedLine::ChangedData {
             table_name: ArcIntern::new(table_name.to_owned()),
             kind: kind,
-            columns: columns
+            columns: columns,
         };
 
         let result = if incomplete_parse {
@@ -478,14 +550,14 @@ impl Parser {
 
 fn slice_until_char(string: &str, character: char) -> Option<&str> {
     let found_index = string.find(character);
-    found_index.and_then(|x| Some(&string[0..x]) )
+    found_index.and_then(|x| Some(&string[0..x]))
 }
 
 fn slice_until_char_or_end(string: &str, character: char) -> &str {
     let sliced = slice_until_char(string, character);
     match sliced {
         None => string,
-        Some(sliced_str) => sliced_str
+        Some(sliced_str) => sliced_str,
     }
 }
 
@@ -501,9 +573,8 @@ fn is_escaped(string: &str, index: usize) -> bool {
 
 fn is_backwards_escaped_by_char(string: &str, index: usize, character: &str) -> bool {
     if index == 0 {
-        return false
-    }
-    else if string.get(index - 1..index).unwrap_or("") != character {
+        return false;
+    } else if string.get(index - 1..index).unwrap_or("") != character {
         return false;
     } else {
         !is_backwards_escaped_by_char(string, index - 1, character)
@@ -516,11 +587,11 @@ fn is_backwards_escaped_by_char(string: &str, index: usize, character: &str) -> 
 // think of escaping things as a pair, since they're both quotes only the last one in a chain can be unescaped
 fn is_quote_escaped(string: &str, index: usize) -> bool {
     // next character is a quote
-    if index + 1 < string.len() &&
-        string.get(index..index+1).unwrap_or("") == r"'" &&
-        string.get(index+1..index+2).unwrap_or("") == r"'"
+    if index + 1 < string.len()
+        && string.get(index..index + 1).unwrap_or("") == r"'"
+        && string.get(index + 1..index + 2).unwrap_or("") == r"'"
     {
-        return true
+        return true;
     } else if index == 0 {
         return false;
     } else if index < string.len() {
