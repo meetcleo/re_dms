@@ -109,7 +109,10 @@ impl DatabaseWriter {
         let (schema_name, just_table_name) = table_name.schema_and_table_name();
         assert!(!table_name.contains('"'));
         let staging_name = self.staging_name(s3_file);
-        self.create_table_if_not_exists(s3_file, &transaction).await;
+        let return_early = self.create_table_if_not_exists(s3_file, &transaction).await;
+        if return_early {
+            return;
+        }
         let create_staging_table = self.query_for_create_staging_table(
             kind,
             &s3_file.columns,
@@ -192,7 +195,13 @@ impl DatabaseWriter {
         info!("INSERTED {} {}", &remote_filepath, table_name);
     }
 
-    async fn create_table_if_not_exists(&self, s3_file: &CleoS3File, database_client: &Client) {
+    // bool is whether we return early. Only necessary for delete where the table
+    // does not exist
+    async fn create_table_if_not_exists(
+        &self,
+        s3_file: &CleoS3File,
+        database_client: &Client,
+    ) -> bool {
         let (schema_name, just_table_name) = s3_file.table_name.schema_and_table_name();
         let query = "
             SELECT EXISTS (
@@ -210,7 +219,7 @@ impl DatabaseWriter {
             // we've got no table so job done (good thing because there's no schema)
             if s3_file.kind == ChangeKind::Delete {
                 error!("Delete when there's no table {:?}!", s3_file.table_name);
-                return;
+                return true;
             }
             info!("table {} does not exist creating...", s3_file.table_name);
             // TODO: distkey
@@ -226,6 +235,7 @@ impl DatabaseWriter {
                 .unwrap();
             info!("finished creating table {} ", s3_file.table_name);
         } // else the table exists and do nothing
+        false
     }
 
     fn staging_name<'a>(&self, s3_file: &'a CleoS3File) -> String {
