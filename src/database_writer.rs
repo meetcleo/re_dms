@@ -1,4 +1,4 @@
-use deadpool_postgres::{ManagerConfig, Pool, RecyclingMethod };
+use deadpool_postgres::{ManagerConfig, Pool, RecyclingMethod};
 use openssl::ssl::{SslConnector, SslMethod};
 use postgres_openssl::MakeTlsConnector;
 use serde::Deserialize;
@@ -7,19 +7,19 @@ use dotenv::dotenv;
 use std::env;
 
 #[allow(unused_imports)]
-use log::{debug, error, log_enabled, info, Level};
+use log::{debug, error, info, log_enabled, Level};
 
+use crate::change_processing::DdlChange;
 use crate::file_uploader::CleoS3File;
 use crate::parser::{ChangeKind, ColumnInfo, TableName};
-use crate::change_processing::DdlChange;
 
 pub struct DatabaseWriter {
-    connection_pool: Pool
+    connection_pool: Pool,
 }
 
 #[derive(Debug, Deserialize)]
 struct Config {
-    pg: deadpool_postgres::Config
+    pg: deadpool_postgres::Config,
 }
 
 impl Config {
@@ -33,7 +33,7 @@ impl Config {
 impl DatabaseWriter {
     pub fn new() -> DatabaseWriter {
         DatabaseWriter {
-            connection_pool: DatabaseWriter::create_connection_pool()
+            connection_pool: DatabaseWriter::create_connection_pool(),
         }
     }
 
@@ -41,7 +41,9 @@ impl DatabaseWriter {
         dotenv().ok();
         let mut cfg = Config::from_env().unwrap();
         // cfg.dbname = Some("cleo_development".to_string());
-        cfg.pg.manager = Some(ManagerConfig { recycling_method: RecyclingMethod::Fast });
+        cfg.pg.manager = Some(ManagerConfig {
+            recycling_method: RecyclingMethod::Fast,
+        });
         let builder = SslConnector::builder(SslMethod::tls()).expect("fuck");
         let connector = MakeTlsConnector::new(builder.build());
         cfg.pg.create_pool(connector).unwrap()
@@ -49,8 +51,12 @@ impl DatabaseWriter {
 
     pub async fn handle_ddl(&self, ddl_change: &DdlChange) {
         let alter_table_statement = match ddl_change {
-            DdlChange::AddColumn(column_info, table_name) => { self.add_column_statement(column_info, table_name)},
-            DdlChange::RemoveColumn(column_info, table_name) => { self.remove_column_statement(column_info, table_name)},
+            DdlChange::AddColumn(column_info, table_name) => {
+                self.add_column_statement(column_info, table_name)
+            }
+            DdlChange::RemoveColumn(column_info, table_name) => {
+                self.remove_column_statement(column_info, table_name)
+            }
         };
         info!("alter table statement: {}", alter_table_statement.as_str());
         let client = self.connection_pool.get().await.unwrap();
@@ -63,27 +69,36 @@ impl DatabaseWriter {
     fn add_column_statement(&self, column_info: &ColumnInfo, table_name: &TableName) -> String {
         let (schema_name, just_table_name) = table_name.split_once('.').unwrap();
         let column_name_and_type = self.column_and_type_for_column(column_info);
-        format!("alter table \"{schema_name}\".\"{just_table_name}\" add column {column_name_and_type}",
-                schema_name=&schema_name,
-                just_table_name=&just_table_name,
-                column_name_and_type=&column_name_and_type
+        format!(
+            "alter table \"{schema_name}\".\"{just_table_name}\" add column {column_name_and_type}",
+            schema_name = &schema_name,
+            just_table_name = &just_table_name,
+            column_name_and_type = &column_name_and_type
         )
     }
 
     fn remove_column_statement(&self, column_info: &ColumnInfo, table_name: &TableName) -> String {
         let (schema_name, just_table_name) = table_name.split_once('.').unwrap();
         // TODO: foreign keys
-        format!("alter table \"{schema_name}\".\"{just_table_name}\" drop column \"{column_name}\"",
-                schema_name=&schema_name,
-                just_table_name=&just_table_name,
-                column_name=&column_info.name
+        format!(
+            "alter table \"{schema_name}\".\"{just_table_name}\" drop column \"{column_name}\"",
+            schema_name = &schema_name,
+            just_table_name = &just_table_name,
+            column_name = &column_info.name
         )
     }
 
     pub async fn import_table(&self, s3_file: &CleoS3File) {
-        let CleoS3File{ kind, table_name,.. } = s3_file;
-        if ["public.transaction_descriptions", "public.user_relationships_timestamps"].contains(&table_name.as_str()) {
-            return
+        let CleoS3File {
+            kind, table_name, ..
+        } = s3_file;
+        if [
+            "public.transaction_descriptions",
+            "public.user_relationships_timestamps",
+        ]
+        .contains(&table_name.as_str())
+        {
+            return;
         }
         // temp tables are present in the session, so we still need to drop it at the end of the transaction
         info!("BEGIN INSERT {}", table_name);
@@ -94,13 +109,23 @@ impl DatabaseWriter {
         let (schema_name, just_table_name) = table_name.split_once('.').unwrap();
         assert!(!table_name.contains('"'));
         let staging_name = self.staging_name(s3_file);
-        let create_staging_table = self.query_for_create_staging_table(kind, &s3_file.columns, &staging_name, &schema_name, &just_table_name);
+        let create_staging_table = self.query_for_create_staging_table(
+            kind,
+            &s3_file.columns,
+            &staging_name,
+            &schema_name,
+            &just_table_name,
+        );
         println!("{}", create_staging_table);
 
         let remote_filepath = s3_file.remote_path();
         let access_key_id = env::var("AWS_ACCESS_KEY_ID").unwrap();
         let secret_access_key = env::var("AWS_SECRET_ACCESS_KEY").unwrap();
-        let credentials_string = format!("aws_access_key_id={aws_access_key_id};aws_secret_access_key={secret_access_key}", aws_access_key_id=access_key_id, secret_access_key=secret_access_key);
+        let credentials_string = format!(
+            "aws_access_key_id={aws_access_key_id};aws_secret_access_key={secret_access_key}",
+            aws_access_key_id = access_key_id,
+            secret_access_key = secret_access_key
+        );
         // no gzip
         let copy_to_staging_table = format!(
             "
@@ -116,29 +141,47 @@ impl DatabaseWriter {
             compupdate off
             statupdate off
 ",
-            staging_name=&staging_name,
-            remote_filepath=&remote_filepath,
-            credentials_string=&credentials_string);
+            staging_name = &staging_name,
+            remote_filepath = &remote_filepath,
+            credentials_string = &credentials_string
+        );
 
         let data_migration_query_string = self.query_for_change_kind(
             kind,
             staging_name.as_ref(),
             just_table_name.as_ref(),
             schema_name.as_ref(),
-            &s3_file.columns
+            &s3_file.columns,
         );
         let drop_staging_table = format!("drop table if exists {}", &staging_name);
         // let insert_query = format!();
-        let result = transaction.execute(create_staging_table.as_str(), &[]).await;
+        let result = transaction
+            .execute(create_staging_table.as_str(), &[])
+            .await;
         if let Err(err) = result {
-            error!("Received error: {} {} {} {:?}", table_name, remote_filepath, create_staging_table.as_str(),err);
+            error!(
+                "Received error: {} {} {} {:?}",
+                table_name,
+                remote_filepath,
+                create_staging_table.as_str(),
+                err
+            );
         }
         info!("CREATED STAGING TABLE {}", table_name);
-        transaction.execute(copy_to_staging_table.as_str(), &[]).await.unwrap();
+        transaction
+            .execute(copy_to_staging_table.as_str(), &[])
+            .await
+            .unwrap();
         info!("COPIED TO STAGING TABLE {}", table_name);
-        transaction.execute(data_migration_query_string.as_str(), &[]).await.unwrap();
+        transaction
+            .execute(data_migration_query_string.as_str(), &[])
+            .await
+            .unwrap();
         info!("INSERTED FROM STAGING TABLE {}", table_name);
-        transaction.execute(drop_staging_table.as_str(), &[]).await.unwrap();
+        transaction
+            .execute(drop_staging_table.as_str(), &[])
+            .await
+            .unwrap();
         info!("DROPPED STAGING TABLE {}", table_name);
         // TEMP
         // serialiseable isolation error. might be to do with dms.
@@ -158,16 +201,27 @@ impl DatabaseWriter {
         format!("{}_staging", dot_until_dot)
     }
 
-    fn query_for_create_staging_table(&self, kind: &ChangeKind, columns: &Vec<ColumnInfo>, staging_name: &str, schema_name: &str, table_name: &str) -> String {
+    fn query_for_create_staging_table(
+        &self,
+        kind: &ChangeKind,
+        columns: &Vec<ColumnInfo>,
+        staging_name: &str,
+        schema_name: &str,
+        table_name: &str,
+    ) -> String {
         match kind {
             ChangeKind::Insert => {
-                format!("create temp table \"{}\" (like \"{}\".\"{}\")", &staging_name, &schema_name, &table_name)
+                format!(
+                    "create temp table \"{}\" (like \"{}\".\"{}\")",
+                    &staging_name, &schema_name, &table_name
+                )
             }
             ChangeKind::Delete => {
                 format!(
                     "create temp table \"{}\" ({})",
                     &staging_name,
-                    columns.iter()
+                    columns
+                        .iter()
                         .map(|x| self.column_and_type_for_column(x))
                         .collect::<Vec<_>>()
                         .join(",")
@@ -177,7 +231,8 @@ impl DatabaseWriter {
                 format!(
                     "create temp table \"{}\" ({})",
                     &staging_name,
-                    columns.iter()
+                    columns
+                        .iter()
                         .map(|x| self.column_and_type_for_column(x))
                         .collect::<Vec<_>>()
                         .join(",")
@@ -190,12 +245,19 @@ impl DatabaseWriter {
     fn column_and_type_for_column(&self, column_info: &ColumnInfo) -> String {
         format!(
             "\"{column_name}\" {column_type}",
-            column_name=column_info.column_name(),
-         column_type=self.column_type_mapping(column_info.column_type()).as_str()
+            column_name = column_info.column_name(),
+            column_type = self.column_type_mapping(column_info.column_type()).as_str()
         )
     }
 
-    fn query_for_change_kind(&self, kind: &ChangeKind, staging_name: &str, table_name: &str, schema_name: &str, columns: &Vec<ColumnInfo> ) -> String {
+    fn query_for_change_kind(
+        &self,
+        kind: &ChangeKind,
+        staging_name: &str,
+        table_name: &str,
+        schema_name: &str,
+        columns: &Vec<ColumnInfo>,
+    ) -> String {
         match kind {
             ChangeKind::Insert => {
                 format!(
@@ -207,7 +269,7 @@ impl DatabaseWriter {
                     table_name=&table_name,
                     staging_name=&staging_name
                 )
-            },
+            }
             ChangeKind::Delete => {
                 format!(
                     "delete from \"{schema_name}\".\"{table_name}\" where id in (select id from \"{staging_name}\")",
@@ -224,15 +286,16 @@ impl DatabaseWriter {
                     set {columns_to_update} from \"{staging_name}\" s
                     where t.id = s.id
                     ",
-                    schema_name=&schema_name,
-                    table_name=&table_name,
-                    columns_to_update=columns.iter()
+                    schema_name = &schema_name,
+                    table_name = &table_name,
+                    columns_to_update = columns
+                        .iter()
                         .filter(|x| !x.is_id_column())
                         .map(|x| x.column_name())
-                        .map(|x| format!("\"{}\" = s.\"{}\"",x,x))
+                        .map(|x| format!("\"{}\" = s.\"{}\"", x, x))
                         .collect::<Vec<_>>()
                         .join(","),
-                    staging_name=&staging_name
+                    staging_name = &staging_name
                 )
             }
         }
@@ -256,7 +319,7 @@ impl DatabaseWriter {
             "public.hstore" => "CHARACTER VARYING(65535)",
             "uuid" => "CHARACTER VARYING(36)",
             "interval" => "CHARACTER VARYING(65535)",
-            _ => column_type
+            _ => column_type,
         };
         return_type.to_string()
     }

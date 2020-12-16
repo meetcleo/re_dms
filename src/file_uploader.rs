@@ -1,20 +1,19 @@
 // extern crate futures;
 
-use rusoto_core::{Region, ByteStream};
-use rusoto_s3::{S3, S3Client, PutObjectRequest};
+use futures::TryStreamExt;
+use rusoto_core::{ByteStream, Region};
+use rusoto_s3::{PutObjectRequest, S3Client, S3};
 use tokio::fs::File;
-use tokio_util::codec;
-use futures::{TryStreamExt}; // , FutureExt
-// // sync
-// use std::fs;
-// use std::io::Read;
+use tokio_util::codec; // , FutureExt
+                       // // sync
+                       // use std::fs;
+                       // use std::io::Read;
 
-
-use crate::file_writer::{FileWriter, FileStruct};
+use crate::file_writer::{FileStruct, FileWriter};
 use crate::parser::{ChangeKind, ColumnInfo, TableName};
 
 pub struct FileUploader {
-    s3_client: S3Client
+    s3_client: S3Client,
 }
 
 // little bag of data
@@ -22,7 +21,7 @@ pub struct CleoS3File {
     pub remote_filename: String,
     pub kind: ChangeKind,
     pub table_name: TableName,
-    pub columns: Vec<ColumnInfo>
+    pub columns: Vec<ColumnInfo>,
 }
 impl CleoS3File {
     pub fn remote_path(&self) -> String {
@@ -35,14 +34,15 @@ impl CleoS3File {
 const BUCKET_NAME: &str = "cleo-data-science";
 
 impl FileUploader {
-
     pub fn new() -> FileUploader {
-        FileUploader { s3_client: S3Client::new(Region::UsEast1) }
+        FileUploader {
+            s3_client: S3Client::new(Region::UsEast1),
+        }
     }
     // Not actually async yet here
     pub async fn upload_to_s3(&self, file_name: &str, file_struct: &FileStruct) -> CleoS3File {
         // println!("copying file {}", file_name);
-        let local_filename =  file_name;
+        let local_filename = file_name;
         let remote_filename = "mike-test-2/".to_owned() + file_name;
         // println!("remote key {}", remote_filename);
         // async
@@ -58,7 +58,8 @@ impl FileUploader {
                 // our s3 library can then stream that to s3. This means we pause the async task on every bit of both read and
                 // write IO and are very efficient.
                 // map_ok is a future combinator, that will apply the closure to each frame (freeze-ing the frame to make it immutable)
-                let byte_stream = codec::FramedRead::new(tokio_file, codec::BytesCodec::new()).map_ok(|frame| frame.freeze() );
+                let byte_stream = codec::FramedRead::new(tokio_file, codec::BytesCodec::new())
+                    .map_ok(|frame| frame.freeze());
                 // // sync
                 // let mut file = std::fs::File::open(file_name).unwrap();
                 // let mut buffer = Vec::new();
@@ -74,13 +75,11 @@ impl FileUploader {
                     ..Default::default()
                 };
 
-                let maybe_uploaded = self.s3_client
-                    .put_object(put_request)
-                    .await;
+                let maybe_uploaded = self.s3_client.put_object(put_request).await;
                 match maybe_uploaded {
                     Ok(_result) => {
                         println!("uploaded file {}", remote_filename);
-                    },
+                    }
                     Err(result) => {
                         panic!("Failed to upload file {} {:?}", remote_filename, result);
                     }
@@ -90,13 +89,15 @@ impl FileUploader {
                         remote_filename: remote_filename.clone(),
                         kind: file_struct.kind,
                         table_name: file_struct.table_name.clone(),
-                        columns: columns.clone()
+                        columns: columns.clone(),
                     }
                 } else {
                     panic!("columns not initialized on file {}", file_name);
                 }
-            },
-            Err(err) => { panic!("problem with {:?} {:?}", file_name, err); }
+            }
+            Err(err) => {
+                panic!("problem with {:?} {:?}", file_name, err);
+            }
         }
     }
 
@@ -110,13 +111,14 @@ impl FileUploader {
         upload_files_vec.push(deletes_file);
         upload_files_vec.extend(updates_files);
 
-        let s3_file_results = upload_files_vec.iter()
+        let s3_file_results = upload_files_vec
+            .iter()
             .filter(|x| x.exists())
-            .map(
-            |file| async move {
-                self.upload_to_s3(file.file_name.to_str().unwrap(), &file).await
-            }
-        ).collect::<Vec<_>>();
+            .map(|file| async move {
+                self.upload_to_s3(file.file_name.to_str().unwrap(), &file)
+                    .await
+            })
+            .collect::<Vec<_>>();
         futures::future::join_all(s3_file_results).await
     }
 }
