@@ -1,10 +1,12 @@
-use tokio::sync::mpsc;
+use std::collections::HashMap;
 use std::sync::Arc;
-use std::collections::{ HashMap };
+use tokio::sync::mpsc;
 
-use crate::file_uploader_threads::{GenericTableThread, GenericTableThreadSplitter, DEFAULT_CHANNEL_SIZE, UploaderStageResult};
 use crate::database_writer::DatabaseWriter;
-use crate::parser::{TableName};
+use crate::file_uploader_threads::{
+    GenericTableThread, GenericTableThreadSplitter, UploaderStageResult, DEFAULT_CHANNEL_SIZE,
+};
+use crate::parser::TableName;
 
 // manages the thread-per-table and the fanout
 pub type DatabaseTableThread = GenericTableThread<UploaderStageResult>;
@@ -12,22 +14,25 @@ pub type DatabaseTableThread = GenericTableThread<UploaderStageResult>;
 // single thread handle
 pub type DatabaseWriterThreads = GenericTableThreadSplitter<DatabaseWriter, UploaderStageResult>;
 
-
 impl DatabaseWriterThreads {
     pub fn new() -> DatabaseWriterThreads {
         let shared_resource = Arc::new(DatabaseWriter::new());
         let table_streams = HashMap::new();
-        DatabaseWriterThreads {shared_resource, table_streams}
+        DatabaseWriterThreads {
+            shared_resource,
+            table_streams,
+        }
     }
 
-    pub fn spawn_database_writer_stream(receiver: mpsc::Receiver<UploaderStageResult>) -> tokio::task::JoinHandle<()> {
+    pub fn spawn_database_writer_stream(
+        receiver: mpsc::Receiver<UploaderStageResult>,
+    ) -> tokio::task::JoinHandle<()> {
         tokio::spawn(DatabaseWriterThreads::database_uploader_stream(receiver))
     }
 
     pub async fn database_uploader_stream(mut receiver: mpsc::Receiver<UploaderStageResult>) {
         let mut database_uploader_stream = DatabaseWriterThreads::new();
         loop {
-
             let received = receiver.recv().await;
             if let Some(s3_file) = received {
                 let table_name = s3_file.table_name();
@@ -36,14 +41,13 @@ impl DatabaseWriterThreads {
                 if let Some(ref mut inner_sender) = sender.sender {
                     inner_sender.send(s3_file).await;
                 }
-            }
-            else {
+            } else {
                 println!("channel hung up main");
                 database_uploader_stream.join_all_table_threads().await;
 
                 println!("finished waiting on threads");
                 // TODO: shut down table_streams
-                break
+                break;
             }
         }
     }
@@ -57,17 +61,25 @@ impl DatabaseWriterThreads {
     // if one doesn't exist will spawn one
     pub fn get_sender(&mut self, table_name: TableName) -> &mut DatabaseTableThread {
         let cloned_uploader = self.get_uploader();
-        self.table_streams
-            .entry(table_name)
-            .or_insert_with(|| {
-                let (inner_sender, receiver) = mpsc::channel::<UploaderStageResult>(DEFAULT_CHANNEL_SIZE);
-                let sender = Some(inner_sender);
-                let join_handle = Some(tokio::spawn(Self::spawn_table_thread(receiver, cloned_uploader)));
-                DatabaseTableThread { sender, join_handle }
-            })
+        self.table_streams.entry(table_name).or_insert_with(|| {
+            let (inner_sender, receiver) =
+                mpsc::channel::<UploaderStageResult>(DEFAULT_CHANNEL_SIZE);
+            let sender = Some(inner_sender);
+            let join_handle = Some(tokio::spawn(Self::spawn_table_thread(
+                receiver,
+                cloned_uploader,
+            )));
+            DatabaseTableThread {
+                sender,
+                join_handle,
+            }
+        })
     }
 
-    pub async fn spawn_table_thread(mut receiver: mpsc::Receiver<UploaderStageResult>, uploader: Arc<DatabaseWriter>) {
+    pub async fn spawn_table_thread(
+        mut receiver: mpsc::Receiver<UploaderStageResult>,
+        uploader: Arc<DatabaseWriter>,
+    ) {
         let mut last_table_name = None;
         loop {
             // need to do things this way rather than a match for the borrow checker
@@ -78,7 +90,7 @@ impl DatabaseWriterThreads {
                 match uploader_stage_result {
                     UploaderStageResult::S3File(cleo_s3_file) => {
                         uploader.import_table(&cleo_s3_file).await;
-                    },
+                    }
                     UploaderStageResult::DdlChange(ddl_change) => {
                         uploader.handle_ddl(&ddl_change).await;
                     }
