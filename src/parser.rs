@@ -3,12 +3,18 @@ use log::{debug, error, info, log_enabled, Level};
 use std::fmt;
 
 use internment::ArcIntern;
+use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::HashSet;
 
 pub type TableName = ArcIntern<String>;
 pub type ColumnName = ArcIntern<String>;
 pub type ColumnType = ArcIntern<String>;
+
+lazy_static! {
+    static ref PARSE_COLUMN_REGEX: regex::Regex = Regex::new(r"(^[^\[^\]]+)\[([^:]+)\]:").unwrap();
+    static ref COLUMN_TYPE_REGEX: regex::Regex = Regex::new(r"\[.+\]").unwrap();
+}
 
 // for tablename
 pub trait SchemaAndTable {
@@ -445,16 +451,13 @@ impl Parser {
     }
 
     fn parse_column<'a>(&self, string: &'a str) -> (Column, &'a str) {
-        let re = Regex::new(r"(^[^\[^\]]+)\[([^:]+)\]:").unwrap();
+        let re = &PARSE_COLUMN_REGEX;
         let captures = re.captures(string).unwrap();
 
         let column_name = captures.get(1).map_or("", |m| m.as_str());
         let column_type = captures.get(2).map_or("", |m| m.as_str());
         // For array types, remove the inner type specification (treat it as varchar)
-        let column_type = &Regex::new(r"\[.+\]")
-            .unwrap()
-            .replace_all(column_type, "")
-            .to_string();
+        let column_type = &COLUMN_TYPE_REGEX.replace_all(column_type, "").to_string();
         let string_without_column_type =
             &string[captures.get(0).map_or("", |m| m.as_str()).len() + 0..];
 
