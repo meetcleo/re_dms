@@ -9,6 +9,19 @@ pub type TableName = ArcIntern<String>;
 pub type ColumnName = ArcIntern<String>;
 pub type ColumnType = ArcIntern<String>;
 
+// for tablename
+pub trait SchemaAndTable {
+    fn schema_and_table_name(&self) -> (&str, &str);
+}
+
+// schema.table_name
+// we assume a valid table name, so unwrap
+impl SchemaAndTable for TableName {
+    fn schema_and_table_name(&self) -> (&str, &str) {
+        self.split_once('.').unwrap()
+    }
+}
+
 // define more config later
 struct ParserConfig {
     include_xids: bool,

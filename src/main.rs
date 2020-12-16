@@ -45,7 +45,7 @@ async fn main() {
             database_receiver,
         );
 
-    if let Ok(lines) = read_lines("./data/test_decoding_remove_column.txt") {
+    if let Ok(lines) = read_lines("./data/test_decoding_add_table.txt") {
         // Consumes the iterator, returns an (Optional) String
         for line in lines
         //.take(30)
