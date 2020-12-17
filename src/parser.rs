@@ -43,7 +43,7 @@ pub struct Parser {
     parse_state: ParserState,
 }
 
-#[derive(Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum ColumnValue {
     Boolean(bool),
     Integer(i64),
@@ -78,7 +78,7 @@ impl fmt::Display for ColumnValue {
     }
 }
 
-#[derive(Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum Column {
     UnchangedToastColumn {
         column_info: ColumnInfo,
@@ -182,7 +182,7 @@ impl std::string::ToString for ChangeKind {
     }
 }
 
-#[derive(Debug, Hash, Eq, PartialEq)]
+#[derive(Clone, Debug, Hash, Eq, PartialEq)]
 pub enum ParsedLine {
     // int is xid
     Begin(i64),
