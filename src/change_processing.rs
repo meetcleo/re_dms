@@ -1062,4 +1062,141 @@ mod tests {
         };
         assert_eq!(change_processing.table_holder, expected_table_holder_1);
     }
+
+    #[test]
+    fn dml_change_update_update_delete() {
+        let table_name = TableName::new("foobar".to_string());
+        let id_column_info = ColumnInfo::new("id", "bigint");
+        let text_column_info = ColumnInfo::new("foobar", "text");
+
+        // CHANGE 1 - UPDATE
+        let changed_columns_1 = vec![
+            Column::ChangedColumn {
+                column_info: id_column_info.clone(),
+                value: Some(ColumnValue::Integer(1)),
+            },
+            Column::ChangedColumn {
+                column_info: text_column_info.clone(),
+                value: Some(ColumnValue::Text("1".to_string())),
+            },
+        ];
+        let change_1 = ParsedLine::ChangedData {
+            kind: ChangeKind::Update,
+            table_name: table_name.clone(),
+            columns: changed_columns_1,
+        };
+        let mut change_processing = ChangeProcessing::new();
+        let result_1 = change_processing.add_change(change_1);
+        let mut expected_changes_1 = BTreeMap::<i64, ChangeSet>::new();
+        expected_changes_1.insert(
+            1,
+            ChangeSet {
+                changes: vec![ParsedLine::ChangedData {
+                    columns: vec![
+                        Column::ChangedColumn {
+                            column_info: id_column_info.clone(),
+                            value: Some(ColumnValue::Integer(1)),
+                        },
+                        Column::ChangedColumn {
+                            column_info: text_column_info.clone(),
+                            value: Some(ColumnValue::Text("1".to_string())),
+                        },
+                    ],
+                    table_name: table_name.clone(),
+                    kind: ChangeKind::Update,
+                }],
+            },
+        );
+        let expected_change_set_1 = ChangeSetWithColumnType::IntColumnType(expected_changes_1);
+        let expected_table_holder_1 = TableHolder {
+            tables: hashmap!(table_name.clone() => Table {
+                table_name: table_name.clone(),
+                column_info: Some(hashset!(id_column_info.clone(), text_column_info.clone())),
+                changeset: expected_change_set_1 }),
+        };
+        assert_eq!(change_processing.table_holder, expected_table_holder_1);
+        assert!(result_1.is_none());
+
+        // CHANGE 2 - UPDATE
+        let changed_columns_2 = vec![
+            Column::ChangedColumn {
+                column_info: id_column_info.clone(),
+                value: Some(ColumnValue::Integer(1)),
+            },
+            Column::ChangedColumn {
+                column_info: text_column_info.clone(),
+                value: Some(ColumnValue::Text("2".to_string())),
+            },
+        ];
+        let change_2 = ParsedLine::ChangedData {
+            kind: ChangeKind::Update,
+            table_name: table_name.clone(),
+            columns: changed_columns_2,
+        };
+        let result_2 = change_processing.add_change(change_2);
+        let mut expected_changes_2 = BTreeMap::<i64, ChangeSet>::new();
+        expected_changes_2.insert(
+            1,
+            ChangeSet {
+                changes: vec![ParsedLine::ChangedData {
+                    columns: vec![
+                        Column::ChangedColumn {
+                            column_info: id_column_info.clone(),
+                            value: Some(ColumnValue::Integer(1)),
+                        },
+                        Column::ChangedColumn {
+                            column_info: text_column_info.clone(),
+                            value: Some(ColumnValue::Text("2".to_string())),
+                        },
+                    ],
+                    table_name: table_name.clone(),
+                    kind: ChangeKind::Update,
+                }],
+            },
+        );
+        let expected_change_set_2 = ChangeSetWithColumnType::IntColumnType(expected_changes_2);
+        let expected_table_holder_2 = TableHolder {
+            tables: hashmap!(table_name.clone() => Table {
+                table_name: table_name.clone(),
+                column_info: Some(hashset!(id_column_info.clone(), text_column_info.clone())),
+                changeset: expected_change_set_2 }),
+        };
+        assert_eq!(change_processing.table_holder, expected_table_holder_2);
+        assert!(result_2.is_none());
+
+        // CHANGE 3 - DELETE
+        let changed_columns_3 = vec![Column::ChangedColumn {
+            column_info: id_column_info.clone(),
+            value: Some(ColumnValue::Integer(1)),
+        }];
+        let change_3 = ParsedLine::ChangedData {
+            kind: ChangeKind::Delete,
+            table_name: table_name.clone(),
+            columns: changed_columns_3,
+        };
+        let result_3 = change_processing.add_change(change_3);
+        let mut expected_changes_3 = BTreeMap::<i64, ChangeSet>::new();
+        expected_changes_3.insert(
+            1,
+            ChangeSet {
+                changes: vec![ParsedLine::ChangedData {
+                    columns: vec![Column::ChangedColumn {
+                        column_info: id_column_info.clone(),
+                        value: Some(ColumnValue::Integer(1)),
+                    }],
+                    table_name: table_name.clone(),
+                    kind: ChangeKind::Delete,
+                }],
+            },
+        );
+        let expected_change_set_3 = ChangeSetWithColumnType::IntColumnType(expected_changes_3);
+        let expected_table_holder_3 = TableHolder {
+            tables: hashmap!(table_name.clone() => Table {
+                table_name: table_name.clone(),
+                column_info: Some(hashset!(id_column_info.clone(), text_column_info.clone())),
+                changeset: expected_change_set_3 }),
+        };
+        assert_eq!(change_processing.table_holder, expected_table_holder_3);
+        assert!(result_3.is_none());
+    }
 }
