@@ -72,10 +72,16 @@ impl ChangeSet {
                 // if we have a delete, we can only follow it by an insert
                 if let ParsedLine::ChangedData {
                     kind: ChangeKind::Insert,
-                    ..
+                    columns,
+                    table_name,
                 } = change
                 {
-                    self.push_change(change)
+                    self.changes.clear();
+                    self.changes.push(ParsedLine::ChangedData {
+                        kind: ChangeKind::Update,
+                        columns,
+                        table_name,
+                    })
                 } else {
                     panic!("subsequent change after delete")
                 }
@@ -1002,5 +1008,65 @@ mod tests {
         let mut change_processing = ChangeProcessing::new();
         change_processing.add_change(change_1.clone());
         change_processing.add_change(change_2.clone());
+    }
+
+    #[test]
+    fn dml_change_delete_insert_updates() {
+        let table_name = TableName::new("foobar".to_string());
+        let id_column_info = ColumnInfo::new("id", "bigint");
+        let text_column_info = ColumnInfo::new("foobar", "text");
+
+        let changed_columns_1 = vec![
+            Column::ChangedColumn {
+                column_info: id_column_info.clone(),
+                value: Some(ColumnValue::Integer(1)),
+            },
+            Column::ChangedColumn {
+                column_info: text_column_info.clone(),
+                value: Some(ColumnValue::Text("1".to_string())),
+            },
+        ];
+        let change_1 = ParsedLine::ChangedData {
+            kind: ChangeKind::Delete,
+            table_name: table_name.clone(),
+            columns: changed_columns_1.clone(),
+        };
+        let change_2 = ParsedLine::ChangedData {
+            kind: ChangeKind::Insert,
+            table_name: table_name.clone(),
+            columns: changed_columns_1.clone(),
+        };
+        let mut change_processing = ChangeProcessing::new();
+        change_processing.add_change(change_1.clone());
+        change_processing.add_change(change_2.clone());
+
+        let mut expected_changes_1 = BTreeMap::<i64, ChangeSet>::new();
+        expected_changes_1.insert(
+            1,
+            ChangeSet {
+                changes: vec![ParsedLine::ChangedData {
+                    columns: vec![
+                        Column::ChangedColumn {
+                            column_info: id_column_info.clone(),
+                            value: Some(ColumnValue::Integer(1)),
+                        },
+                        Column::ChangedColumn {
+                            column_info: text_column_info.clone(),
+                            value: Some(ColumnValue::Text("1".to_string())),
+                        },
+                    ],
+                    table_name: table_name.clone(),
+                    kind: ChangeKind::Update,
+                }],
+            },
+        );
+        let expected_change_set_1 = ChangeSetWithColumnType::IntColumnType(expected_changes_1);
+        let expected_table_holder_1 = TableHolder {
+            tables: hashmap!(table_name.clone() => Table {
+                table_name: table_name.clone(),
+                column_info: Some(hashset!(id_column_info.clone(), text_column_info.clone())),
+                changeset: expected_change_set_1 }),
+        };
+        assert_eq!(change_processing.table_holder, expected_table_holder_1);
     }
 }
