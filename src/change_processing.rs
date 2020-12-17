@@ -1199,4 +1199,24 @@ mod tests {
         assert_eq!(change_processing.table_holder, expected_table_holder_3);
         assert!(result_3.is_none());
     }
+
+    #[test]
+    #[should_panic]
+    fn dml_change_delete_delete_panics() {
+        let table_name = TableName::new("foobar".to_string());
+        let id_column_info = ColumnInfo::new("id", "bigint");
+
+        let changed_columns = vec![Column::ChangedColumn {
+            column_info: id_column_info.clone(),
+            value: Some(ColumnValue::Integer(1)),
+        }];
+        let change = ParsedLine::ChangedData {
+            kind: ChangeKind::Delete,
+            table_name: table_name.clone(),
+            columns: changed_columns,
+        };
+        let mut change_processing = ChangeProcessing::new();
+        change_processing.add_change(change.clone());
+        change_processing.add_change(change.clone());
+    }
 }
