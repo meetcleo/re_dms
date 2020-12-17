@@ -88,8 +88,16 @@ impl ChangeSet {
             } else if let ParsedLine::ChangedData { kind, .. } = change {
                 match kind {
                     ChangeKind::Delete => {
-                        self.changes.clear();
-                        self.push_change(change);
+                        if let Some(ParsedLine::ChangedData {
+                            kind: ChangeKind::Insert,
+                            ..
+                        }) = self.changes.last()
+                        {
+                            self.changes.clear();
+                        } else {
+                            self.changes.clear();
+                            self.push_change(change);
+                        }
                     }
                     ChangeKind::Update => self.handle_update(change),
                     _ => {
@@ -892,22 +900,7 @@ mod tests {
         };
         let result_3 = change_processing.add_change(change_3);
         let mut expected_changes_3 = BTreeMap::<i64, ChangeSet>::new();
-        expected_changes_3.insert(
-            1,
-            ChangeSet {
-                changes: vec![
-                    // TODO: think this should be empty as we are Inserting, then Deleting, which should cancel each other out?
-                    ParsedLine::ChangedData {
-                        columns: vec![Column::ChangedColumn {
-                            column_info: id_column_info.clone(),
-                            value: Some(ColumnValue::Integer(1)),
-                        }],
-                        table_name: table_name.clone(),
-                        kind: ChangeKind::Delete,
-                    },
-                ],
-            },
-        );
+        expected_changes_3.insert(1, ChangeSet { changes: vec![] });
         let expected_change_set_3 = ChangeSetWithColumnType::IntColumnType(expected_changes_3);
         let expected_table_holder_3 = TableHolder {
             tables: hashmap!(table_name.clone() => Table {
