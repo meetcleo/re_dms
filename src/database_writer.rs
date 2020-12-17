@@ -220,6 +220,8 @@ impl DatabaseWriter {
             if s3_file.kind == ChangeKind::Delete {
                 error!("Delete when there's no table {:?}!", s3_file.table_name);
                 return true;
+            } else if s3_file.kind == ChangeKind::Update {
+                panic!("update when there's no table {:?}!", s3_file.table_name);
             }
             info!("table {} does not exist creating...", s3_file.table_name);
             // TODO: distkey
