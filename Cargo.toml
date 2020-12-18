@@ -57,3 +57,6 @@ config = "0.10.1"
 maplit = "1.0.2"
 assert_matches = "1.4.0"
 
+[dev_dependencies]
+mock_instant = { version = "0.2", features = ["sync"] }
+
