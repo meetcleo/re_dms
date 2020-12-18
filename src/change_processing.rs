@@ -35,8 +35,7 @@ const CHANGES_PER_TABLE: usize = 100000;
 
 #[derive(Debug, Eq, PartialEq)]
 struct ChangeSet {
-    // TODO
-    changes: Vec<ParsedLine>,
+    changes: Option<ParsedLine>,
 }
 
 #[derive(Debug)]
@@ -57,17 +56,17 @@ impl ChangeProcessingResult {
 
 impl ChangeSet {
     fn new() -> ChangeSet {
-        ChangeSet { changes: vec![] }
+        ChangeSet { changes: None }
     }
     // batch apply enabled
     fn add_change(&mut self, change: ParsedLine) {
-        if self.changes.len() == 0 {
-            self.push_change(change);
+        if self.changes == None {
+            self.changes = Some(change);
         } else {
             if let Some(ParsedLine::ChangedData {
                 kind: ChangeKind::Delete,
                 ..
-            }) = self.changes.last()
+            }) = self.changes
             {
                 // if we have a delete, we can only follow it by an insert
                 if let ParsedLine::ChangedData {
@@ -76,8 +75,7 @@ impl ChangeSet {
                     table_name,
                 } = change
                 {
-                    self.changes.clear();
-                    self.changes.push(ParsedLine::ChangedData {
+                    self.changes = Some(ParsedLine::ChangedData {
                         kind: ChangeKind::Update,
                         columns,
                         table_name,
@@ -91,12 +89,11 @@ impl ChangeSet {
                         if let Some(ParsedLine::ChangedData {
                             kind: ChangeKind::Insert,
                             ..
-                        }) = self.changes.last()
+                        }) = self.changes
                         {
-                            self.changes.clear();
+                            self.changes = None;
                         } else {
-                            self.changes.clear();
-                            self.push_change(change);
+                            self.changes = Some(change);
                         }
                     }
                     ChangeKind::Update => self.handle_update(change),
@@ -108,13 +105,9 @@ impl ChangeSet {
         }
     }
 
-    fn push_change(&mut self, change: ParsedLine) {
-        self.changes.push(change);
-    }
-
     fn handle_update(&mut self, change: ParsedLine) {
         if let ParsedLine::ChangedData { columns, .. } = change {
-            if let Some(last_change) = self.changes.last_mut() {
+            if let Some(last_change) = &mut self.changes {
                 if let ParsedLine::ChangedData {
                     columns: old_columns,
                     ..
@@ -384,10 +377,12 @@ impl Table {
 
     fn get_stats(&self) -> (usize, usize) {
         let number_of_ids = self.changeset.len();
-        let number_of_changes = self
-            .changeset
-            .values()
-            .fold(0, |acc, value| acc + value.changes.len());
+        let number_of_changes = self.changeset.values().fold(0, |acc, value| {
+            acc + match value.changes {
+                Some(_) => 1,
+                _ => 0,
+            }
+        });
         (number_of_ids, number_of_changes)
     }
 }
@@ -789,7 +784,7 @@ mod tests {
         expected_changes_1.insert(
             1,
             ChangeSet {
-                changes: vec![ParsedLine::ChangedData {
+                changes: Some(ParsedLine::ChangedData {
                     columns: vec![
                         Column::ChangedColumn {
                             column_info: id_column_info.clone(),
@@ -802,7 +797,7 @@ mod tests {
                     ],
                     table_name: table_name.clone(),
                     kind: ChangeKind::Insert,
-                }],
+                }),
             },
         );
         let expected_change_set_1 = ChangeSetWithColumnType::IntColumnType(expected_changes_1);
@@ -836,7 +831,7 @@ mod tests {
         expected_changes_2.insert(
             1,
             ChangeSet {
-                changes: vec![ParsedLine::ChangedData {
+                changes: Some(ParsedLine::ChangedData {
                     columns: vec![
                         Column::ChangedColumn {
                             column_info: id_column_info.clone(),
@@ -849,7 +844,7 @@ mod tests {
                     ],
                     table_name: table_name.clone(),
                     kind: ChangeKind::Insert,
-                }],
+                }),
             },
         );
         let expected_change_set_2 = ChangeSetWithColumnType::IntColumnType(expected_changes_2);
@@ -874,7 +869,7 @@ mod tests {
         };
         let result_3 = change_processing.add_change(change_3);
         let mut expected_changes_3 = BTreeMap::<i64, ChangeSet>::new();
-        expected_changes_3.insert(1, ChangeSet { changes: vec![] });
+        expected_changes_3.insert(1, ChangeSet { changes: None });
         let expected_change_set_3 = ChangeSetWithColumnType::IntColumnType(expected_changes_3);
         let expected_table_holder_3 = TableHolder {
             tables: hashmap!(table_name.clone() => Table {
@@ -1011,7 +1006,7 @@ mod tests {
         expected_changes_1.insert(
             1,
             ChangeSet {
-                changes: vec![ParsedLine::ChangedData {
+                changes: Some(ParsedLine::ChangedData {
                     columns: vec![
                         Column::ChangedColumn {
                             column_info: id_column_info.clone(),
@@ -1024,7 +1019,7 @@ mod tests {
                     ],
                     table_name: table_name.clone(),
                     kind: ChangeKind::Update,
-                }],
+                }),
             },
         );
         let expected_change_set_1 = ChangeSetWithColumnType::IntColumnType(expected_changes_1);
@@ -1065,7 +1060,7 @@ mod tests {
         expected_changes_1.insert(
             1,
             ChangeSet {
-                changes: vec![ParsedLine::ChangedData {
+                changes: Some(ParsedLine::ChangedData {
                     columns: vec![
                         Column::ChangedColumn {
                             column_info: id_column_info.clone(),
@@ -1078,7 +1073,7 @@ mod tests {
                     ],
                     table_name: table_name.clone(),
                     kind: ChangeKind::Update,
-                }],
+                }),
             },
         );
         let expected_change_set_1 = ChangeSetWithColumnType::IntColumnType(expected_changes_1);
@@ -1112,7 +1107,7 @@ mod tests {
         expected_changes_2.insert(
             1,
             ChangeSet {
-                changes: vec![ParsedLine::ChangedData {
+                changes: Some(ParsedLine::ChangedData {
                     columns: vec![
                         Column::ChangedColumn {
                             column_info: id_column_info.clone(),
@@ -1125,7 +1120,7 @@ mod tests {
                     ],
                     table_name: table_name.clone(),
                     kind: ChangeKind::Update,
-                }],
+                }),
             },
         );
         let expected_change_set_2 = ChangeSetWithColumnType::IntColumnType(expected_changes_2);
@@ -1153,14 +1148,14 @@ mod tests {
         expected_changes_3.insert(
             1,
             ChangeSet {
-                changes: vec![ParsedLine::ChangedData {
+                changes: Some(ParsedLine::ChangedData {
                     columns: vec![Column::ChangedColumn {
                         column_info: id_column_info.clone(),
                         value: Some(ColumnValue::Integer(1)),
                     }],
                     table_name: table_name.clone(),
                     kind: ChangeKind::Delete,
-                }],
+                }),
             },
         );
         let expected_change_set_3 = ChangeSetWithColumnType::IntColumnType(expected_changes_3);
@@ -1222,7 +1217,7 @@ mod tests {
         expected_changes_1.insert(
             1,
             ChangeSet {
-                changes: vec![ParsedLine::ChangedData {
+                changes: Some(ParsedLine::ChangedData {
                     columns: vec![
                         Column::ChangedColumn {
                             column_info: id_column_info.clone(),
@@ -1235,7 +1230,7 @@ mod tests {
                     ],
                     table_name: table_name.clone(),
                     kind: ChangeKind::Insert,
-                }],
+                }),
             },
         );
         let expected_change_set_1 = ChangeSetWithColumnType::IntColumnType(expected_changes_1);
@@ -1268,7 +1263,7 @@ mod tests {
         expected_changes_2.insert(
             1,
             ChangeSet {
-                changes: vec![ParsedLine::ChangedData {
+                changes: Some(ParsedLine::ChangedData {
                     columns: vec![
                         Column::ChangedColumn {
                             column_info: id_column_info.clone(),
@@ -1281,7 +1276,7 @@ mod tests {
                     ],
                     table_name: table_name.clone(),
                     kind: ChangeKind::Insert,
-                }],
+                }),
             },
         );
         let expected_change_set_2 = ChangeSetWithColumnType::IntColumnType(expected_changes_2);
@@ -1323,7 +1318,7 @@ mod tests {
         expected_changes_1.insert(
             1,
             ChangeSet {
-                changes: vec![ParsedLine::ChangedData {
+                changes: Some(ParsedLine::ChangedData {
                     columns: vec![
                         Column::ChangedColumn {
                             column_info: id_column_info.clone(),
@@ -1336,7 +1331,7 @@ mod tests {
                     ],
                     table_name: table_name.clone(),
                     kind: ChangeKind::Update,
-                }],
+                }),
             },
         );
         let expected_change_set_1 = ChangeSetWithColumnType::IntColumnType(expected_changes_1);
@@ -1369,7 +1364,7 @@ mod tests {
         expected_changes_2.insert(
             1,
             ChangeSet {
-                changes: vec![ParsedLine::ChangedData {
+                changes: Some(ParsedLine::ChangedData {
                     columns: vec![
                         Column::ChangedColumn {
                             column_info: id_column_info.clone(),
@@ -1382,7 +1377,7 @@ mod tests {
                     ],
                     table_name: table_name.clone(),
                     kind: ChangeKind::Update,
-                }],
+                }),
             },
         );
         let expected_change_set_2 = ChangeSetWithColumnType::IntColumnType(expected_changes_2);
@@ -1423,7 +1418,7 @@ mod tests {
         expected_changes_1.insert(
             1,
             ChangeSet {
-                changes: vec![ParsedLine::ChangedData {
+                changes: Some(ParsedLine::ChangedData {
                     columns: vec![
                         Column::ChangedColumn {
                             column_info: id_column_info.clone(),
@@ -1435,7 +1430,7 @@ mod tests {
                     ],
                     table_name: table_name.clone(),
                     kind: ChangeKind::Update,
-                }],
+                }),
             },
         );
         let expected_change_set_1 = ChangeSetWithColumnType::IntColumnType(expected_changes_1);
@@ -1468,7 +1463,7 @@ mod tests {
         expected_changes_2.insert(
             1,
             ChangeSet {
-                changes: vec![ParsedLine::ChangedData {
+                changes: Some(ParsedLine::ChangedData {
                     columns: vec![
                         Column::ChangedColumn {
                             column_info: id_column_info.clone(),
@@ -1480,7 +1475,7 @@ mod tests {
                     ],
                     table_name: table_name.clone(),
                     kind: ChangeKind::Update,
-                }],
+                }),
             },
         );
         let expected_change_set_2 = ChangeSetWithColumnType::IntColumnType(expected_changes_2);
