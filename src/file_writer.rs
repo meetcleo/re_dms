@@ -17,7 +17,6 @@ use flate2::Compression;
 pub struct FileWriter {
     directory: PathBuf,
     pub insert_file: FileStruct,
-    // update_file: FileStruct,
     pub update_files: HashMap<String, FileStruct>,
     pub delete_file: FileStruct,
     pub table_name: TableName,

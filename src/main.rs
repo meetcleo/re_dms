@@ -16,6 +16,7 @@ mod file_uploader;
 mod file_uploader_threads;
 mod file_writer;
 mod parser;
+mod wal_file_manager;
 
 use file_uploader_threads::DEFAULT_CHANNEL_SIZE;
 
@@ -45,7 +46,7 @@ async fn main() {
             database_receiver,
         );
 
-    if let Ok(lines) = read_lines("./data/test_decoding_add_table.txt") {
+    if let Ok(lines) = read_lines("./data/test_decoding_check_unchanged_toast.txt") {
         // Consumes the iterator, returns an (Optional) String
         for line in lines
         //.take(30)
