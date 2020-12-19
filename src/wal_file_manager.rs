@@ -180,13 +180,20 @@ pub enum WalLineResult {
 mod tests {
     use super::*;
 
+    // NOTE: I think this is actually run globally before all tests. Seems fine to me though.
+    #[ctor::ctor]
+    fn create_tmp_directory() {
+        std::fs::create_dir_all(TESTING_PATH);
+    }
+
+    // TODO stub filesystem properly
+    const TESTING_PATH: &str = "/tmp/wal_testing";
+
     #[test]
     fn wal_file_naming() {
         let wal_file_name = WalFile::name_for_wal_file(31);
         assert_eq!(wal_file_name.as_str(), "000000000000001F");
     }
-    // TODO stub filesystem properly
-    const TESTING_PATH: &str = "/tmp/wal_testing";
 
     #[test]
     fn wal_file_path() {
