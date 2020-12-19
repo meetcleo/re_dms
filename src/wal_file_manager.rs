@@ -7,7 +7,7 @@ use std::io::{self, BufRead, Write};
 use std::time::Duration;
 
 #[cfg(test)]
-use mock_instant::Instant;
+use mock_instant::{Instant, MockClock};
 
 #[cfg(not(test))]
 use std::time::Instant;
@@ -66,7 +66,14 @@ impl WalFile {
         wal_file_directory.join(wal_file_name)
     }
     pub fn write(&mut self, string: &str) {
-        self.file.lock().unwrap().write(string.as_bytes());
+        self.file
+            .lock()
+            .unwrap()
+            .write(format!("{}\n", string).as_bytes())
+            .unwrap();
+    }
+    pub fn flush(&mut self) {
+        self.file.lock().unwrap().flush().unwrap();
     }
 }
 
@@ -108,6 +115,7 @@ impl WalFileManager {
         self.current_wal_file.clone()
     }
     fn swap_wal(&mut self) {
+        self.current_wal_file.flush();
         self.current_wal_file_number = self.current_wal_file_number + 1;
         self.swapped_wal = true;
         self.last_swapped_wal = Instant::now();
@@ -139,6 +147,7 @@ impl WalFileManager {
             let maybe_next_line = self.wal_input_file_iterator.next();
             if let Some(next_line_result) = maybe_next_line {
                 let next_line = next_line_result.unwrap();
+                println!("next_line {}", next_line);
                 // TODO: poisoned mutex
                 self.current_wal_file.write(&next_line);
                 self.handle_next_line(next_line)
@@ -219,13 +228,45 @@ mod tests {
             PathBuf::from("test/parser.txt").as_path(),
             directory_path.as_path(),
         );
-        let previous_wal_file = wal_file_manager.current_wal();
+        let mut current_wal_file = wal_file_manager.current_wal();
 
         // 6 blocks of begin, table, commit
-        // for i in 0..6 {
-        //     let begin = wal_file_manager.next_line();
+        for _ in 0..6 {
+            let begin = wal_file_manager.next_line();
+            if let Some(WalLineResult::WalLine(file, line)) = begin {
+                assert_eq!(file, current_wal_file);
+                assert!(line.starts_with("BEGIN"))
+            } else {
+                panic!("begin line doesn't match {:?}", begin)
+            }
 
-        //     assert!()
-        // }
+            let table = wal_file_manager.next_line();
+            if let Some(WalLineResult::WalLine(file, line)) = table {
+                assert_eq!(file, current_wal_file);
+                assert!(line.starts_with("table"));
+            } else {
+                panic!("table line doesn't match {:?}", table);
+            }
+            // we advance 10 minutes before the commit line
+            MockClock::advance(Duration::from_secs(600));
+
+            let commit = wal_file_manager.next_line();
+            if let Some(WalLineResult::WalLine(file, line)) = commit {
+                assert_eq!(file, current_wal_file);
+                assert!(line.starts_with("COMMIT"));
+            } else {
+                panic!("commit line doesn't match {:?}", commit);
+            }
+
+            let wal_swap = wal_file_manager.next_line();
+            assert_eq!(wal_swap, Some(WalLineResult::SwapWal));
+            assert_ne!(current_wal_file, wal_file_manager.current_wal());
+            current_wal_file = wal_file_manager.current_wal();
+        }
+
+        let iterator_finished = wal_file_manager.next_line();
+        assert_eq!(iterator_finished, None);
+        let iterator_finished = wal_file_manager.next_line();
+        assert_eq!(iterator_finished, None);
     }
 }
