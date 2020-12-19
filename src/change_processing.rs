@@ -511,7 +511,6 @@ impl ChangeProcessing {
 mod tests {
     use super::*;
     use crate::parser::*;
-    use assert_matches::assert_matches;
     use maplit::{hashmap, hashset};
 
     // this is basically an integration test, but that's fine
@@ -581,7 +580,10 @@ mod tests {
             assert_eq!(change_vec.len(), 2);
 
             let table_change = change_vec.remove(0);
-            assert_matches!(table_change, ChangeProcessingResult::TableChanges(..));
+            assert!(matches!(
+                table_change,
+                ChangeProcessingResult::TableChanges(..)
+            ));
             let ddl_change = change_vec.remove(0);
             if let ChangeProcessingResult::DdlChange(DdlChange::AddColumn(column_info, TableName)) =
                 ddl_change
@@ -659,7 +661,10 @@ mod tests {
             assert_eq!(change_vec.len(), 2);
 
             let table_change = change_vec.remove(0);
-            assert_matches!(table_change, ChangeProcessingResult::TableChanges(..));
+            assert!(matches!(
+                table_change,
+                ChangeProcessingResult::TableChanges(..)
+            ));
             let ddl_change = change_vec.remove(0);
 
             if let ChangeProcessingResult::DdlChange(DdlChange::RemoveColumn(column_info, ..)) =
@@ -760,7 +765,10 @@ mod tests {
             assert_eq!(change_vec.len(), 5);
             // assert!(ddl_changes.is_some());
             let table_change = change_vec.remove(0);
-            assert_matches!(table_change, ChangeProcessingResult::TableChanges(..));
+            assert!(matches!(
+                table_change,
+                ChangeProcessingResult::TableChanges(..)
+            ));
 
             let returned_ddl_set: HashSet<DdlChange> = change_vec
                 .iter()
