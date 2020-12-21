@@ -511,15 +511,16 @@ impl ChangeProcessing {
     // this drains every table from the changeset,
     // writes the files, and returns them
     pub fn drain_final_changes(&mut self) -> Vec<ChangeProcessingResult> {
+        let maybe_associated_wal_file = self.associated_wal_file.clone();
         // error if associated_wal_file is null
-        let associated_wal_file = self.associated_wal_file.clone().unwrap();
         let resulting_vec = self
             .table_holder
             .tables
             .drain()
-            .map(|(table_name, table)| {
+            .map(|(_table_name, table)| {
                 // need to clone again because this is in a loop
-                let file_writer = Self::write_files_for_table(table, associated_wal_file.clone());
+                let file_writer =
+                    Self::write_files_for_table(table, maybe_associated_wal_file.clone().unwrap());
                 ChangeProcessingResult::TableChanges(file_writer)
             })
             .collect();
