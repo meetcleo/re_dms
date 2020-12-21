@@ -1,4 +1,5 @@
 use crate::parser::{ChangeKind, Column, ColumnInfo, ColumnValue, ParsedLine, TableName};
+use crate::wal_file_manager::WalFile;
 use itertools::Itertools;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -7,13 +8,6 @@ use either::Either;
 
 #[allow(unused_imports)]
 use log::{debug, error, info, log_enabled, Level};
-
-// single threaded f'now
-// can have one of these per thread and communicate via
-// channels later
-pub struct ChangeProcessing {
-    table_holder: TableHolder,
-}
 
 #[derive(Debug, Eq, PartialEq, Hash, Clone)]
 pub enum DdlChange {
@@ -427,6 +421,17 @@ impl TableHolder {
             None
         }
     }
+
+    // number of tables
+    fn len(&self) -> usize {
+        self.tables.len()
+    }
+}
+
+// single threaded f'now
+pub struct ChangeProcessing {
+    table_holder: TableHolder,
+    associated_wal_file: Option<WalFile>,
 }
 
 impl ChangeProcessing {
@@ -434,7 +439,17 @@ impl ChangeProcessing {
         let hash_map = HashMap::new();
         ChangeProcessing {
             table_holder: TableHolder { tables: hash_map },
+            associated_wal_file: None,
         }
+    }
+
+    // notice this is a move of the wal file
+    pub fn register_wal_file(&mut self, wal_file: WalFile) {
+        // it's an error to register a wal file while we have any changes left in our tables
+        if self.table_holder.len() != 0 {
+            panic!("Tried to register wal file while we have changes in our tables");
+        }
+        self.associated_wal_file = Some(wal_file);
     }
     pub fn add_change(&mut self, parsed_line: ParsedLine) -> Option<Vec<ChangeProcessingResult>> {
         match parsed_line {
@@ -499,10 +514,7 @@ impl ChangeProcessing {
                 ChangeProcessingResult::TableChanges(file_writer)
             })
             .collect();
-        println!(
-            "DRAINED FINAL CHANGES!!!!! {}",
-            self.table_holder.tables.len()
-        );
+        println!("DRAINED FINAL CHANGES!!!!! {}", self.table_holder.len());
         resulting_vec
     }
 }
