@@ -1,6 +1,7 @@
 /target
 /data
 /output
+/output_wal
 *.org
 .env
 .vscode
