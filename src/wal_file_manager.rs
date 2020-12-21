@@ -92,7 +92,7 @@ impl WalFileManager {
             current_wal_file: first_wal_file,
             output_wal_directory: output_wal_directory.to_path_buf(),
             wal_input_file_iterator: Self::open_file(input_file_name),
-            swapped_wal: false,
+            swapped_wal: true, // we issue a "swapped wal" at the start to show that we've created a new wal file
             last_swapped_wal: Instant::now(),
         }
     }
@@ -129,7 +129,13 @@ impl WalFileManager {
 
     fn should_swap_wal(&self) -> bool {
         // 10 minutes
-        self.last_swapped_wal.elapsed() >= Duration::new(600, 0) && !self.swapped_wal
+        let should_swap_wal =
+            self.last_swapped_wal.elapsed() >= Duration::new(1, 0) && !self.swapped_wal;
+        if should_swap_wal {
+            println!("SWAP_WAL_ELAPSED {:?}", self.last_swapped_wal.elapsed());
+            println!("LAST_SWAPPED_WAL {:?}", self.last_swapped_wal);
+        }
+        should_swap_wal
     }
 
     // we explictly don't implement Iterator because we need to be able to iterate
@@ -142,7 +148,7 @@ impl WalFileManager {
         if self.swapped_wal {
             self.swapped_wal = false;
             // tell our client we just swapped the wal and to flush files
-            Some(WalLineResult::SwapWal)
+            Some(WalLineResult::SwapWal(self.current_wal()))
         } else {
             // we only swap after we receive a commit line, we write it and pass it through the iterator, but then swap the wal file.
             let maybe_next_line = self.wal_input_file_iterator.next();
@@ -172,7 +178,7 @@ impl WalFileManager {
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum WalLineResult {
-    SwapWal,
+    SwapWal(WalFile),
     WalLine(WalFile, String),
 }
 
@@ -224,7 +230,7 @@ mod tests {
         assert_eq!(wal_file_manager.current_wal().file_number, 2);
         let swap_wal = wal_file_manager.next_line();
 
-        assert_eq!(swap_wal, Some(WalLineResult::SwapWal))
+        assert!(matches!(swap_wal, Some(WalLineResult::SwapWal(..))))
     }
 
     #[test]
@@ -236,6 +242,10 @@ mod tests {
             directory_path.as_path(),
         );
         let mut current_wal_file = wal_file_manager.current_wal();
+
+        // start with a wal swap
+        let wal_swap = wal_file_manager.next_line();
+        assert!(matches!(wal_swap, Some(WalLineResult::SwapWal(..))));
 
         // 6 blocks of begin, table, commit
         for _ in 0..6 {
@@ -266,7 +276,7 @@ mod tests {
             }
 
             let wal_swap = wal_file_manager.next_line();
-            assert_eq!(wal_swap, Some(WalLineResult::SwapWal));
+            assert!(matches!(wal_swap, Some(WalLineResult::SwapWal(..))));
             assert_ne!(current_wal_file, wal_file_manager.current_wal());
             current_wal_file = wal_file_manager.current_wal();
         }
