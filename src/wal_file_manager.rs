@@ -48,8 +48,9 @@ impl PartialEq for WalFile {
 impl WalFile {
     // creates a new wal file and returns a struct representing it.
     pub fn new(wal_file_number: u64, wal_file_directory: &Path) -> WalFile {
-        let file =
-            File::create(Self::path_for_wal_file(wal_file_number, wal_file_directory)).unwrap();
+        let path = Self::path_for_wal_file(wal_file_number, wal_file_directory);
+        println!("{:?}", path);
+        let file = File::create(path).unwrap();
         WalFile {
             file_number: wal_file_number,
             file: Arc::new(Mutex::new(file)),
@@ -147,7 +148,6 @@ impl WalFileManager {
             let maybe_next_line = self.wal_input_file_iterator.next();
             if let Some(next_line_result) = maybe_next_line {
                 let next_line = next_line_result.unwrap();
-                println!("next_line {}", next_line);
                 // TODO: poisoned mutex
                 self.current_wal_file.write(&next_line);
                 self.handle_next_line(next_line)

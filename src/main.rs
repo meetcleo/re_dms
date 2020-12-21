@@ -48,8 +48,8 @@ async fn main() {
         );
     let mut wal_file_manager = wal_file_manager::WalFileManager::new(
         None,
-        PathBuf::from("./data/test_decoding_check_unchanged_toast.txt").as_path(),
-        PathBuf::from("output/output_wal").as_path(),
+        PathBuf::from("./data/test_decoding.txt").as_path(),
+        PathBuf::from("output_wal").as_path(),
     );
 
     while let Some(wal_line_result) = wal_file_manager.next_line() {
