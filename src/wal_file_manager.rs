@@ -1,10 +1,13 @@
-use std::fs::File;
+use std::fs::{self, File};
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use std::io::{self, BufRead, Write};
 use std::time::Duration;
+
+#[allow(unused_imports)]
+use log::{debug, error, info, log_enabled, Level};
 
 #[cfg(test)]
 use mock_instant::{Instant, MockClock};
@@ -33,7 +36,13 @@ pub struct WalFileManager {
 #[derive(Debug, Clone)]
 pub struct WalFile {
     pub file_number: u64,
+    // this is the directory where wal files are kept
+    // for the directory associated with this wal file see
+    // path_for_wal_directory
+    pub wal_directory: PathBuf,
     // we have interior mutability of the file, and synchronise with a mutex
+    // NOTE: it is unsafe to create two wal_files with the same file_number
+    // (keep wal file creation single threaded!)
     file: Arc<Mutex<File>>,
 }
 
@@ -46,14 +55,19 @@ impl PartialEq for WalFile {
 }
 
 impl WalFile {
-    // creates a new wal file and returns a struct representing it.
+    // creates a new wal file and associated directory and returns a struct representing it.
     pub fn new(wal_file_number: u64, wal_file_directory: &Path) -> WalFile {
-        let path = Self::path_for_wal_file(wal_file_number, wal_file_directory);
-        println!("{:?}", path);
+        let path = Self::path_for_wal_file_class(wal_file_number, wal_file_directory);
+        let directory_path =
+            Self::path_for_wal_directory_class(wal_file_number, wal_file_directory);
+        info!("creating wal file {:?}", path);
         let file = File::create(path).unwrap();
+        info!("creating wal directory {:?}", directory_path);
+        let _directory = fs::create_dir_all(directory_path).unwrap();
         WalFile {
             file_number: wal_file_number,
             file: Arc::new(Mutex::new(file)),
+            wal_directory: wal_file_directory.to_path_buf(),
         }
     }
     // 16 hex chars
@@ -61,11 +75,28 @@ impl WalFile {
         // hex uppercase padded to 16 chars
         format!("{:0>16X}", wal_file_number)
     }
-    fn path_for_wal_file(wal_file_number: u64, wal_file_directory: &Path) -> PathBuf {
-        let mut wal_file_name = Self::name_for_wal_file(wal_file_number);
-        wal_file_name.push_str(".wal");
+    // class method needed in constructor
+    fn path_for_wal_file_class(wal_file_number: u64, wal_file_directory: &Path) -> PathBuf {
+        let mut name_without_extension = Self::name_for_wal_file(wal_file_number);
+        name_without_extension.push_str(".wal");
+        wal_file_directory.join(name_without_extension)
+    }
+
+    // for symmetry with directory
+    fn path_for_wal_file(&self) -> PathBuf {
+        Self::path_for_wal_file_class(self.file_number, self.wal_directory.as_path())
+    }
+
+    // class method needed in constructor
+    fn path_for_wal_directory_class(wal_file_number: u64, wal_file_directory: &Path) -> PathBuf {
+        let wal_file_name = Self::name_for_wal_file(wal_file_number);
         wal_file_directory.join(wal_file_name)
     }
+
+    fn path_for_wal_directory(&self) -> PathBuf {
+        Self::path_for_wal_directory_class(self.file_number, self.wal_directory.as_path())
+    }
+
     pub fn write(&mut self, string: &str) {
         self.file
             .lock()
@@ -202,9 +233,20 @@ mod tests {
     }
 
     #[test]
+    fn wal_file_directory() {
+        let directory_path = PathBuf::from(TESTING_PATH);
+        let wal_file = WalFile::new(31, directory_path.as_path());
+
+        assert_eq!(
+            wal_file.path_for_wal_directory(),
+            PathBuf::from("/tmp/wal_testing/000000000000001F")
+        );
+    }
+
+    #[test]
     fn wal_file_path() {
         let directory_path = PathBuf::from(TESTING_PATH);
-        let wal_file_path = WalFile::path_for_wal_file(1, directory_path.as_path());
+        let wal_file_path = WalFile::path_for_wal_file_class(1, directory_path.as_path());
         assert_eq!(
             wal_file_path,
             PathBuf::from("/tmp/wal_testing/0000000000000001.wal")

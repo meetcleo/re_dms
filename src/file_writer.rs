@@ -205,10 +205,8 @@ impl FileWriter {
         FileWriter {
             directory: owned_directory,
             insert_file: FileStruct::new(directory.clone(), ChangeKind::Insert, table_name.clone()),
-            //FileStruct::new(directory.join(table_name.to_owned() + "_inserts.csv.gz"), ChangeKind::Insert, table_name.as_ref()),
             update_files: HashMap::new(),
             delete_file: FileStruct::new(directory.clone(), ChangeKind::Delete, table_name.clone()),
-            //FileStruct::new(directory.join(table_name.to_owned() + "_deletes.csv.gz"), ChangeKind::Delete, table_name.as_ref())
             table_name: table_name,
         }
     }
