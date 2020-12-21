@@ -59,78 +59,109 @@ impl ChangeSet {
         ChangeSet { changes: None }
     }
     // batch apply enabled
-    fn add_change(&mut self, change: ParsedLine) {
-        if self.changes == None {
-            self.changes = Some(change);
-        } else {
-            if let Some(ParsedLine::ChangedData {
-                kind: ChangeKind::Delete,
-                ..
-            }) = self.changes
-            {
-                // if we have a delete, we can only follow it by an insert
-                if let ParsedLine::ChangedData {
-                    kind: ChangeKind::Insert,
-                    columns,
-                    table_name,
-                } = change
-                {
-                    self.changes = Some(ParsedLine::ChangedData {
-                        kind: ChangeKind::Update,
-                        columns,
-                        table_name,
-                    })
-                } else {
-                    panic!("subsequent change after delete")
-                }
-            } else if let ParsedLine::ChangedData { kind, .. } = change {
-                match kind {
-                    ChangeKind::Delete => {
-                        if let Some(ParsedLine::ChangedData {
-                            kind: ChangeKind::Insert,
-                            ..
-                        }) = self.changes
-                        {
-                            self.changes = None;
-                        } else {
-                            self.changes = Some(change);
-                        }
-                    }
-                    ChangeKind::Update => self.handle_update(change),
-                    _ => {
-                        panic!("Trying to insert a value twice");
-                    }
-                }
-            }
+    fn add_change(&mut self, new_change: ParsedLine) {
+        self.changes = match self.changes {
+            Some(ParsedLine::ChangedData { kind, .. }) => match kind {
+                ChangeKind::Insert => self.handle_insert_subsequent(new_change),
+                ChangeKind::Update => self.handle_update_subsequent(new_change),
+                ChangeKind::Delete => self.handle_delete_subsequent(new_change),
+            },
+            _ => Some(new_change),
         }
     }
 
-    fn handle_update(&mut self, change: ParsedLine) {
-        if let ParsedLine::ChangedData { columns, .. } = change {
-            if let Some(last_change) = &mut self.changes {
-                if let ParsedLine::ChangedData {
-                    columns: old_columns,
-                    ..
-                } = last_change
-                {
-                    let untoasted_columns: Vec<Column> = columns
-                        .iter()
-                        .map(|column| {
-                            if let Column::UnchangedToastColumn { column_info, .. } = column {
-                                old_columns
-                                    .iter()
-                                    .find(|old_column| old_column.column_info() == column_info)
-                                    .unwrap_or(column)
-                            } else {
-                                column
-                            }
-                            .clone()
-                        })
-                        .collect();
-
-                    *old_columns = untoasted_columns;
+    fn handle_insert_subsequent(&self, new_change: ParsedLine) -> Option<ParsedLine> {
+        if let ParsedLine::ChangedData {
+            kind,
+            columns,
+            table_name,
+        } = new_change
+        {
+            match kind {
+                ChangeKind::Insert => panic!("attempting to insert a record twice"),
+                ChangeKind::Update => {
+                    self.untoasted_changes(columns, table_name, ChangeKind::Insert)
                 }
+                ChangeKind::Delete => None,
             }
+        } else {
+            panic!("don't know how to handle this type of line here")
+        }
+    }
+
+    fn handle_update_subsequent(&self, new_change: ParsedLine) -> Option<ParsedLine> {
+        if let ParsedLine::ChangedData { kind, .. } = new_change {
+            match kind {
+                ChangeKind::Insert => panic!("attempting to insert a record twice"),
+                ChangeKind::Update => match new_change {
+                    ParsedLine::ChangedData {
+                        columns,
+                        table_name,
+                        ..
+                    } => self.untoasted_changes(columns, table_name, ChangeKind::Update),
+                    _ => panic!("don't know how to handle this type of line here"),
+                },
+                ChangeKind::Delete => Some(new_change),
+            }
+        } else {
+            panic!("don't know how to handle this type of line here")
+        }
+    }
+
+    fn handle_delete_subsequent(&self, new_change: ParsedLine) -> Option<ParsedLine> {
+        if let ParsedLine::ChangedData {
+            kind,
+            columns,
+            table_name,
+        } = new_change
+        {
+            match kind {
+                ChangeKind::Insert => {
+                    self.untoasted_changes(columns, table_name, ChangeKind::Update)
+                }
+                ChangeKind::Update => {
+                    panic!("attempting to update a record after it's been deleted")
+                }
+                ChangeKind::Delete => panic!("attempting to delete a record twice"),
+            }
+        } else {
+            panic!("don't know how to handle this type of line here")
+        }
+    }
+
+    fn untoasted_changes(
+        &self,
+        new_columns: Vec<Column>,
+        table_name: TableName,
+        new_kind: ChangeKind,
+    ) -> Option<ParsedLine> {
+        if let Some(ParsedLine::ChangedData {
+            columns: old_columns,
+            ..
+        }) = &self.changes
+        {
+            let untoasted_columns: Vec<Column> = new_columns
+                .iter()
+                .map(|column| {
+                    if let Column::UnchangedToastColumn { column_info, .. } = column {
+                        old_columns
+                            .iter()
+                            .find(|old_column| old_column.column_info() == column_info)
+                            .unwrap_or(column)
+                    } else {
+                        column
+                    }
+                    .clone()
+                })
+                .collect();
+
+            Some(ParsedLine::ChangedData {
+                columns: untoasted_columns,
+                kind: new_kind,
+                table_name: table_name,
+            })
+        } else {
+            panic!("last change was not changed data, no idea how we got here")
         }
     }
 }
