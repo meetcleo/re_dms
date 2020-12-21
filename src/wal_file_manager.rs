@@ -83,7 +83,7 @@ impl WalFile {
     }
 
     // for symmetry with directory
-    fn path_for_wal_file(&self) -> PathBuf {
+    pub fn path_for_wal_file(&self) -> PathBuf {
         Self::path_for_wal_file_class(self.file_number, self.wal_directory.as_path())
     }
 
@@ -93,11 +93,11 @@ impl WalFile {
         wal_file_directory.join(wal_file_name)
     }
 
-    fn path_for_wal_directory(&self) -> PathBuf {
+    pub fn path_for_wal_directory(&self) -> PathBuf {
         Self::path_for_wal_directory_class(self.file_number, self.wal_directory.as_path())
     }
 
-    pub fn write(&mut self, string: &str) {
+    fn write(&mut self, string: &str) {
         self.file
             .lock()
             .unwrap()
