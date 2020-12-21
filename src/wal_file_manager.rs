@@ -12,6 +12,9 @@ use log::{debug, error, info, log_enabled, Level};
 #[cfg(test)]
 use mock_instant::{Instant, MockClock};
 
+// TODO: config
+const SECONDS_UNTIL_WAL_SWITCH: u64 = 600;
+
 #[cfg(not(test))]
 use std::time::Instant;
 
@@ -160,8 +163,9 @@ impl WalFileManager {
 
     fn should_swap_wal(&self) -> bool {
         // 10 minutes
-        let should_swap_wal =
-            self.last_swapped_wal.elapsed() >= Duration::new(1, 0) && !self.swapped_wal;
+        let should_swap_wal = self.last_swapped_wal.elapsed()
+            >= Duration::new(SECONDS_UNTIL_WAL_SWITCH, 0)
+            && !self.swapped_wal;
         if should_swap_wal {
             println!("SWAP_WAL_ELAPSED {:?}", self.last_swapped_wal.elapsed());
             println!("LAST_SWAPPED_WAL {:?}", self.last_swapped_wal);
