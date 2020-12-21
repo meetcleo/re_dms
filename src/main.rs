@@ -54,7 +54,7 @@ async fn main() {
 
     while let Some(wal_line_result) = wal_file_manager.next_line() {
         match wal_line_result {
-            wal_file_manager::WalLineResult::SwapWal => {
+            wal_file_manager::WalLineResult::SwapWal(wal_file) => {
                 // drain the collector of all it's tables, and send to file transmitter
                 drain_collector_and_transmit(&mut collector, &mut file_transmitter).await;
             }
