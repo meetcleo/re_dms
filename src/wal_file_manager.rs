@@ -129,7 +129,7 @@ impl WalFileManager {
 
     fn should_swap_wal(&self) -> bool {
         // 10 minutes
-        self.last_swapped_wal.elapsed() >= Duration::new(600, 0)
+        self.last_swapped_wal.elapsed() >= Duration::new(600, 0) && !self.swapped_wal
     }
 
     // we explictly don't implement Iterator because we need to be able to iterate
