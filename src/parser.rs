@@ -163,6 +163,12 @@ impl Column {
     pub fn is_id_column(&self) -> bool {
         self.column_name() == "id"
     }
+    pub fn is_unchanged_toast_column(&self) -> bool {
+        match self {
+            Column::UnchangedToastColumn { .. } => true,
+            _ => false,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
