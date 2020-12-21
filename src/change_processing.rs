@@ -140,16 +140,16 @@ impl ChangeSet {
             ..
         }) = &self.changes
         {
+            assert_eq!(new_columns.len(), old_columns.len());
             let untoasted_columns: Vec<Column> = new_columns
                 .iter()
-                .map(|column| {
-                    if let Column::UnchangedToastColumn { column_info, .. } = column {
-                        old_columns
-                            .iter()
-                            .find(|old_column| old_column.column_info() == column_info)
-                            .unwrap_or(column)
+                .zip(old_columns.iter())
+                .map(|(new_column, old_column)| {
+                    debug_assert_eq!(new_column.column_info(), old_column.column_info());
+                    if new_column.is_unchanged_toast_column() {
+                        old_column
                     } else {
-                        column
+                        new_column
                     }
                     .clone()
                 })
@@ -409,10 +409,7 @@ impl Table {
     fn get_stats(&self) -> (usize, usize) {
         let number_of_ids = self.changeset.len();
         let number_of_changes = self.changeset.values().fold(0, |acc, value| {
-            acc + match value.changes {
-                Some(_) => 1,
-                _ => 0,
-            }
+            acc + if value.changes.is_some() { 1 } else { 0 }
         });
         (number_of_ids, number_of_changes)
     }
@@ -483,9 +480,9 @@ impl ChangeProcessing {
         let table_name = table.table_name;
         let mut file_writer = file_writer::FileWriter::new(table_name.clone());
         table.changeset.values().for_each(|record| {
-            record.changes.iter().for_each(|change| {
+            if let Some(change) = &record.changes {
                 file_writer.add_change(change);
-            })
+            };
         });
         file_writer
     }
