@@ -499,7 +499,7 @@ impl ChangeProcessing {
         associated_wal_file: WalFile,
     ) -> file_writer::FileWriter {
         let table_name = table.table_name;
-        let mut file_writer = file_writer::FileWriter::new(table_name.clone());
+        let mut file_writer = file_writer::FileWriter::new(table_name.clone(), associated_wal_file);
         table.changeset.values().for_each(|record| {
             if let Some(change) = &record.changes {
                 file_writer.add_change(change);

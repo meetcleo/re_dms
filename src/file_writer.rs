@@ -4,6 +4,7 @@ use std::path::Path;
 use std::path::PathBuf;
 
 use crate::parser::{ChangeKind, ColumnInfo, ParsedLine, TableName};
+use crate::wal_file_manager;
 use std::collections::HashMap; //{ HashMap, BTreeMap, HashSet };
 
 use itertools::Itertools;
@@ -197,16 +198,26 @@ impl FileStruct {
 
 // TODO: write iterator over files
 impl FileWriter {
-    pub fn new(table_name: TableName) -> FileWriter {
-        let directory = Path::new("output");
-        // create directory
+    pub fn new(
+        table_name: TableName,
+        associated_wal_file: wal_file_manager::WalFile,
+    ) -> FileWriter {
+        let directory = associated_wal_file.path_for_wal_directory();
         let owned_directory = directory.clone().to_owned();
-        fs::create_dir_all(owned_directory.as_path()).expect("panic creating directory");
+        // fs::create_dir_all(owned_directory.as_path()).expect("panic creating directory");
         FileWriter {
             directory: owned_directory,
-            insert_file: FileStruct::new(directory.clone(), ChangeKind::Insert, table_name.clone()),
+            insert_file: FileStruct::new(
+                directory.as_path(),
+                ChangeKind::Insert,
+                table_name.clone(),
+            ),
             update_files: HashMap::new(),
-            delete_file: FileStruct::new(directory.clone(), ChangeKind::Delete, table_name.clone()),
+            delete_file: FileStruct::new(
+                directory.as_path(),
+                ChangeKind::Delete,
+                table_name.clone(),
+            ),
             table_name: table_name,
         }
     }
