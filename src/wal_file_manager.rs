@@ -18,7 +18,7 @@ const SECONDS_UNTIL_WAL_SWITCH: u64 = 600;
 #[cfg(not(test))]
 use std::time::Instant;
 
-type WalInputFileIterator = io::Lines<io::BufReader<File>>;
+type WalInputFileIterator = io::Split<io::BufReader<File>>;
 
 #[derive(Debug)]
 pub struct WalFileManager {
@@ -143,7 +143,7 @@ impl WalFileManager {
         P: AsRef<Path>,
     {
         let file = File::open(filename)?;
-        Ok(io::BufReader::new(file).lines())
+        Ok(io::BufReader::new(file).split(b'\n'))
     }
 
     fn current_wal(&self) -> WalFile {
@@ -189,9 +189,10 @@ impl WalFileManager {
             let maybe_next_line = self.wal_input_file_iterator.next();
             if let Some(next_line_result) = maybe_next_line {
                 let next_line = next_line_result.unwrap();
+                let next_line_string = String::from_utf8(next_line).unwrap();
                 // TODO: poisoned mutex
-                self.current_wal_file.write(&next_line);
-                self.handle_next_line(next_line)
+                self.current_wal_file.write(next_line_string.as_str());
+                self.handle_next_line(next_line_string)
             } else {
                 None
             }
