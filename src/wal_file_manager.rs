@@ -46,7 +46,36 @@ pub struct WalFile {
     // we have interior mutability of the file, and synchronise with a mutex
     // NOTE: it is unsafe to create two wal_files with the same file_number
     // (keep wal file creation single threaded!)
-    file: Arc<Mutex<File>>,
+    file: Arc<Option<Mutex<WalFileInternal>>>,
+}
+
+#[derive(Debug)]
+struct WalFileInternal {
+    file: File,
+    // we want this to be locked by the mutex
+    had_errors_loading: bool,
+}
+
+impl WalFileInternal {
+    pub fn new(file: File) -> WalFileInternal {
+        WalFileInternal {
+            file: file,
+            had_errors_loading: false,
+        }
+    }
+    fn register_error(&mut self) {
+        self.had_errors_loading = true;
+    }
+}
+
+// just pass writes straight to the file
+impl std::io::Write for WalFileInternal {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.file.write(buf)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.file.flush()
+    }
 }
 
 impl Eq for WalFile {}
@@ -69,7 +98,7 @@ impl WalFile {
         let _directory = fs::create_dir_all(directory_path).unwrap();
         WalFile {
             file_number: wal_file_number,
-            file: Arc::new(Mutex::new(file)),
+            file: Arc::new(Some(Mutex::new(WalFileInternal::new(file)))),
             wal_directory: wal_file_directory.to_path_buf(),
         }
     }
@@ -101,15 +130,27 @@ impl WalFile {
     }
 
     fn write(&mut self, string: &str) {
-        self.file
-            .lock()
-            .unwrap()
+        self.with_locked_internal_file()
             .write(format!("{}\n", string).as_bytes())
             .unwrap();
     }
     pub fn flush(&mut self) {
-        self.file.lock().unwrap().flush().unwrap();
+        self.with_locked_internal_file().flush().unwrap();
     }
+    pub fn register_error(&mut self) {
+        self.with_locked_internal_file().register_error();
+    }
+
+    fn with_locked_internal_file(&mut self) -> std::sync::MutexGuard<'_, WalFileInternal> {
+        self.file
+            .as_ref() // tbh, I don't even know why we need two as_ref here, but we do
+            .as_ref() // ref to option
+            .unwrap() // unwrapped option, which is our mutex
+            .lock() // lock the mutex
+            .unwrap() // check for error on unlock
+    }
+
+    pub fn maybe_remove_wal_file() {}
 }
 
 impl WalFileManager {
