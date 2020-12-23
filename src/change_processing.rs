@@ -1,4 +1,5 @@
 use crate::parser::{ChangeKind, Column, ColumnInfo, ColumnValue, ParsedLine, TableName};
+use crate::wal_file_manager::WalFile;
 use itertools::Itertools;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
@@ -7,13 +8,6 @@ use either::Either;
 
 #[allow(unused_imports)]
 use log::{debug, error, info, log_enabled, Level};
-
-// single threaded f'now
-// can have one of these per thread and communicate via
-// channels later
-pub struct ChangeProcessing {
-    table_holder: TableHolder,
-}
 
 #[derive(Debug, Eq, PartialEq, Hash, Clone)]
 pub enum DdlChange {
@@ -427,6 +421,17 @@ impl TableHolder {
             None
         }
     }
+
+    // number of tables
+    fn len(&self) -> usize {
+        self.tables.len()
+    }
+}
+
+// single threaded f'now
+pub struct ChangeProcessing {
+    table_holder: TableHolder,
+    associated_wal_file: Option<WalFile>,
 }
 
 impl ChangeProcessing {
@@ -434,19 +439,32 @@ impl ChangeProcessing {
         let hash_map = HashMap::new();
         ChangeProcessing {
             table_holder: TableHolder { tables: hash_map },
+            associated_wal_file: None,
         }
+    }
+
+    // notice this is a move of the wal file
+    pub fn register_wal_file(&mut self, associated_wal_file: WalFile) {
+        // it's an error to register a wal file while we have any changes left in our tables
+        if self.table_holder.len() != 0 {
+            panic!("Tried to register wal file while we have changes in our tables");
+        }
+        self.associated_wal_file = Some(associated_wal_file);
     }
     pub fn add_change(&mut self, parsed_line: ParsedLine) -> Option<Vec<ChangeProcessingResult>> {
         match parsed_line {
             ParsedLine::Begin(_) | ParsedLine::Commit(_) | ParsedLine::TruncateTable => None, // TODO
             ParsedLine::ContinueParse => None, // need to be exhaustive
             ParsedLine::ChangedData { .. } => {
-                // map here unpacks the option
+                // map here maps over the option
                 // NOTE: this means that we must return a table if we want to return a ddl result
                 self.table_holder.add_change(parsed_line).map(
                     |(returned_table, maybe_ddl_changes)| {
                         let mut start_vec = vec![ChangeProcessingResult::TableChanges(
-                            Self::write_files_for_table(returned_table),
+                            Self::write_files_for_table(
+                                returned_table,
+                                self.associated_wal_file.clone().unwrap(),
+                            ),
                         )];
                         if let Some(ddl_changes) = maybe_ddl_changes {
                             for ddl_change in ddl_changes {
@@ -476,9 +494,12 @@ impl ChangeProcessing {
             });
     }
 
-    fn write_files_for_table(table: Table) -> file_writer::FileWriter {
+    fn write_files_for_table(
+        table: Table,
+        associated_wal_file: WalFile,
+    ) -> file_writer::FileWriter {
         let table_name = table.table_name;
-        let mut file_writer = file_writer::FileWriter::new(table_name.clone());
+        let mut file_writer = file_writer::FileWriter::new(table_name.clone(), associated_wal_file);
         table.changeset.values().for_each(|record| {
             if let Some(change) = &record.changes {
                 file_writer.add_change(change);
@@ -490,19 +511,20 @@ impl ChangeProcessing {
     // this drains every table from the changeset,
     // writes the files, and returns them
     pub fn drain_final_changes(&mut self) -> Vec<ChangeProcessingResult> {
+        let maybe_associated_wal_file = self.associated_wal_file.clone();
+        // error if associated_wal_file is null
         let resulting_vec = self
             .table_holder
             .tables
             .drain()
             .map(|(_table_name, table)| {
-                let file_writer = Self::write_files_for_table(table);
+                // need to clone again because this is in a loop
+                let file_writer =
+                    Self::write_files_for_table(table, maybe_associated_wal_file.clone().unwrap());
                 ChangeProcessingResult::TableChanges(file_writer)
             })
             .collect();
-        println!(
-            "DRAINED FINAL CHANGES!!!!! {}",
-            self.table_holder.tables.len()
-        );
+        println!("DRAINED FINAL CHANGES!!!!! {}", self.table_holder.len());
         resulting_vec
     }
 }
@@ -511,8 +533,21 @@ impl ChangeProcessing {
 mod tests {
     use super::*;
     use crate::parser::*;
-    use assert_matches::assert_matches;
     use maplit::{hashmap, hashset};
+    use std::path::PathBuf;
+
+    // NOTE: I think this is actually run globally before all tests. Seems fine to me though.
+    #[ctor::ctor]
+    fn create_tmp_directory() {
+        std::fs::create_dir_all(TESTING_PATH).unwrap();
+    }
+
+    // TODO stub filesystem properly
+    const TESTING_PATH: &str = "/tmp/wal_change_processing_testing";
+
+    fn new_wal_file() -> WalFile {
+        WalFile::new(1, PathBuf::from(TESTING_PATH).as_path())
+    }
 
     // this is basically an integration test, but that's fine
     #[test]
@@ -561,6 +596,7 @@ mod tests {
             columns: third_changed_columns,
         };
         let mut change_processing = ChangeProcessing::new();
+        change_processing.register_wal_file(new_wal_file());
         let blank_stats_hash = hashmap!();
         assert_eq!(change_processing.get_stats(), blank_stats_hash);
         let first_result = change_processing.add_change(first_change);
@@ -581,7 +617,10 @@ mod tests {
             assert_eq!(change_vec.len(), 2);
 
             let table_change = change_vec.remove(0);
-            assert_matches!(table_change, ChangeProcessingResult::TableChanges(..));
+            assert!(matches!(
+                table_change,
+                ChangeProcessingResult::TableChanges(..)
+            ));
             let ddl_change = change_vec.remove(0);
             if let ChangeProcessingResult::DdlChange(DdlChange::AddColumn(column_info, TableName)) =
                 ddl_change
@@ -639,6 +678,7 @@ mod tests {
             columns: third_changed_columns,
         };
         let mut change_processing = ChangeProcessing::new();
+        change_processing.register_wal_file(new_wal_file());
         let blank_stats_hash = hashmap!();
         assert_eq!(change_processing.get_stats(), blank_stats_hash);
         let first_result = change_processing.add_change(first_change);
@@ -659,7 +699,10 @@ mod tests {
             assert_eq!(change_vec.len(), 2);
 
             let table_change = change_vec.remove(0);
-            assert_matches!(table_change, ChangeProcessingResult::TableChanges(..));
+            assert!(matches!(
+                table_change,
+                ChangeProcessingResult::TableChanges(..)
+            ));
             let ddl_change = change_vec.remove(0);
 
             if let ChangeProcessingResult::DdlChange(DdlChange::RemoveColumn(column_info, ..)) =
@@ -741,6 +784,7 @@ mod tests {
             columns: third_changed_columns,
         };
         let mut change_processing = ChangeProcessing::new();
+        change_processing.register_wal_file(new_wal_file());
         let blank_stats_hash = hashmap!();
         assert_eq!(change_processing.get_stats(), blank_stats_hash);
         let first_result = change_processing.add_change(first_change);
@@ -760,7 +804,10 @@ mod tests {
             assert_eq!(change_vec.len(), 5);
             // assert!(ddl_changes.is_some());
             let table_change = change_vec.remove(0);
-            assert_matches!(table_change, ChangeProcessingResult::TableChanges(..));
+            assert!(matches!(
+                table_change,
+                ChangeProcessingResult::TableChanges(..)
+            ));
 
             let returned_ddl_set: HashSet<DdlChange> = change_vec
                 .iter()
