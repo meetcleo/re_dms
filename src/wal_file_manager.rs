@@ -329,8 +329,34 @@ mod tests {
     #[test]
     fn new_wal_file() {
         let directory_path = PathBuf::from(TESTING_PATH);
-        let wal_file = WalFile::new(1, directory_path.as_path());
+        let mut wal_file = WalFile::new(1, directory_path.as_path());
         assert_eq!(wal_file.file_number, 1);
+        assert!(Path::new("/tmp/wal_testing/0000000000000001.wal").exists());
+        wal_file.maybe_remove_wal_file();
+        assert!(!Path::new("/tmp/wal_testing/0000000000000001.wal").exists());
+    }
+
+    #[test]
+    fn wal_file_wont_be_deleted_if_cloned() {
+        let directory_path = PathBuf::from(TESTING_PATH);
+        let mut wal_file = WalFile::new(1, directory_path.as_path());
+        let _cloned_wal_file = wal_file.clone();
+        assert_eq!(wal_file.file_number, 1);
+        assert!(Path::new("/tmp/wal_testing/0000000000000001.wal").exists());
+        wal_file.maybe_remove_wal_file();
+        // it still exists
+        assert!(Path::new("/tmp/wal_testing/0000000000000001.wal").exists());
+    }
+
+    #[test]
+    fn wal_file_wont_be_deleted_if_there_is_an_error() {
+        let directory_path = PathBuf::from(TESTING_PATH);
+        let mut wal_file = WalFile::new(1, directory_path.as_path());
+        wal_file.register_error();
+        assert_eq!(wal_file.file_number, 1);
+        assert!(Path::new("/tmp/wal_testing/0000000000000001.wal").exists());
+        wal_file.maybe_remove_wal_file();
+        // it still exists
         assert!(Path::new("/tmp/wal_testing/0000000000000001.wal").exists());
     }
 
