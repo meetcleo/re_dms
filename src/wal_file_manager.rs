@@ -57,7 +57,7 @@ struct WalFileInternal {
 }
 
 impl WalFileInternal {
-    pub fn new(file: File) -> WalFileInternal {
+    fn new(file: File) -> WalFileInternal {
         WalFileInternal {
             file: file,
             had_errors_loading: false,
@@ -65,6 +65,9 @@ impl WalFileInternal {
     }
     fn register_error(&mut self) {
         self.had_errors_loading = true;
+    }
+    fn has_errors(&self) -> bool {
+        self.had_errors_loading
     }
 }
 
@@ -150,7 +153,31 @@ impl WalFile {
             .unwrap() // check for error on unlock
     }
 
-    pub fn maybe_remove_wal_file() {}
+    pub fn maybe_remove_wal_file(&mut self) {
+        // we only want to remove the wal file if we're the only pointer to this file
+        if Arc::strong_count(&self.file) != 1 {
+            return;
+        }
+        // need to do this before the immutable borrow where we get the file below
+        let file_path = self.path_for_wal_file();
+        let directory_path = self.path_for_wal_directory();
+        // do this in a block, so we drop our borrow right after
+        {
+            let locked_internal_file = self.with_locked_internal_file();
+            // we don't remove the wal file if there was an error loading it
+            if locked_internal_file.has_errors() {
+                return;
+            }
+            // TODO delete file and folder.
+            // We've locked our mutex, so we're safe from races
+            std::fs::remove_file(file_path).unwrap();
+            std::fs::remove_dir_all(directory_path).unwrap();
+        }
+
+        // borrow dropped by here
+        // now we replace Arc value with None.
+        self.file = Arc::new(None);
+    }
 }
 
 impl WalFileManager {
