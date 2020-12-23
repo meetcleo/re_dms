@@ -102,7 +102,8 @@ impl FileUploader {
     }
 
     // does all of these concurrently
-    pub async fn upload_table_to_s3(&self, file_writer: &FileWriter) -> Vec<CleoS3File> {
+    // consumes the file_writer
+    pub async fn upload_table_to_s3(&self, mut file_writer: FileWriter) -> Vec<CleoS3File> {
         let mut upload_files_vec = vec![];
         let insert_file = &file_writer.insert_file;
         let deletes_file = &file_writer.delete_file;
@@ -119,6 +120,10 @@ impl FileUploader {
                     .await
             })
             .collect::<Vec<_>>();
-        futures::future::join_all(s3_file_results).await
+        let cleo_s3_files = futures::future::join_all(s3_file_results).await;
+        // if we don't have any cleo s3 files... first off, bit weird that we sent a file writer here
+        // but secondly, we'd need to clean up the wal file
+        file_writer.wal_file.maybe_remove_wal_file();
+        cleo_s3_files
     }
 }
