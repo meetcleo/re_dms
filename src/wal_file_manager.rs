@@ -208,7 +208,7 @@ impl WalFileManager {
     }
 
     fn open_file(input_file_path: &Path) -> WalInputFileIterator {
-        println!("{:?}", input_file_path);
+        info!("{:?}", input_file_path);
         Self::read_lines(input_file_path).unwrap()
     }
 
@@ -245,8 +245,8 @@ impl WalFileManager {
             >= Duration::new(SECONDS_UNTIL_WAL_SWITCH, 0)
             && !self.swapped_wal;
         if should_swap_wal {
-            println!("SWAP_WAL_ELAPSED {:?}", self.last_swapped_wal.elapsed());
-            println!("LAST_SWAPPED_WAL {:?}", self.last_swapped_wal);
+            info!("SWAP_WAL_ELAPSED {:?}", self.last_swapped_wal.elapsed());
+            info!("LAST_SWAPPED_WAL {:?}", self.last_swapped_wal);
         }
         should_swap_wal
     }

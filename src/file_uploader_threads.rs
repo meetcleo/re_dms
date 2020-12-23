@@ -2,6 +2,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
+#[allow(unused_imports)]
+use log::{debug, error, info, log_enabled, Level};
+
 use crate::change_processing;
 use crate::file_uploader::{CleoS3File, FileUploader};
 use crate::parser::TableName;
@@ -51,9 +54,9 @@ impl<SharedResource, ChannelType> GenericTableThreadSplitter<SharedResource, Cha
                 table_thread.drop_sender_and_return_join_handle()
             })
             .collect::<Vec<_>>();
-        println!("got all join_handles file_uploader waiting");
+        info!("got all join_handles file_uploader waiting");
         futures::future::join_all(join_handles).await;
-        println!("finished waiting on all file_uploader join handles");
+        info!("finished waiting on all file_uploader join handles");
     }
 
     pub fn get_shared_resource(&self) -> Arc<SharedResource> {
@@ -110,10 +113,10 @@ impl FileUploaderThreads {
                     .as_ref()
                     .map(|inner_sender| async move { inner_sender });
             } else {
-                println!("channel hung up main");
+                info!("channel hung up main");
                 file_uploader_stream.join_all_table_threads().await;
 
-                println!("finished waiting on threads");
+                info!("finished waiting on threads");
                 break;
             }
         }
@@ -174,7 +177,7 @@ impl FileUploaderThreads {
                     }
                 }
             } else {
-                // println!("channel hung up: {:?}", last_table_name);
+                // info!("channel hung up: {:?}", last_table_name);
                 drop(result_sender);
                 break;
             }
