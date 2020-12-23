@@ -49,6 +49,14 @@ pub struct WalFile {
     file: Arc<Option<Mutex<WalFileInternal>>>,
 }
 
+// this feels like a lot to do in a destructor (fs stuff!)
+// lets keep it explicit for now
+// impl Drop for WalFile {
+//     fn drop(&mut self) {
+//         self.maybe_remove_wal_file();
+//     }
+// }
+
 #[derive(Debug)]
 struct WalFileInternal {
     file: File,
@@ -176,7 +184,7 @@ impl WalFile {
 
         // borrow dropped by here
         // now we replace Arc value with None.
-        self.file = Arc::new(None);
+        // self.file = Arc::new(None);
     }
 }
 
@@ -226,6 +234,8 @@ impl WalFileManager {
             self.current_wal_file_number,
             self.output_wal_directory.as_path(),
         );
+        // this will only delete, if we didn't send any changes off to the change processor
+        self.current_wal_file.maybe_remove_wal_file();
         self.current_wal_file = next_wal;
     }
 

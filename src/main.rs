@@ -57,7 +57,7 @@ async fn main() {
             wal_file_manager::WalLineResult::SwapWal(wal_file) => {
                 // drain the collector of all it's tables, and send to file transmitter
                 drain_collector_and_transmit(&mut collector, &mut file_transmitter).await;
-                collector.register_wal_file(wal_file);
+                collector.register_wal_file(wal_file.clone());
             }
             wal_file_manager::WalLineResult::WalLine(wal_file, line) => {
                 let parsed_line = parser.parse(&line);

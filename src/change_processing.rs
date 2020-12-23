@@ -524,6 +524,12 @@ impl ChangeProcessing {
                 ChangeProcessingResult::TableChanges(file_writer)
             })
             .collect();
+        // if there are no changes,
+        // our wal file would be the last one left
+        // clean up if so
+        self.associated_wal_file
+            .as_mut()
+            .map(|wal_file| wal_file.maybe_remove_wal_file());
         println!("DRAINED FINAL CHANGES!!!!! {}", self.table_holder.len());
         resulting_vec
     }
