@@ -204,7 +204,6 @@ impl FileWriter {
     ) -> FileWriter {
         let directory = associated_wal_file.path_for_wal_directory();
         let owned_directory = directory.clone().to_owned();
-        // fs::create_dir_all(owned_directory.as_path()).expect("panic creating directory");
         FileWriter {
             directory: owned_directory,
             insert_file: FileStruct::new(
