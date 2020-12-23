@@ -4,13 +4,14 @@ use futures::TryStreamExt;
 use rusoto_core::{ByteStream, Region};
 use rusoto_s3::{PutObjectRequest, S3Client, S3};
 use tokio::fs::File;
-use tokio_util::codec; // , FutureExt
-                       // // sync
-                       // use std::fs;
-                       // use std::io::Read;
+use tokio_util::codec;
+
+#[allow(unused_imports)]
+use log::{debug, error, info, log_enabled, Level};
 
 use crate::file_writer::{FileStruct, FileWriter};
 use crate::parser::{ChangeKind, ColumnInfo, TableName};
+use crate::wal_file_manager;
 
 pub struct FileUploader {
     s3_client: S3Client,
@@ -22,6 +23,7 @@ pub struct CleoS3File {
     pub kind: ChangeKind,
     pub table_name: TableName,
     pub columns: Vec<ColumnInfo>,
+    pub wal_file: wal_file_manager::WalFile,
 }
 impl CleoS3File {
     pub fn remote_path(&self) -> String {
@@ -40,13 +42,18 @@ impl FileUploader {
         }
     }
     // Not actually async yet here
-    pub async fn upload_to_s3(&self, file_name: &str, file_struct: &FileStruct) -> CleoS3File {
-        // println!("copying file {}", file_name);
+    pub async fn upload_to_s3(
+        &self,
+        wal_file: wal_file_manager::WalFile,
+        file_name: &str,
+        file_struct: &FileStruct,
+    ) -> CleoS3File {
+        // info!("copying file {}", file_name);
         let local_filename = file_name;
         let remote_filename = "mike-test-2/".to_owned() + file_name;
-        // println!("remote key {}", remote_filename);
+        // info!("remote key {}", remote_filename);
         // async
-        // println!("{}", local_filename);
+        // info!("{}", local_filename);
         let meta = ::std::fs::metadata(local_filename).unwrap();
         let tokio_file_result = File::open(&local_filename).await;
         match tokio_file_result {
@@ -65,7 +72,7 @@ impl FileUploader {
                 // let mut buffer = Vec::new();
                 // file.read_to_end(&mut buffer);
 
-                println!("{} {}", meta.len(), file_name);
+                info!("{} {}", meta.len(), file_name);
                 let put_request = PutObjectRequest {
                     bucket: BUCKET_NAME.to_owned(),
                     key: remote_filename.clone(),
@@ -78,7 +85,7 @@ impl FileUploader {
                 let maybe_uploaded = self.s3_client.put_object(put_request).await;
                 match maybe_uploaded {
                     Ok(_result) => {
-                        println!("uploaded file {}", remote_filename);
+                        info!("uploaded file {}", remote_filename);
                     }
                     Err(result) => {
                         panic!("Failed to upload file {} {:?}", remote_filename, result);
@@ -90,6 +97,7 @@ impl FileUploader {
                         kind: file_struct.kind,
                         table_name: file_struct.table_name.clone(),
                         columns: columns.clone(),
+                        wal_file: wal_file,
                     }
                 } else {
                     panic!("columns not initialized on file {}", file_name);
@@ -102,23 +110,33 @@ impl FileUploader {
     }
 
     // does all of these concurrently
-    pub async fn upload_table_to_s3(&self, file_writer: &FileWriter) -> Vec<CleoS3File> {
+    // consumes the file_writer
+    pub async fn upload_table_to_s3(&self, mut file_writer: FileWriter) -> Vec<CleoS3File> {
         let mut upload_files_vec = vec![];
         let insert_file = &file_writer.insert_file;
         let deletes_file = &file_writer.delete_file;
-        let updates_files: Vec<_> = file_writer.update_files.values().collect();
-        upload_files_vec.push(insert_file);
-        upload_files_vec.push(deletes_file);
+        let wal_file = &file_writer.wal_file;
+        let updates_files: Vec<_> = file_writer
+            .update_files
+            .values()
+            .map(|file| (wal_file.clone(), file))
+            .collect();
+        upload_files_vec.push((wal_file.clone(), insert_file));
+        upload_files_vec.push((wal_file.clone(), deletes_file));
         upload_files_vec.extend(updates_files);
 
         let s3_file_results = upload_files_vec
             .iter()
-            .filter(|x| x.exists())
-            .map(|file| async move {
-                self.upload_to_s3(file.file_name.to_str().unwrap(), &file)
+            .filter(|(_wal_file, file)| file.exists())
+            .map(|(wal_file, file)| async move {
+                self.upload_to_s3(wal_file.to_owned(), file.file_name.to_str().unwrap(), &file)
                     .await
             })
             .collect::<Vec<_>>();
-        futures::future::join_all(s3_file_results).await
+        let cleo_s3_files = futures::future::join_all(s3_file_results).await;
+        // if we don't have any cleo s3 files... first off, bit weird that we sent a file writer here
+        // but secondly, we'd need to clean up the wal file
+        file_writer.wal_file.maybe_remove_wal_file();
+        cleo_s3_files
     }
 }

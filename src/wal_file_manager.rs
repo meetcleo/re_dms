@@ -20,19 +20,6 @@ use std::time::Instant;
 
 type WalInputFileIterator = io::Split<io::BufReader<File>>;
 
-#[derive(Debug)]
-pub struct WalFileManager {
-    // the number of our wal file. starts at 1, goes to i64::maxint at which point we break
-    current_wal_file_number: u64,
-    // filename for now, can refactor to stdin later
-    input_filename: PathBuf,
-    current_wal_file: WalFile,
-    output_wal_directory: PathBuf,
-    wal_input_file_iterator: WalInputFileIterator,
-    swapped_wal: bool,
-    last_swapped_wal: Instant,
-}
-
 // NOTE: these are not wal files in the sense of postgres wal files
 // just files that are increasing in number that we write to before
 // processing the data
@@ -46,7 +33,47 @@ pub struct WalFile {
     // we have interior mutability of the file, and synchronise with a mutex
     // NOTE: it is unsafe to create two wal_files with the same file_number
     // (keep wal file creation single threaded!)
-    file: Arc<Mutex<File>>,
+    file: Arc<Option<Mutex<WalFileInternal>>>,
+}
+
+// this feels like a lot to do in a destructor (fs stuff!)
+// lets keep it explicit for now
+// impl Drop for WalFile {
+//     fn drop(&mut self) {
+//         self.maybe_remove_wal_file();
+//     }
+// }
+
+#[derive(Debug)]
+struct WalFileInternal {
+    file: File,
+    // we want this to be locked by the mutex
+    had_errors_loading: bool,
+}
+
+impl WalFileInternal {
+    fn new(file: File) -> WalFileInternal {
+        WalFileInternal {
+            file: file,
+            had_errors_loading: false,
+        }
+    }
+    fn register_error(&mut self) {
+        self.had_errors_loading = true;
+    }
+    fn has_errors(&self) -> bool {
+        self.had_errors_loading
+    }
+}
+
+// just pass writes straight to the file
+impl std::io::Write for WalFileInternal {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.file.write(buf)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.file.flush()
+    }
 }
 
 impl Eq for WalFile {}
@@ -69,7 +96,7 @@ impl WalFile {
         let _directory = fs::create_dir_all(directory_path).unwrap();
         WalFile {
             file_number: wal_file_number,
-            file: Arc::new(Mutex::new(file)),
+            file: Arc::new(Some(Mutex::new(WalFileInternal::new(file)))),
             wal_directory: wal_file_directory.to_path_buf(),
         }
     }
@@ -101,15 +128,69 @@ impl WalFile {
     }
 
     fn write(&mut self, string: &str) {
-        self.file
-            .lock()
-            .unwrap()
+        self.with_locked_internal_file()
             .write(format!("{}\n", string).as_bytes())
             .unwrap();
     }
     pub fn flush(&mut self) {
-        self.file.lock().unwrap().flush().unwrap();
+        self.with_locked_internal_file().flush().unwrap();
     }
+    pub fn register_error(&mut self) {
+        self.with_locked_internal_file().register_error();
+    }
+
+    fn with_locked_internal_file(&mut self) -> std::sync::MutexGuard<'_, WalFileInternal> {
+        self.file
+            .as_ref() // tbh, I don't even know why we need two as_ref here, but we do
+            .as_ref() // ref to option
+            .unwrap() // unwrapped option, which is our mutex
+            .lock() // lock the mutex
+            .unwrap() // check for error on unlock
+    }
+
+    pub fn maybe_remove_wal_file(&mut self) {
+        // we only want to remove the wal file if we're the only pointer to this file
+        println!(
+            "Maybe remove wal file {}: arc count: {}",
+            self.file_number,
+            Arc::strong_count(&self.file)
+        );
+        if Arc::strong_count(&self.file) != 1 {
+            return;
+        }
+        // need to do this before the immutable borrow where we get the file below
+        let file_path = self.path_for_wal_file();
+        let directory_path = self.path_for_wal_directory();
+        // do this in a block, so we drop our borrow right after
+        {
+            let locked_internal_file = self.with_locked_internal_file();
+            // we don't remove the wal file if there was an error loading it
+            if locked_internal_file.has_errors() {
+                return;
+            }
+            // TODO delete file and folder.
+            // We've locked our mutex, so we're safe from races
+            std::fs::remove_file(file_path).unwrap();
+            std::fs::remove_dir_all(directory_path).unwrap();
+        }
+
+        // borrow dropped by here
+        // now we replace Arc value with None.
+        self.file = Arc::new(None);
+    }
+}
+
+#[derive(Debug)]
+pub struct WalFileManager {
+    // the number of our wal file. starts at 1, goes to i64::maxint at which point we break
+    current_wal_file_number: u64,
+    // filename for now, can refactor to stdin later
+    input_filename: PathBuf,
+    current_wal_file: WalFile,
+    output_wal_directory: PathBuf,
+    wal_input_file_iterator: WalInputFileIterator,
+    swapped_wal: bool,
+    last_swapped_wal: Instant,
 }
 
 impl WalFileManager {
@@ -132,7 +213,7 @@ impl WalFileManager {
     }
 
     fn open_file(input_file_path: &Path) -> WalInputFileIterator {
-        println!("{:?}", input_file_path);
+        info!("{:?}", input_file_path);
         Self::read_lines(input_file_path).unwrap()
     }
 
@@ -158,6 +239,8 @@ impl WalFileManager {
             self.current_wal_file_number,
             self.output_wal_directory.as_path(),
         );
+        // this will only delete, if we didn't send any changes off to the change processor
+        self.current_wal_file.maybe_remove_wal_file();
         self.current_wal_file = next_wal;
     }
 
@@ -167,8 +250,8 @@ impl WalFileManager {
             >= Duration::new(SECONDS_UNTIL_WAL_SWITCH, 0)
             && !self.swapped_wal;
         if should_swap_wal {
-            println!("SWAP_WAL_ELAPSED {:?}", self.last_swapped_wal.elapsed());
-            println!("LAST_SWAPPED_WAL {:?}", self.last_swapped_wal);
+            info!("SWAP_WAL_ELAPSED {:?}", self.last_swapped_wal.elapsed());
+            info!("LAST_SWAPPED_WAL {:?}", self.last_swapped_wal);
         }
         should_swap_wal
     }
@@ -209,6 +292,10 @@ impl WalFileManager {
         } else {
             Some(WalLineResult::WalLine(self.current_wal(), line))
         }
+    }
+
+    pub fn clean_up_final_wal_file(&mut self) {
+        self.current_wal_file.maybe_remove_wal_file()
     }
 }
 
@@ -261,8 +348,34 @@ mod tests {
     #[test]
     fn new_wal_file() {
         let directory_path = PathBuf::from(TESTING_PATH);
-        let wal_file = WalFile::new(1, directory_path.as_path());
+        let mut wal_file = WalFile::new(1, directory_path.as_path());
         assert_eq!(wal_file.file_number, 1);
+        assert!(Path::new("/tmp/wal_testing/0000000000000001.wal").exists());
+        wal_file.maybe_remove_wal_file();
+        assert!(!Path::new("/tmp/wal_testing/0000000000000001.wal").exists());
+    }
+
+    #[test]
+    fn wal_file_wont_be_deleted_if_cloned() {
+        let directory_path = PathBuf::from(TESTING_PATH);
+        let mut wal_file = WalFile::new(1, directory_path.as_path());
+        let _cloned_wal_file = wal_file.clone();
+        assert_eq!(wal_file.file_number, 1);
+        assert!(Path::new("/tmp/wal_testing/0000000000000001.wal").exists());
+        wal_file.maybe_remove_wal_file();
+        // it still exists
+        assert!(Path::new("/tmp/wal_testing/0000000000000001.wal").exists());
+    }
+
+    #[test]
+    fn wal_file_wont_be_deleted_if_there_is_an_error() {
+        let directory_path = PathBuf::from(TESTING_PATH);
+        let mut wal_file = WalFile::new(1, directory_path.as_path());
+        wal_file.register_error();
+        assert_eq!(wal_file.file_number, 1);
+        assert!(Path::new("/tmp/wal_testing/0000000000000001.wal").exists());
+        wal_file.maybe_remove_wal_file();
+        // it still exists
         assert!(Path::new("/tmp/wal_testing/0000000000000001.wal").exists());
     }
 

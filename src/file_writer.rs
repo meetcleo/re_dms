@@ -21,6 +21,7 @@ pub struct FileWriter {
     pub update_files: HashMap<String, FileStruct>,
     pub delete_file: FileStruct,
     pub table_name: TableName,
+    pub wal_file: wal_file_manager::WalFile,
 }
 
 #[derive(Debug)]
@@ -218,6 +219,7 @@ impl FileWriter {
                 table_name.clone(),
             ),
             table_name: table_name,
+            wal_file: associated_wal_file,
         }
     }
     pub fn add_change(&mut self, change: &ParsedLine) {
