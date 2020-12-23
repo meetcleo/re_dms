@@ -47,7 +47,6 @@ async fn main() {
             database_receiver,
         );
     let mut wal_file_manager = wal_file_manager::WalFileManager::new(
-        None,
         PathBuf::from("./data/test_decoding.txt").as_path(),
         PathBuf::from("output_wal").as_path(),
     );
