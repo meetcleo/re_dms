@@ -444,12 +444,19 @@ impl ChangeProcessing {
     }
 
     // notice this is a move of the wal file
-    pub fn register_wal_file(&mut self, associated_wal_file: WalFile) {
+    pub fn register_wal_file(&mut self, associated_wal_file: Option<WalFile>) {
+        // if there are no changes,
+        // our wal file would be the last one left
+        // clean up if so
+        self.associated_wal_file
+            .as_mut()
+            .map(|wal_file| wal_file.maybe_remove_wal_file());
+
         // it's an error to register a wal file while we have any changes left in our tables
         if self.table_holder.len() != 0 {
             panic!("Tried to register wal file while we have changes in our tables");
         }
-        self.associated_wal_file = Some(associated_wal_file);
+        self.associated_wal_file = associated_wal_file;
     }
     pub fn add_change(&mut self, parsed_line: ParsedLine) -> Option<Vec<ChangeProcessingResult>> {
         match parsed_line {
@@ -524,12 +531,6 @@ impl ChangeProcessing {
                 ChangeProcessingResult::TableChanges(file_writer)
             })
             .collect();
-        // if there are no changes,
-        // our wal file would be the last one left
-        // clean up if so
-        self.associated_wal_file
-            .as_mut()
-            .map(|wal_file| wal_file.maybe_remove_wal_file());
         info!("DRAINED FINAL CHANGES!!!!! {}", self.table_holder.len());
         resulting_vec
     }
@@ -602,7 +603,7 @@ mod tests {
             columns: third_changed_columns,
         };
         let mut change_processing = ChangeProcessing::new();
-        change_processing.register_wal_file(new_wal_file());
+        change_processing.register_wal_file(Some(new_wal_file()));
         let blank_stats_hash = hashmap!();
         assert_eq!(change_processing.get_stats(), blank_stats_hash);
         let first_result = change_processing.add_change(first_change);
@@ -684,7 +685,7 @@ mod tests {
             columns: third_changed_columns,
         };
         let mut change_processing = ChangeProcessing::new();
-        change_processing.register_wal_file(new_wal_file());
+        change_processing.register_wal_file(Some(new_wal_file()));
         let blank_stats_hash = hashmap!();
         assert_eq!(change_processing.get_stats(), blank_stats_hash);
         let first_result = change_processing.add_change(first_change);
@@ -790,7 +791,7 @@ mod tests {
             columns: third_changed_columns,
         };
         let mut change_processing = ChangeProcessing::new();
-        change_processing.register_wal_file(new_wal_file());
+        change_processing.register_wal_file(Some(new_wal_file()));
         let blank_stats_hash = hashmap!();
         assert_eq!(change_processing.get_stats(), blank_stats_hash);
         let first_result = change_processing.add_change(first_change);
