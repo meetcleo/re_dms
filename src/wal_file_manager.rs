@@ -262,7 +262,8 @@ mod tests {
     fn new_wal_file() {
         let directory_path = PathBuf::from(TESTING_PATH);
         let wal_file = WalFile::new(1, directory_path.as_path());
-        println!("{:?}", wal_file);
+        assert_eq!(wal_file.file_number, 1);
+        assert!(Path::new("/tmp/wal_testing/0000000000000001.wal").exists());
     }
 
     #[test]
