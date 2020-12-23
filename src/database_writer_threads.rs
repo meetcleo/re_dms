@@ -2,6 +2,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
+#[allow(unused_imports)]
+use log::{debug, error, info, log_enabled, Level};
+
 use crate::database_writer::DatabaseWriter;
 use crate::file_uploader_threads::{
     GenericTableThread, GenericTableThreadSplitter, UploaderStageResult, DEFAULT_CHANNEL_SIZE,
@@ -42,10 +45,10 @@ impl DatabaseWriterThreads {
                     inner_sender.send(s3_file).await;
                 }
             } else {
-                println!("channel hung up main");
+                info!("channel hung up main");
                 database_uploader_stream.join_all_table_threads().await;
 
-                println!("finished waiting on threads");
+                info!("finished waiting on threads");
                 break;
             }
         }
@@ -82,20 +85,20 @@ impl DatabaseWriterThreads {
         let mut last_table_name = None;
         loop {
             // need to do things this way rather than a match for the borrow checker
-            let received = receiver.recv().await;
-            if let Some(uploader_stage_result) = received {
+            let mut received = receiver.recv().await;
+            if let Some(ref mut uploader_stage_result) = received {
                 let table_name = uploader_stage_result.table_name();
                 last_table_name = Some(table_name);
                 match uploader_stage_result {
-                    UploaderStageResult::S3File(cleo_s3_file) => {
-                        uploader.import_table(&cleo_s3_file).await;
+                    UploaderStageResult::S3File(ref mut cleo_s3_file) => {
+                        uploader.import_table(cleo_s3_file).await;
                     }
                     UploaderStageResult::DdlChange(ddl_change) => {
                         uploader.handle_ddl(&ddl_change).await;
                     }
                 }
             } else {
-                println!("channel hung up: {:?}", last_table_name);
+                info!("channel hung up: {:?}", last_table_name);
                 break;
             }
         }
