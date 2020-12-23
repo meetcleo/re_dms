@@ -20,19 +20,6 @@ use std::time::Instant;
 
 type WalInputFileIterator = io::Split<io::BufReader<File>>;
 
-#[derive(Debug)]
-pub struct WalFileManager {
-    // the number of our wal file. starts at 1, goes to i64::maxint at which point we break
-    current_wal_file_number: u64,
-    // filename for now, can refactor to stdin later
-    input_filename: PathBuf,
-    current_wal_file: WalFile,
-    output_wal_directory: PathBuf,
-    wal_input_file_iterator: WalInputFileIterator,
-    swapped_wal: bool,
-    last_swapped_wal: Instant,
-}
-
 // NOTE: these are not wal files in the sense of postgres wal files
 // just files that are increasing in number that we write to before
 // processing the data
@@ -163,6 +150,11 @@ impl WalFile {
 
     pub fn maybe_remove_wal_file(&mut self) {
         // we only want to remove the wal file if we're the only pointer to this file
+        println!(
+            "Maybe remove wal file {}: arc count: {}",
+            self.file_number,
+            Arc::strong_count(&self.file)
+        );
         if Arc::strong_count(&self.file) != 1 {
             return;
         }
@@ -184,8 +176,21 @@ impl WalFile {
 
         // borrow dropped by here
         // now we replace Arc value with None.
-        // self.file = Arc::new(None);
+        self.file = Arc::new(None);
     }
+}
+
+#[derive(Debug)]
+pub struct WalFileManager {
+    // the number of our wal file. starts at 1, goes to i64::maxint at which point we break
+    current_wal_file_number: u64,
+    // filename for now, can refactor to stdin later
+    input_filename: PathBuf,
+    current_wal_file: WalFile,
+    output_wal_directory: PathBuf,
+    wal_input_file_iterator: WalInputFileIterator,
+    swapped_wal: bool,
+    last_swapped_wal: Instant,
 }
 
 impl WalFileManager {
@@ -287,6 +292,10 @@ impl WalFileManager {
         } else {
             Some(WalLineResult::WalLine(self.current_wal(), line))
         }
+    }
+
+    pub fn clean_up_final_wal_file(&mut self) {
+        self.current_wal_file.maybe_remove_wal_file()
     }
 }
 

@@ -57,7 +57,7 @@ async fn main() {
             wal_file_manager::WalLineResult::SwapWal(wal_file) => {
                 // drain the collector of all it's tables, and send to file transmitter
                 drain_collector_and_transmit(&mut collector, &mut file_transmitter).await;
-                collector.register_wal_file(wal_file.clone());
+                collector.register_wal_file(Some(wal_file.clone()));
             }
             wal_file_manager::WalLineResult::WalLine(wal_file, line) => {
                 let parsed_line = parser.parse(&line);
@@ -85,6 +85,11 @@ async fn main() {
     file_uploader_threads_join_handle.await;
 
     database_writer_threads_join_handle.await;
+
+    // remove wal file from collector
+    collector.register_wal_file(None);
+    // clean up wal file in manager
+    wal_file_manager.clean_up_final_wal_file();
 }
 
 async fn drain_collector_and_transmit(
