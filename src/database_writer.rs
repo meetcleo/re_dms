@@ -120,7 +120,7 @@ impl DatabaseWriter {
             &schema_name,
             &just_table_name,
         );
-        println!("{}", create_staging_table);
+        info!("{}", create_staging_table);
 
         let remote_filepath = s3_file.remote_path();
         let access_key_id = env::var("AWS_ACCESS_KEY_ID").unwrap();

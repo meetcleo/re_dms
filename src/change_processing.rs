@@ -490,7 +490,7 @@ impl ChangeProcessing {
             .iter()
             .for_each(|(table_name, table)| {
                 let (ids, _changes) = table.get_stats();
-                println!("{} {}", ids, table_name)
+                info!("{} {}", ids, table_name)
             });
     }
 
@@ -530,7 +530,7 @@ impl ChangeProcessing {
         self.associated_wal_file
             .as_mut()
             .map(|wal_file| wal_file.maybe_remove_wal_file());
-        println!("DRAINED FINAL CHANGES!!!!! {}", self.table_holder.len());
+        info!("DRAINED FINAL CHANGES!!!!! {}", self.table_holder.len());
         resulting_vec
     }
 }

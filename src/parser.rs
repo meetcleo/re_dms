@@ -698,7 +698,7 @@ mod tests {
             cnt
         }
 
-        //println!("a {:?}", a);
+        // info!("a {:?}", a);
 
         count(a) == count(b)
     }

@@ -2,6 +2,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
+#[allow(unused_imports)]
+use log::{debug, error, info, log_enabled, Level};
+
 use crate::database_writer::DatabaseWriter;
 use crate::file_uploader_threads::{
     GenericTableThread, GenericTableThreadSplitter, UploaderStageResult, DEFAULT_CHANNEL_SIZE,
@@ -42,10 +45,10 @@ impl DatabaseWriterThreads {
                     inner_sender.send(s3_file).await;
                 }
             } else {
-                println!("channel hung up main");
+                info!("channel hung up main");
                 database_uploader_stream.join_all_table_threads().await;
 
-                println!("finished waiting on threads");
+                info!("finished waiting on threads");
                 break;
             }
         }
@@ -95,7 +98,7 @@ impl DatabaseWriterThreads {
                     }
                 }
             } else {
-                println!("channel hung up: {:?}", last_table_name);
+                info!("channel hung up: {:?}", last_table_name);
                 break;
             }
         }

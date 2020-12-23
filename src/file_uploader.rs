@@ -4,10 +4,10 @@ use futures::TryStreamExt;
 use rusoto_core::{ByteStream, Region};
 use rusoto_s3::{PutObjectRequest, S3Client, S3};
 use tokio::fs::File;
-use tokio_util::codec; // , FutureExt
-                       // // sync
-                       // use std::fs;
-                       // use std::io::Read;
+use tokio_util::codec;
+
+#[allow(unused_imports)]
+use log::{debug, error, info, log_enabled, Level};
 
 use crate::file_writer::{FileStruct, FileWriter};
 use crate::parser::{ChangeKind, ColumnInfo, TableName};
@@ -41,12 +41,12 @@ impl FileUploader {
     }
     // Not actually async yet here
     pub async fn upload_to_s3(&self, file_name: &str, file_struct: &FileStruct) -> CleoS3File {
-        // println!("copying file {}", file_name);
+        // info!("copying file {}", file_name);
         let local_filename = file_name;
         let remote_filename = "mike-test-2/".to_owned() + file_name;
-        // println!("remote key {}", remote_filename);
+        // info!("remote key {}", remote_filename);
         // async
-        // println!("{}", local_filename);
+        // info!("{}", local_filename);
         let meta = ::std::fs::metadata(local_filename).unwrap();
         let tokio_file_result = File::open(&local_filename).await;
         match tokio_file_result {
@@ -65,7 +65,7 @@ impl FileUploader {
                 // let mut buffer = Vec::new();
                 // file.read_to_end(&mut buffer);
 
-                println!("{} {}", meta.len(), file_name);
+                info!("{} {}", meta.len(), file_name);
                 let put_request = PutObjectRequest {
                     bucket: BUCKET_NAME.to_owned(),
                     key: remote_filename.clone(),
@@ -78,7 +78,7 @@ impl FileUploader {
                 let maybe_uploaded = self.s3_client.put_object(put_request).await;
                 match maybe_uploaded {
                     Ok(_result) => {
-                        println!("uploaded file {}", remote_filename);
+                        info!("uploaded file {}", remote_filename);
                     }
                     Err(result) => {
                         panic!("Failed to upload file {} {:?}", remote_filename, result);
