@@ -160,7 +160,7 @@ impl FileUploaderThreads {
                 match change {
                     change_processing::ChangeProcessingResult::TableChanges(mut file_writer) => {
                         file_writer.flush_all();
-                        let s3_files = uploader.upload_table_to_s3(&file_writer).await;
+                        let s3_files = uploader.upload_table_to_s3(file_writer).await;
                         for s3_file in s3_files {
                             // TODO handle errors
                             let result_change = UploaderStageResult::S3File(s3_file);
