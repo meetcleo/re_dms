@@ -1,3 +1,4 @@
+use glob::glob;
 use std::fs::{self, File};
 use std::path::Path;
 use std::path::PathBuf;
@@ -194,12 +195,9 @@ pub struct WalFileManager {
 }
 
 impl WalFileManager {
-    pub fn new(
-        previous_wal_file_number: Option<u64>,
-        input_file_name: &Path,
-        output_wal_directory: &Path,
-    ) -> WalFileManager {
-        let new_wal_file_number = previous_wal_file_number.unwrap_or(0) + 1;
+    pub fn new(input_file_name: &Path, output_wal_directory: &Path) -> WalFileManager {
+        let new_wal_file_number =
+            Self::get_next_wal_filenumber_from_filesystem(output_wal_directory);
         let first_wal_file = WalFile::new(new_wal_file_number, output_wal_directory);
         WalFileManager {
             current_wal_file_number: new_wal_file_number,
@@ -210,6 +208,22 @@ impl WalFileManager {
             swapped_wal: true, // we issue a "swapped wal" at the start to show that we've created a new wal file
             last_swapped_wal: Instant::now(),
         }
+    }
+
+    fn get_next_wal_filenumber_from_filesystem(wal_directory: &Path) -> u64 {
+        let wal_glob = wal_directory.join("*".to_owned() + ".wal");
+        glob(wal_glob.to_str().unwrap())
+            .unwrap()
+            .map(|file_path| match file_path {
+                Ok(path) => {
+                    let file_name = path.file_stem().unwrap().to_str().unwrap();
+                    u64::from_str_radix(file_name, 16).unwrap()
+                }
+
+                Err(_e) => panic!("unreadable path. What did you do?"),
+            })
+            .fold(0, std::cmp::max)
+            + 1
     }
 
     fn open_file(input_file_path: &Path) -> WalInputFileIterator {
@@ -315,6 +329,13 @@ mod tests {
         std::fs::create_dir_all(TESTING_PATH).unwrap();
     }
 
+    fn clear_testing_directory() {
+        // clear directory
+        let directory_path = PathBuf::from(TESTING_PATH);
+        fs::remove_dir_all(directory_path.clone()).unwrap();
+        fs::create_dir_all(directory_path.clone()).unwrap();
+    }
+
     // TODO stub filesystem properly
     const TESTING_PATH: &str = "/tmp/wal_testing";
 
@@ -322,6 +343,22 @@ mod tests {
     fn wal_file_naming() {
         let wal_file_name = WalFile::name_for_wal_file(31);
         assert_eq!(wal_file_name.as_str(), "000000000000001F");
+    }
+
+    #[test]
+    fn wal_file_manager_numbering() {
+        clear_testing_directory();
+        // first create a wal file with a number
+        let number = 127;
+        let directory_path = PathBuf::from(TESTING_PATH);
+        WalFile::new(number, directory_path.as_path());
+        WalFile::new(1, directory_path.as_path()); // couple of other smaller numbers too
+        WalFile::new(number - 1, directory_path.as_path());
+        let wal_file_manager = WalFileManager::new(
+            PathBuf::from("test/parser.txt").as_path(),
+            directory_path.as_path(),
+        );
+        assert_eq!(wal_file_manager.current_wal_file.file_number, number + 1)
     }
 
     #[test]
@@ -381,9 +418,9 @@ mod tests {
 
     #[test]
     fn wal_file_manager() {
+        clear_testing_directory();
         let directory_path = PathBuf::from(TESTING_PATH);
         let mut wal_file_manager = WalFileManager::new(
-            None,
             PathBuf::from("test/parser.txt").as_path(),
             directory_path.as_path(),
         );
@@ -398,7 +435,6 @@ mod tests {
     fn wal_file_integration_test() {
         let directory_path = PathBuf::from(TESTING_PATH);
         let mut wal_file_manager = WalFileManager::new(
-            None,
             PathBuf::from("test/parser.txt").as_path(),
             directory_path.as_path(),
         );
