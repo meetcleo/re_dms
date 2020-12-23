@@ -88,10 +88,9 @@ impl DatabaseWriter {
         )
     }
 
-    pub async fn import_table(&self, s3_file: &CleoS3File) {
-        let CleoS3File {
-            kind, table_name, ..
-        } = s3_file;
+    pub async fn import_table(&self, s3_file: &mut CleoS3File) {
+        let kind = &s3_file.kind;
+        let table_name = &s3_file.table_name;
         if [
             "public.transaction_descriptions",
             "public.user_relationships_timestamps",
@@ -193,6 +192,8 @@ impl DatabaseWriter {
         info!("COMMITTED TX {}", table_name);
 
         info!("INSERTED {} {}", &remote_filepath, table_name);
+
+        s3_file.wal_file.maybe_remove_wal_file();
     }
 
     // bool is whether we return early. Only necessary for delete where the table
