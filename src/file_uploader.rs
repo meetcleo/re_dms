@@ -11,6 +11,7 @@ use log::{debug, error, info, log_enabled, Level};
 
 use crate::file_writer::{FileStruct, FileWriter};
 use crate::parser::{ChangeKind, ColumnInfo, TableName};
+use crate::wal_file_manager;
 
 pub struct FileUploader {
     s3_client: S3Client,
@@ -22,6 +23,7 @@ pub struct CleoS3File {
     pub kind: ChangeKind,
     pub table_name: TableName,
     pub columns: Vec<ColumnInfo>,
+    pub wal_file: wal_file_manager::WalFile,
 }
 impl CleoS3File {
     pub fn remote_path(&self) -> String {
@@ -40,7 +42,12 @@ impl FileUploader {
         }
     }
     // Not actually async yet here
-    pub async fn upload_to_s3(&self, file_name: &str, file_struct: &FileStruct) -> CleoS3File {
+    pub async fn upload_to_s3(
+        &self,
+        wal_file: wal_file_manager::WalFile,
+        file_name: &str,
+        file_struct: &FileStruct,
+    ) -> CleoS3File {
         // info!("copying file {}", file_name);
         let local_filename = file_name;
         let remote_filename = "mike-test-2/".to_owned() + file_name;
@@ -90,6 +97,7 @@ impl FileUploader {
                         kind: file_struct.kind,
                         table_name: file_struct.table_name.clone(),
                         columns: columns.clone(),
+                        wal_file: wal_file,
                     }
                 } else {
                     panic!("columns not initialized on file {}", file_name);
@@ -107,16 +115,21 @@ impl FileUploader {
         let mut upload_files_vec = vec![];
         let insert_file = &file_writer.insert_file;
         let deletes_file = &file_writer.delete_file;
-        let updates_files: Vec<_> = file_writer.update_files.values().collect();
-        upload_files_vec.push(insert_file);
-        upload_files_vec.push(deletes_file);
+        let wal_file = &file_writer.wal_file;
+        let updates_files: Vec<_> = file_writer
+            .update_files
+            .values()
+            .map(|file| (wal_file.clone(), file))
+            .collect();
+        upload_files_vec.push((wal_file.clone(), insert_file));
+        upload_files_vec.push((wal_file.clone(), deletes_file));
         upload_files_vec.extend(updates_files);
 
         let s3_file_results = upload_files_vec
             .iter()
-            .filter(|x| x.exists())
-            .map(|file| async move {
-                self.upload_to_s3(file.file_name.to_str().unwrap(), &file)
+            .filter(|(_wal_file, file)| file.exists())
+            .map(|(wal_file, file)| async move {
+                self.upload_to_s3(wal_file.to_owned(), file.file_name.to_str().unwrap(), &file)
                     .await
             })
             .collect::<Vec<_>>();
