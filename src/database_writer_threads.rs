@@ -90,7 +90,7 @@ impl DatabaseWriterThreads {
                 last_table_name = Some(table_name);
                 match uploader_stage_result {
                     UploaderStageResult::S3File(ref mut cleo_s3_file) => {
-                        uploader.import_table(cleo_s3_file).await;
+                        uploader.apply_s3_changes(cleo_s3_file).await;
                     }
                     UploaderStageResult::DdlChange(ddl_change) => {
                         uploader.handle_ddl(&ddl_change).await;

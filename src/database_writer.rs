@@ -2,7 +2,6 @@ use deadpool_postgres::{Client, ManagerConfig, Pool, RecyclingMethod};
 use openssl::ssl::{SslConnector, SslMethod};
 use postgres_openssl::MakeTlsConnector;
 use serde::Deserialize;
-use tokio_postgres::Error;
 // use config;
 use dotenv::dotenv;
 use std::env;
@@ -70,7 +69,7 @@ impl DatabaseWriter {
         info!("alter table statement: {}", alter_table_statement.as_str());
         let client = self.connection_pool.get().await.unwrap();
 
-        let result = client
+        client
             .execute(alter_table_statement.as_str(), &[])
             .await
             .map_err(DatabaseWriterError::TokioError)?;
@@ -101,7 +100,7 @@ impl DatabaseWriter {
         )
     }
 
-    pub async fn import_table(&self, s3_file: &mut CleoS3File) -> Result<(), DatabaseWriterError> {
+    pub async fn apply_s3_changes(&self, s3_file: &mut CleoS3File) -> Result<(), DatabaseWriterError> {
         let kind = &s3_file.kind;
         let table_name = &s3_file.table_name;
         if [
@@ -192,18 +191,23 @@ impl DatabaseWriter {
         info!("CREATED STAGING TABLE {}", table_name);
         transaction
             .execute(copy_to_staging_table.as_str(), &[])
-            .await;
+            .await
+            .map_err(DatabaseWriterError::TokioError)?;
         info!("COPIED TO STAGING TABLE {}", table_name);
         transaction
             .execute(data_migration_query_string.as_str(), &[])
-            .await;
+            .await
+            .map_err(DatabaseWriterError::TokioError)?;
         info!("INSERTED FROM STAGING TABLE {}", table_name);
-        transaction.execute(drop_staging_table.as_str(), &[]).await;
+        transaction
+            .execute(drop_staging_table.as_str(), &[])
+            .await
+            .map_err(DatabaseWriterError::TokioError)?;
         info!("DROPPED STAGING TABLE {}", table_name);
         // TEMP
         // serialiseable isolation error. might be to do with dms.
         // transaction.commit().await.unwrap();
-        info!("COMMITTED TX {}", table_name);
+        // info!("COMMITTED TX {}", table_name);
 
         info!("INSERTED {} {}", &remote_filepath, table_name);
 
