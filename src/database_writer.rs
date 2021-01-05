@@ -234,7 +234,7 @@ impl DatabaseWriter {
                 just_table_name = just_table_name,
                 columns = self.values_description_for_table(&s3_file.columns)
             );
-            let row = database_client
+            database_client
                 .execute(create_table_query.as_str(), &[])
                 .await
                 .unwrap();

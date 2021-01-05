@@ -478,6 +478,8 @@ impl ChangeProcessing {
             }
         }
     }
+
+    #[allow(dead_code)]
     pub fn get_stats(&self) -> HashMap<&TableName, usize> {
         self.table_holder
             .tables
