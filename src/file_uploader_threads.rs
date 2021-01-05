@@ -11,6 +11,7 @@ use crate::parser::TableName;
 
 pub const DEFAULT_CHANNEL_SIZE: usize = 1000;
 
+#[derive(Debug)]
 pub enum UploaderStageResult {
     S3File(CleoS3File),
     DdlChange(change_processing::DdlChange),
@@ -167,7 +168,7 @@ impl FileUploaderThreads {
                         for s3_file in s3_files {
                             // TODO handle errors
                             let result_change = UploaderStageResult::S3File(s3_file);
-                            result_sender.send(result_change).await;
+                            result_sender.send(result_change).await.unwrap();
                         }
                     }
                     change_processing::ChangeProcessingResult::DdlChange(ddl_change) => {
@@ -177,7 +178,7 @@ impl FileUploaderThreads {
                     }
                 }
             } else {
-                // info!("channel hung up: {:?}", last_table_name);
+                info!("file uploader channel hung up: {:?}", last_table_name);
                 drop(result_sender);
                 break;
             }
