@@ -107,7 +107,7 @@ impl FileUploaderThreads {
                 let sender = file_uploader_stream.get_sender(table_name, &result_sender);
                 // TODO: handle error
                 if let Some(ref mut inner_sender) = sender.sender {
-                    inner_sender.send(file_writer).await;
+                    inner_sender.send(file_writer).await.unwrap();
                 }
                 sender
                     .sender
@@ -174,7 +174,7 @@ impl FileUploaderThreads {
                     change_processing::ChangeProcessingResult::DdlChange(ddl_change) => {
                         // rewrap into the output enum
                         let result_change = UploaderStageResult::DdlChange(ddl_change);
-                        result_sender.send(result_change).await;
+                        result_sender.send(result_change).await.unwrap();
                     }
                 }
             } else {
