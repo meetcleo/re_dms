@@ -40,14 +40,17 @@ impl DatabaseWriter {
 
     fn create_connection_pool() -> Pool {
         dotenv().ok();
-        let mut cfg = Config::from_env().unwrap();
-        // cfg.dbname = Some("cleo_development".to_string());
+        // fail fast
+        let mut cfg = Config::from_env().expect("Unable to build config from environment");
         cfg.pg.manager = Some(ManagerConfig {
             recycling_method: RecyclingMethod::Fast,
         });
-        let builder = SslConnector::builder(SslMethod::tls()).expect("fuck");
+        let builder = SslConnector::builder(SslMethod::tls())
+            .expect("Unable to build ssl connector. Are ssl libraries configured correctly?");
         let connector = MakeTlsConnector::new(builder.build());
-        cfg.pg.create_pool(connector).unwrap()
+        cfg.pg
+            .create_pool(connector)
+            .expect("Unable to build database connection pool")
     }
 
     pub async fn handle_ddl(&self, ddl_change: &DdlChange) -> Result<(), Error> {
