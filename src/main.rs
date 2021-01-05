@@ -4,8 +4,6 @@ use std::io::{self, BufRead};
 use std::path::PathBuf;
 // use log::{debug, error, log_enabled, info, Level};
 
-// use std::io::prelude::*;
-// use std::fs;
 use tokio::sync::mpsc;
 
 mod change_processing;
@@ -78,9 +76,9 @@ async fn main() {
     // make sure we close the channel to let things propogate
     drop(file_transmitter);
     // make sure we wait for our uploads to finish
-    file_uploader_threads_join_handle.await;
+    file_uploader_threads_join_handle.await.unwrap();
 
-    database_writer_threads_join_handle.await;
+    database_writer_threads_join_handle.await.unwrap();
 
     // remove wal file from collector
     collector.register_wal_file(None);
@@ -94,7 +92,6 @@ async fn drain_collector_and_transmit(
 ) {
     let final_changes: Vec<_> = collector.drain_final_changes();
     for change in final_changes {
-        // TODO error handling
-        transmitter.send(change).await;
+        transmitter.send(change).await.unwrap();
     }
 }

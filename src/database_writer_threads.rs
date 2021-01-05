@@ -40,9 +40,8 @@ impl DatabaseWriterThreads {
             if let Some(s3_file) = received {
                 let table_name = s3_file.table_name();
                 let sender = database_uploader_stream.get_sender(table_name);
-                // TODO: handle error
                 if let Some(ref mut inner_sender) = sender.sender {
-                    inner_sender.send(s3_file).await;
+                    inner_sender.send(s3_file).await.unwrap();
                 }
             } else {
                 info!("channel hung up main");
