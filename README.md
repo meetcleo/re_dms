@@ -54,3 +54,6 @@ Start logical replication, piping it into re_dms:
 `$ pg_recvlogical --create-slot --start --if-not-exists --fsync-interval=0 --file=- --plugin=test_decoding --slot=re_dms -d postgresql://<you>@localhost/cleo_development | ./target/release/re_dms`
 
 Docs on `pg_recvlogical` [here](https://www.postgresql.org/docs/10/app-pgrecvlogical.html)
+
+## Errors
+* any errors sending to a channel are logic errors, so panic.
