@@ -235,13 +235,6 @@ impl ChangeSetWithColumnType {
     }
 }
 
-// this holds the existing number of files that have been created for a table
-struct FileCounter {
-    update_files_count: i32,
-    insert_files_count: i32,
-    delete_files_count: i32,
-}
-
 #[derive(Debug, Eq, PartialEq)]
 struct Table {
     // we want to have a changeset, but need to match on the enum type for the pkey of the column
