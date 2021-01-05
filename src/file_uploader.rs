@@ -18,6 +18,7 @@ pub struct FileUploader {
 }
 
 // little bag of data
+#[derive(Debug)]
 pub struct CleoS3File {
     pub remote_filename: String,
     pub kind: ChangeKind,

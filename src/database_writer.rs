@@ -2,6 +2,7 @@ use deadpool_postgres::{Client, ManagerConfig, Pool, RecyclingMethod};
 use openssl::ssl::{SslConnector, SslMethod};
 use postgres_openssl::MakeTlsConnector;
 use serde::Deserialize;
+use tokio_postgres::Error;
 // use config;
 use dotenv::dotenv;
 use std::env;
@@ -49,7 +50,7 @@ impl DatabaseWriter {
         cfg.pg.create_pool(connector).unwrap()
     }
 
-    pub async fn handle_ddl(&self, ddl_change: &DdlChange) {
+    pub async fn handle_ddl(&self, ddl_change: &DdlChange) -> Result<(), Error> {
         let alter_table_statement = match ddl_change {
             DdlChange::AddColumn(column_info, table_name) => {
                 self.add_column_statement(column_info, table_name)
@@ -61,9 +62,10 @@ impl DatabaseWriter {
         info!("alter table statement: {}", alter_table_statement.as_str());
         let client = self.connection_pool.get().await.unwrap();
 
-        let result = client.execute(alter_table_statement.as_str(), &[]).await;
+        client.execute(alter_table_statement.as_str(), &[]).await?;
 
         info!("alter table finished: {}", alter_table_statement.as_str());
+        Ok(())
     }
 
     fn add_column_statement(&self, column_info: &ColumnInfo, table_name: &TableName) -> String {

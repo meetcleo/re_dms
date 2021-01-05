@@ -222,6 +222,7 @@ impl ChangeSetWithColumnType {
         }
     }
 
+    #[allow(dead_code)]
     fn clear(&mut self) {
         match self {
             ChangeSetWithColumnType::IntColumnType(btree) => {
