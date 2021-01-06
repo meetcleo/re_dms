@@ -221,18 +221,6 @@ impl ChangeSetWithColumnType {
             }
         }
     }
-
-    #[allow(dead_code)]
-    fn clear(&mut self) {
-        match self {
-            ChangeSetWithColumnType::IntColumnType(btree) => {
-                btree.clear();
-            }
-            ChangeSetWithColumnType::UuidColumnType(btree) => {
-                btree.clear();
-            }
-        }
-    }
 }
 
 #[derive(Debug, Eq, PartialEq)]
