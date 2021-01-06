@@ -42,9 +42,13 @@ impl DatabaseWriterThreads {
             let received = receiver.recv().await;
             if let Some(s3_file) = received {
                 let table_name = s3_file.table_name();
+                let current_table_name = table_name.clone();
                 let sender = database_uploader_stream.get_sender(table_name);
                 if let Some(ref mut inner_sender) = sender.sender {
-                    inner_sender.send(s3_file).await.unwrap();
+                    inner_sender.send(s3_file).await.expect(&format!(
+                        "Sending to database_uploader_streame {:?} failed, channel already closed.",
+                        current_table_name
+                    ));
                 }
             } else {
                 info!("channel hung up main");
