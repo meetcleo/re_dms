@@ -94,6 +94,8 @@ impl DatabaseWriterThreads {
             let received = receiver.recv().await;
             if let Some(ref uploader_stage_result) = received {
                 let table_name = uploader_stage_result.table_name();
+                // so we can register an error if we fail
+                let mut wal_file = uploader_stage_result.wal_file();
                 last_table_name = Some(table_name);
                 let backoff_result = (|| async {
                     match uploader_stage_result {
@@ -108,7 +110,7 @@ impl DatabaseWriterThreads {
                             let mut mutable_s3_file = (*cleo_s3_file).clone();
                             uploader.apply_s3_changes(&mut mutable_s3_file).await?;
                         }
-                        UploaderStageResult::DdlChange(ddl_change) => {
+                        UploaderStageResult::DdlChange(ddl_change, _) => {
                             uploader.handle_ddl(&ddl_change).await?;
                         }
                     };
@@ -131,10 +133,10 @@ impl DatabaseWriterThreads {
                 match backoff_result {
                     Ok(..) => {}
                     Err(err) => {
-                        // TODO: wal_file.register_error();
+                        wal_file.register_error();
                         panic!(
-                            "Database writing and exponential backoff failed for {:?}",
-                            last_table_name,
+                            "Database writing and exponential backoff failed for {:?}. err: {:?}",
+                            last_table_name, err
                         );
                     }
                 }

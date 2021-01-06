@@ -55,7 +55,9 @@ async fn main() {
                     if let Some(change_vec) = collector.add_change(parsed_line) {
                         for change in change_vec {
                             // TODO error handling
-                            file_transmitter.send(change).await;
+                            file_transmitter.send(change).await.expect(
+                                "Error writing to file_transmitter channel. Channel dropped.",
+                            );
                         }
                     }
                 }

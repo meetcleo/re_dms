@@ -15,7 +15,7 @@ pub const DEFAULT_CHANNEL_SIZE: usize = 1000;
 #[derive(Debug)]
 pub enum UploaderStageResult {
     S3File(CleoS3File),
-    DdlChange(change_processing::DdlChange),
+    DdlChange(change_processing::DdlChange, WalFile),
 }
 
 impl UploaderStageResult {
@@ -23,11 +23,16 @@ impl UploaderStageResult {
     pub fn table_name(&self) -> TableName {
         match self {
             Self::S3File(cleo_s3_file) => cleo_s3_file.table_name.clone(),
-            Self::DdlChange(ddl_change) => ddl_change.table_name(),
+            Self::DdlChange(ddl_change, ..) => ddl_change.table_name(),
         }
     }
     // TODO
-    // pub fn wal_file(&self) -> WalFile {}
+    pub fn wal_file(&self) -> WalFile {
+        match self {
+            Self::S3File(cleo_s3_file) => cleo_s3_file.wal_file.clone(),
+            Self::DdlChange(_, wal_file) => wal_file.clone(),
+        }
+    }
 }
 
 pub struct GenericTableThreadSplitter<SharedResource, ChannelType> {
@@ -174,9 +179,9 @@ impl FileUploaderThreads {
                             result_sender.send(result_change).await.unwrap();
                         }
                     }
-                    change_processing::ChangeProcessingResult::DdlChange(ddl_change) => {
+                    change_processing::ChangeProcessingResult::DdlChange(ddl_change, wal_file) => {
                         // rewrap into the output enum
-                        let result_change = UploaderStageResult::DdlChange(ddl_change);
+                        let result_change = UploaderStageResult::DdlChange(ddl_change, wal_file);
                         result_sender.send(result_change).await.unwrap();
                     }
                 }

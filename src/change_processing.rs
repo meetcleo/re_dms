@@ -18,8 +18,8 @@ pub enum DdlChange {
 impl DdlChange {
     pub fn table_name(&self) -> TableName {
         match self {
-            Self::AddColumn(.., table_name) => table_name.clone(),
-            Self::RemoveColumn(.., table_name) => table_name.clone(),
+            Self::AddColumn(_, table_name) => table_name.clone(),
+            Self::RemoveColumn(_, table_name) => table_name.clone(),
         }
     }
 }
@@ -35,7 +35,7 @@ struct ChangeSet {
 #[derive(Debug)]
 pub enum ChangeProcessingResult {
     TableChanges(file_writer::FileWriter),
-    DdlChange(DdlChange),
+    DdlChange(DdlChange, WalFile),
 }
 
 impl ChangeProcessingResult {
@@ -43,7 +43,7 @@ impl ChangeProcessingResult {
     pub fn table_name(&self) -> TableName {
         match self {
             Self::TableChanges(file_writer) => file_writer.table_name.clone(),
-            Self::DdlChange(ddl_change) => ddl_change.table_name(),
+            Self::DdlChange(ddl_change, _) => ddl_change.table_name(),
         }
     }
 }
@@ -469,7 +469,12 @@ impl ChangeProcessing {
                         )];
                         if let Some(ddl_changes) = maybe_ddl_changes {
                             for ddl_change in ddl_changes {
-                                start_vec.push(ChangeProcessingResult::DdlChange(ddl_change))
+                                start_vec.push(ChangeProcessingResult::DdlChange(
+                                    ddl_change,
+                                    self.associated_wal_file
+                                        .clone()
+                                        .expect("Unable to find wal_file for ddl_change"),
+                                ))
                             }
                         }
                         start_vec
