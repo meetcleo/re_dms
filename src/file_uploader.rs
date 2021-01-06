@@ -1,8 +1,9 @@
-// extern crate futures;
-
+use crate::wal_file_manager::WalFile;
+use backoff::Error as BackoffError;
+use backoff::{future::FutureOperation as _, ExponentialBackoff};
 use futures::TryStreamExt;
 use rusoto_core::{ByteStream, Region};
-use rusoto_s3::{PutObjectRequest, S3Client, S3};
+use rusoto_s3::{PutObjectRequest, S3Client, S3Error, S3};
 use tokio::fs::File;
 use tokio_util::codec;
 
@@ -16,6 +17,8 @@ use crate::wal_file_manager;
 pub struct FileUploader {
     s3_client: S3Client,
 }
+
+const TEN_MINUTES: core::time::Duration = core::time::Duration::from_millis(60_000);
 
 // little bag of data
 #[derive(Debug, Clone)]
@@ -42,13 +45,12 @@ impl FileUploader {
             s3_client: S3Client::new(Region::UsEast1),
         }
     }
-    // Not actually async yet here
     pub async fn upload_to_s3(
         &self,
-        wal_file: wal_file_manager::WalFile,
+        wal_file: &wal_file_manager::WalFile,
         file_name: &str,
         file_struct: &FileStruct,
-    ) -> CleoS3File {
+    ) -> Result<CleoS3File, BackoffError<S3Error>> {
         // info!("copying file {}", file_name);
         let local_filename = file_name;
         let remote_filename = "mike-test-2/".to_owned() + file_name;
@@ -65,15 +67,12 @@ impl FileUploader {
                 // Essentially, we have an async file, and want an immutable bytestream that we can read from it.
                 // our s3 library can then stream that to s3. This means we pause the async task on every bit of both read and
                 // write IO and are very efficient.
-                // map_ok is a future combinator, that will apply the closure to each frame (freeze-ing the frame to make it immutable)
+                // map_ok is a future combinator, that will apply the closure to each frame
+                // (freeze-ing the frame to make it immutable since this is needed by the rusoto api)
                 let byte_stream = codec::FramedRead::new(tokio_file, codec::BytesCodec::new())
                     .map_ok(|frame| frame.freeze());
-                // // sync
-                // let mut file = std::fs::File::open(file_name).unwrap();
-                // let mut buffer = Vec::new();
-                // file.read_to_end(&mut buffer);
 
-                info!("{} {}", meta.len(), file_name);
+                debug!("file_length: {} file_name: {}", meta.len(), file_name);
                 let put_request = PutObjectRequest {
                     bucket: BUCKET_NAME.to_owned(),
                     key: remote_filename.clone(),
@@ -93,13 +92,13 @@ impl FileUploader {
                     }
                 }
                 if let Some(columns) = &file_struct.columns {
-                    CleoS3File {
+                    Ok(CleoS3File {
                         remote_filename: remote_filename.clone(),
                         kind: file_struct.kind,
                         table_name: file_struct.table_name.clone(),
                         columns: columns.clone(),
-                        wal_file: wal_file,
-                    }
+                        wal_file: (*wal_file).clone(),
+                    })
                 } else {
                     panic!("columns not initialized on file {}", file_name);
                 }
@@ -117,7 +116,7 @@ impl FileUploader {
         let insert_file = &file_writer.insert_file;
         let deletes_file = &file_writer.delete_file;
         let wal_file = &file_writer.wal_file;
-        let updates_files: Vec<_> = file_writer
+        let updates_files: Vec<(WalFile, &FileStruct)> = file_writer
             .update_files
             .values()
             .map(|file| (wal_file.clone(), file))
@@ -130,7 +129,7 @@ impl FileUploader {
             .iter()
             .filter(|(_wal_file, file)| file.exists())
             .map(|(wal_file, file)| async move {
-                self.upload_to_s3(wal_file.to_owned(), file.file_name.to_str().unwrap(), &file)
+                self.upload_to_s3_with_backoff(wal_file, file.file_name.to_str().unwrap(), &file)
                     .await
             })
             .collect::<Vec<_>>();
@@ -139,5 +138,25 @@ impl FileUploader {
         // but secondly, we'd need to clean up the wal file
         file_writer.wal_file.maybe_remove_wal_file();
         cleo_s3_files
+    }
+
+    pub async fn upload_to_s3_with_backoff(
+        &self,
+        wal_file: &wal_file_manager::WalFile,
+        file_name: &str,
+        file_struct: &FileStruct,
+    ) -> CleoS3File {
+        // for simplicity, this
+        (|| async { self.upload_to_s3(wal_file, file_name, file_struct).await })
+            .retry(Self::exponential_backoff())
+            .await
+            .expect(&format!("File Upload failed for {}", file_name))
+    }
+
+    pub fn exponential_backoff() -> ExponentialBackoff {
+        ExponentialBackoff {
+            max_elapsed_time: Some(TEN_MINUTES),
+            ..ExponentialBackoff::default()
+        }
     }
 }

@@ -126,16 +126,6 @@ impl DatabaseWriterThreads {
                 // pub const MAX_INTERVAL_MILLIS: u64 = 60_000;
                 // /// The default maximum elapsed time in milliseconds (15 minutes).
                 // pub const MAX_ELAPSED_TIME_MILLIS: u64 = 900_000;
-                // let mut eb = ExponentialBackoff {
-                //     current_interval: Duration::from_millis(default::INITIAL_INTERVAL_MILLIS),
-                //     initial_interval: Duration::from_millis(default::INITIAL_INTERVAL_MILLIS),
-                //     randomization_factor: default::RANDOMIZATION_FACTOR,
-                //     multiplier: default::MULTIPLIER,
-                //     max_interval: Duration::from_millis(default::MAX_INTERVAL_MILLIS),
-                //     max_elapsed_time: Some(Duration::from_millis(default::MAX_ELAPSED_TIME_MILLIS)),
-                //     clock: C::default(),
-                //     start_time: Instant::now(),
-                // };
                 .retry(Self::exponential_backoff())
                 .await
                 .expect(&format!(
