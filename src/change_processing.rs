@@ -626,8 +626,10 @@ mod tests {
                 ChangeProcessingResult::TableChanges(..)
             ));
             let ddl_change = change_vec.remove(0);
-            if let ChangeProcessingResult::DdlChange(DdlChange::AddColumn(column_info, TableName)) =
-                ddl_change
+            if let ChangeProcessingResult::DdlChange(
+                DdlChange::AddColumn(column_info, _table_name),
+                _,
+            ) = ddl_change
             {
                 assert_eq!(column_info, new_column_info);
             } else {
@@ -709,7 +711,7 @@ mod tests {
             ));
             let ddl_change = change_vec.remove(0);
 
-            if let ChangeProcessingResult::DdlChange(DdlChange::RemoveColumn(column_info, ..)) =
+            if let ChangeProcessingResult::DdlChange(DdlChange::RemoveColumn(column_info, ..), _) =
                 ddl_change
             {
                 assert_eq!(column_info, removed_column_info);
@@ -816,7 +818,7 @@ mod tests {
             let returned_ddl_set: HashSet<DdlChange> = change_vec
                 .iter()
                 .map(|x| {
-                    if let ChangeProcessingResult::DdlChange(ddl_change) = x {
+                    if let ChangeProcessingResult::DdlChange(ddl_change, _) = x {
                         ddl_change.clone()
                     } else {
                         panic!("found element that's not ddl change");
