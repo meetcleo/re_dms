@@ -1,4 +1,5 @@
 #![feature(str_split_once)]
+#![deny(warnings)]
 
 use std::io::{self, BufRead};
 use std::path::PathBuf;
