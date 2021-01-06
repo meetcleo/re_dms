@@ -355,6 +355,8 @@ impl Table {
     }
 
     fn ddl_changes(&self, parsed_line: &ParsedLine) -> Vec<DdlChange> {
+        // these unwraps are safe, because we only call this if has_ddl_changes
+        // so the Option can't be None
         let new_column_info = &parsed_line.column_info_set().unwrap();
         let old_column_info = &self.column_info.clone().unwrap();
         if !self.has_ddl_changes(parsed_line) {
@@ -464,7 +466,9 @@ impl ChangeProcessing {
                         let mut start_vec = vec![ChangeProcessingResult::TableChanges(
                             Self::write_files_for_table(
                                 returned_table,
-                                self.associated_wal_file.clone().unwrap(),
+                                self.associated_wal_file
+                                    .clone()
+                                    .expect("Error: Trying to write files with no wal file?"),
                             ),
                         )];
                         if let Some(ddl_changes) = maybe_ddl_changes {
@@ -527,8 +531,12 @@ impl ChangeProcessing {
             .drain()
             .map(|(_table_name, table)| {
                 // need to clone again because this is in a loop
-                let file_writer =
-                    Self::write_files_for_table(table, maybe_associated_wal_file.clone().unwrap());
+                let file_writer = Self::write_files_for_table(
+                    table,
+                    maybe_associated_wal_file
+                        .clone()
+                        .expect("Error: trying to write tables with no wal file"),
+                );
                 ChangeProcessingResult::TableChanges(file_writer)
             })
             .collect();

@@ -49,8 +49,8 @@ impl CsvWriter {
             if let CsvWriter::ReadyToWrite(writer) = old_value {
                 writer
                     .into_inner()
-                    .map(|gzip| gzip.finish().unwrap())
-                    .unwrap();
+                    .map(|gzip| gzip.finish().expect("Error finishing gzip"))
+                    .expect("Error unwrapping gzip encoder from csv writer");
             }
         }
     }
@@ -77,40 +77,43 @@ impl FileStruct {
             written_header: false,
             columns: None,
         };
-        // we touch the file when we create the struct created
-        let _file = fs::File::create(new_file_name.as_path()).unwrap();
+        // we touch the file when we create the struct to create the file
+        let _file = fs::File::create(new_file_name.as_path()).expect("Error creating file");
         file_struct
     }
 
     // creates a new filename of the sort directory/n_table_name_inserts.csv.gz
     // where n is a number
-    // TODO: do we just want to save the number and be passing it in somewhere I'm not super happy with thrashing our directory tree?
+    // TODO: do we just want to save the number and be passing it in somewhere
+    // I'm not super happy with thrashing our directory tree?
     fn new_file_name(directory_name: &Path, kind: ChangeKind, table_name: &str) -> PathBuf {
         let the_file_glob_pattern =
             ["*", table_name, kind.to_string().as_str()].join("_") + ".csv.gz";
         let the_glob_pattern = directory_name.join(the_file_glob_pattern);
 
-        let current_file_number = glob(the_glob_pattern.to_str().unwrap())
-            .unwrap()
-            .map(|file_path| {
-                match file_path {
-                    Ok(path) => {
-                        let file_name = path.file_name().unwrap();
-                        // if it's not UTF-8 it can crash
-                        let file_name_str = file_name.to_str().unwrap();
-                        // filename is number_stuff.
-                        let (file_number_str, _) = file_name_str.split_once('_').unwrap();
-                        let file_number: i32 = file_number_str.parse::<i32>().unwrap();
-                        file_number
-                    }
-
-                    // if the path matched but was unreadable,
-                    // thereby preventing its contents from matching
-                    Err(_e) => panic!("unreadable path. What did you do?"),
+        let current_file_number = glob(the_glob_pattern.to_str().expect(
+            "Error turning glob pattern to string. Probably non-UTF8 characters in the directory names?",
+        ))
+        .expect("Error running glob on directory")
+        .map(|file_path| {
+            match file_path {
+                Ok(path) => {
+                    let file_name = path.file_name().expect("Error getting file_name");
+                    // if it's not UTF-8 it can crash
+                    let file_name_str = file_name.to_str().expect("Error turning file_name to string");
+                    // filename is number_stuff.
+                    let (file_number_str, _) = file_name_str.split_once('_').expect("Error, no _ in filename so can't parse it");
+                    let file_number: i32 = file_number_str.parse::<i32>().expect("Error can't parse file number to i32");
+                    file_number
                 }
-            })
-            .max()
-            .unwrap_or(0);
+
+                // if the path matched but was unreadable,
+                // thereby preventing its contents from matching
+                Err(_e) => panic!("Unreadable filepath. What did you do?"),
+            }
+        })
+        .max()
+        .unwrap_or(0);
         let new_file_number = current_file_number + 1;
         let the_new_file_name = [
             new_file_number.to_string().as_str(),
@@ -129,7 +132,8 @@ impl FileStruct {
     }
 
     fn create_writer(&mut self) {
-        let file = fs::File::create(self.file_name.as_path()).unwrap();
+        let file = fs::File::create(self.file_name.as_path())
+            .expect("Unable to create file in file writer");
         let writer = GzEncoder::new(file, Compression::default());
         let csv_writer = csv::WriterBuilder::new().from_writer(writer);
         self.file = CsvWriter::ReadyToWrite(csv_writer);

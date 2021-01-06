@@ -78,13 +78,17 @@ async fn main() {
     // make sure we close the channel to let things propogate
     drop(file_transmitter);
     // make sure we wait for our uploads to finish
-    file_uploader_threads_join_handle.await.unwrap();
+    file_uploader_threads_join_handle
+        .await
+        .expect("Error joining file uploader threads");
 
-    database_writer_threads_join_handle.await.unwrap();
+    database_writer_threads_join_handle
+        .await
+        .expect("Error joining database writer threads");
 
     // remove wal file from collector
     collector.register_wal_file(None);
-    // clean up wal file in manager
+    // clean up wal file in manager it should be the last one now.
     wal_file_manager.clean_up_final_wal_file();
 }
 
