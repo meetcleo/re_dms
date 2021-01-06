@@ -31,7 +31,7 @@ Install Rust:
 
 `$ brew install rustup-init`
 
-$ rustup install nightly
+`$ rustup install nightly`
 
 `$ source "$HOME/.cargo/env"`
 
