@@ -1,7 +1,12 @@
 bin
 data
+host
+hosts.example
+Makefile
 output
 output_wal
+README.md
+roles
 target
 test
 Dockerfile

@@ -1,0 +1,33 @@
+---
+- name: create re_dms group
+  group:
+    name: re_dms
+    state: present
+
+- name: create re_dms user
+  user:
+    name: re_dms
+    groups: re_dms
+    shell: /sbin/nologin
+    append: yes
+    state: present
+    create_home: no
+
+- name: Copy systemd service file to server
+  copy:
+    src: re_dms.service
+    dest: /etc/systemd/system
+    owner: root
+    group: root
+  notify:
+    - Start re_dms
+
+- name: Copy binary to server
+  copy:
+    src: re_dms
+    dest: /usr/local/bin
+    mode: 0755
+    owner: root
+    group: root
+  notify:
+    - Start re_dms
