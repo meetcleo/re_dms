@@ -8,6 +8,7 @@ use log::{debug, error, info, log_enabled, Level};
 use crate::change_processing;
 use crate::file_uploader::{CleoS3File, FileUploader};
 use crate::parser::TableName;
+use crate::wal_file_manager::WalFile;
 
 pub const DEFAULT_CHANNEL_SIZE: usize = 1000;
 
@@ -25,6 +26,8 @@ impl UploaderStageResult {
             Self::DdlChange(ddl_change) => ddl_change.table_name(),
         }
     }
+    // TODO
+    // pub fn wal_file(&self) -> WalFile {}
 }
 
 pub struct GenericTableThreadSplitter<SharedResource, ChannelType> {
