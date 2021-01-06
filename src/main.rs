@@ -1,8 +1,6 @@
 #![feature(str_split_once)]
 
-use std::fs::File;
 use std::io::{self, BufRead};
-use std::path::Path;
 use std::path::PathBuf;
 // use log::{debug, error, log_enabled, info, Level};
 
@@ -46,31 +44,30 @@ async fn main() {
         database_writer_threads::DatabaseWriterThreads::spawn_database_writer_stream(
             database_receiver,
         );
-    let mut wal_file_manager = wal_file_manager::WalFileManager::new(
-        PathBuf::from("./data/test_decoding.txt").as_path(),
-        PathBuf::from("output_wal").as_path(),
-    );
+    let mut wal_file_manager =
+        wal_file_manager::WalFileManager::new(PathBuf::from("output_wal").as_path());
+    collector.register_wal_file(Some(wal_file_manager.current_wal()));
 
-    while let Some(wal_line_result) = wal_file_manager.next_line() {
-        match wal_line_result {
-            wal_file_manager::WalLineResult::SwapWal(wal_file) => {
-                // drain the collector of all it's tables, and send to file transmitter
-                drain_collector_and_transmit(&mut collector, &mut file_transmitter).await;
-                collector.register_wal_file(Some(wal_file.clone()));
-            }
-            wal_file_manager::WalLineResult::WalLine(wal_file, line) => {
-                let parsed_line = parser.parse(&line);
-                match parsed_line {
-                    parser::ParsedLine::ContinueParse => {} // Intentionally left blank, continue parsing
-                    _ => {
-                        if let Some(change_vec) = collector.add_change(parsed_line) {
-                            for change in change_vec {
-                                // TODO error handling
-                                file_transmitter.send(change).await;
-                            }
+    for line in io::stdin().lock().lines() {
+        if let Ok(ip) = line {
+            let parsed_line = parser.parse(&ip);
+            match parsed_line {
+                parser::ParsedLine::ContinueParse => {} // Intentionally left blank, continue parsing
+                _ => {
+                    if let Some(change_vec) = collector.add_change(parsed_line) {
+                        for change in change_vec {
+                            // TODO error handling
+                            file_transmitter.send(change).await;
                         }
                     }
                 }
+            }
+            if let wal_file_manager::WalLineResult::SwapWal(wal_file) =
+                wal_file_manager.next_line(&ip)
+            {
+                // drain the collector of all it's tables, and send to file transmitter
+                drain_collector_and_transmit(&mut collector, &mut file_transmitter).await;
+                collector.register_wal_file(Some(wal_file.clone()));
             }
         }
     }
@@ -100,14 +97,4 @@ async fn drain_collector_and_transmit(
         // TODO error handling
         transmitter.send(change).await;
     }
-}
-
-// The output is wrapped in a Result to allow matching on errors
-// Returns an Iterator to the Reader of the lines of the file.
-fn read_lines<P>(filename: P) -> io::Result<io::Lines<io::BufReader<File>>>
-where
-    P: AsRef<Path>,
-{
-    let file = File::open(filename)?;
-    Ok(io::BufReader::new(file).lines())
 }
