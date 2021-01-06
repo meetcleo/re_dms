@@ -134,7 +134,10 @@ impl DatabaseWriterThreads {
                 // };
                 .retry(Self::exponential_backoff())
                 .await
-                .unwrap();
+                .expect(&format!(
+                    "Database writing and exponential backoff failed for {:?}",
+                    last_table_name,
+                ));
             } else {
                 info!("channel hung up: {:?}", last_table_name);
                 break;
