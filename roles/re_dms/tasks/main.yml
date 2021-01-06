@@ -13,6 +13,16 @@
     state: present
     create_home: no
 
+- name: Copy systemd config file to server
+  copy:
+    src: re_dms.conf
+    dest: /etc
+    owner: root
+    group: root
+    mode: 0660
+  notify:
+    - Start re_dms
+
 - name: Copy systemd service file to server
   copy:
     src: re_dms.service
