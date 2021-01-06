@@ -149,7 +149,7 @@ impl WalFile {
 
     pub fn maybe_remove_wal_file(&mut self) {
         // we only want to remove the wal file if we're the only pointer to this file
-        println!(
+        debug!(
             "Maybe remove wal file {}: arc count: {}",
             self.file_number,
             Arc::strong_count(&self.file)
@@ -167,7 +167,6 @@ impl WalFile {
             if locked_internal_file.has_errors() {
                 return;
             }
-            // TODO delete file and folder.
             // We've locked our mutex, so we're safe from races
             std::fs::remove_file(file_path).unwrap();
             std::fs::remove_dir_all(directory_path).unwrap();
