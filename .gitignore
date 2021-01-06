@@ -2,6 +2,7 @@
 /data
 /output
 /output_wal
+/bin
 *.org
 .env
 .vscode

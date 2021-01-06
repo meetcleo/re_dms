@@ -59,3 +59,19 @@ Docs on `pg_recvlogical` [here](https://www.postgresql.org/docs/10/app-pgrecvlog
 
 ### Errors
 * any errors sending to a channel are logic errors, so panic.
+
+## Deploying to EC2
+
+Build the executable for Linux:
+
+`make build`
+
+_We use a Docker container to build an executable that can run on Linux to avoid cross-compiling. Rust has decent cross-compilation support, but dependencies like SSL libraries are harder to support._
+
+Deploy using ansible:
+
+`make deploy`
+
+Clean any build artefacts:
+
+`make clean`

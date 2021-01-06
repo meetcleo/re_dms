@@ -1,0 +1,12 @@
+bin
+data
+output
+output_wal
+target
+test
+Dockerfile
+.dockerignore
+.git
+.gitignore
+.env
+.vscode
