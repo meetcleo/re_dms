@@ -130,7 +130,7 @@ impl FileUploader {
         upload_files_vec.extend(updates_files);
 
         let s3_file_results = upload_files_vec
-            .iter()
+            .iter_mut()
             .filter(|(_wal_file, file)| file.exists())
             .map(|(wal_file, file)| async move {
                 self.upload_to_s3_with_backoff(wal_file, file.file_name.to_str().unwrap(), &file)
@@ -146,15 +146,22 @@ impl FileUploader {
 
     pub async fn upload_to_s3_with_backoff(
         &self,
-        wal_file: &wal_file_manager::WalFile,
+        wal_file: &mut wal_file_manager::WalFile,
         file_name: &str,
         file_struct: &FileStruct,
     ) -> CleoS3File {
         // for simplicity, this
-        (|| async { self.upload_to_s3(wal_file, file_name, file_struct).await })
+        let result = (|| async { self.upload_to_s3(wal_file, file_name, file_struct).await })
             .retry(Self::exponential_backoff())
-            .await
-            .expect(&format!("File Upload failed for {}", file_name))
+            .await;
+        match result {
+            Ok(s3_file) => s3_file,
+            Err(err) => {
+                // belt and bracers, this won't get deleted
+                wal_file.register_error();
+                panic!("File Upload failed for {}, error: {}", file_name, err);
+            }
+        }
     }
 
     pub fn exponential_backoff() -> ExponentialBackoff {
