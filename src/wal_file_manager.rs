@@ -398,8 +398,6 @@ mod tests {
         wal_file_manager.swap_wal();
         assert_eq!(wal_file_manager.current_wal().file_number, 2);
         let swap_wal = wal_file_manager.next_line(&"BEGIN".to_owned());
-
-        assert!(matches!(swap_wal, WalLineResult::SwapWal(..)))
     }
 
     fn last_line_of_wal(wal_file: &WalFile) -> String {
