@@ -46,6 +46,9 @@ tokio = { version = "0.2.9", features = ["full"] }
 tokio-util = {version = "0.3.1", features = ["codec"] }
 futures = "0.3.1"
 
+# backoff
+backoff = {version = "0.2.1", features = ["tokio"]}
+
 # string internment
 internment = "0.4.1"
 
