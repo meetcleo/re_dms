@@ -22,6 +22,7 @@ struct Config {
     pg: deadpool_postgres::Config,
 }
 
+#[derive(Debug)]
 pub enum DatabaseWriterError {
     PoolError(deadpool_postgres::PoolError),
     TokioError(tokio_postgres::Error),
@@ -100,7 +101,10 @@ impl DatabaseWriter {
         )
     }
 
-    pub async fn apply_s3_changes(&self, s3_file: &mut CleoS3File) -> Result<(), DatabaseWriterError> {
+    pub async fn apply_s3_changes(
+        &self,
+        s3_file: &mut CleoS3File,
+    ) -> Result<(), DatabaseWriterError> {
         let kind = &s3_file.kind;
         let table_name = &s3_file.table_name;
         if [

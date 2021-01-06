@@ -1,3 +1,4 @@
+use backoff::{future::FutureOperation as _, ExponentialBackoff};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -16,6 +17,8 @@ pub type DatabaseTableThread = GenericTableThread<UploaderStageResult>;
 
 // single thread handle
 pub type DatabaseWriterThreads = GenericTableThreadSplitter<DatabaseWriter, UploaderStageResult>;
+
+const TEN_MINUTES: core::time::Duration = core::time::Duration::from_millis(60_000);
 
 impl DatabaseWriterThreads {
     pub fn new() -> DatabaseWriterThreads {
@@ -84,22 +87,65 @@ impl DatabaseWriterThreads {
         let mut last_table_name = None;
         loop {
             // need to do things this way rather than a match for the borrow checker
-            let mut received = receiver.recv().await;
-            if let Some(ref mut uploader_stage_result) = received {
+            let received = receiver.recv().await;
+            if let Some(ref uploader_stage_result) = received {
                 let table_name = uploader_stage_result.table_name();
                 last_table_name = Some(table_name);
-                match uploader_stage_result {
-                    UploaderStageResult::S3File(ref mut cleo_s3_file) => {
-                        uploader.apply_s3_changes(cleo_s3_file).await;
-                    }
-                    UploaderStageResult::DdlChange(ddl_change) => {
-                        uploader.handle_ddl(&ddl_change).await;
-                    }
-                }
+                (|| async {
+                    match uploader_stage_result {
+                        UploaderStageResult::S3File(cleo_s3_file) => {
+                            // dereference to get the struct, then clone,
+                            // so we have a mutable reference to a cloned version of this struct.
+                            // we can't hold a mutable reference to something outside of this async closure because then
+                            // rust isn't happy because we've got these dangling mutable references around.
+                            // (our closure can't be FnOnce, and there's problems if it's FnMut, here we make
+                            // it an Fn at the expense of this clone)
+                            // it took me a _loooooong_ time to grok all of that.
+                            let mut mutable_s3_file = (*cleo_s3_file).clone();
+                            uploader.apply_s3_changes(&mut mutable_s3_file).await?;
+                        }
+                        UploaderStageResult::DdlChange(ddl_change) => {
+                            uploader.handle_ddl(&ddl_change).await?;
+                        }
+                    };
+                    Ok(())
+                })
+                // NOTE: default exponential backoff
+                // /// The default initial interval value in milliseconds (0.5 seconds).
+                //     pub const INITIAL_INTERVAL_MILLIS: u64 = 500;
+                // /// The default randomization factor (0.5 which results in a random period ranging between 50%
+                // /// below and 50% above the retry interval).
+                // pub const RANDOMIZATION_FACTOR: f64 = 0.5;
+                // /// The default multiplier value (1.5 which is 50% increase per back off).
+                // pub const MULTIPLIER: f64 = 1.5;
+                // /// The default maximum back off time in milliseconds (1 minute).
+                // pub const MAX_INTERVAL_MILLIS: u64 = 60_000;
+                // /// The default maximum elapsed time in milliseconds (15 minutes).
+                // pub const MAX_ELAPSED_TIME_MILLIS: u64 = 900_000;
+                // let mut eb = ExponentialBackoff {
+                //     current_interval: Duration::from_millis(default::INITIAL_INTERVAL_MILLIS),
+                //     initial_interval: Duration::from_millis(default::INITIAL_INTERVAL_MILLIS),
+                //     randomization_factor: default::RANDOMIZATION_FACTOR,
+                //     multiplier: default::MULTIPLIER,
+                //     max_interval: Duration::from_millis(default::MAX_INTERVAL_MILLIS),
+                //     max_elapsed_time: Some(Duration::from_millis(default::MAX_ELAPSED_TIME_MILLIS)),
+                //     clock: C::default(),
+                //     start_time: Instant::now(),
+                // };
+                .retry(Self::exponential_backoff())
+                .await
+                .unwrap();
             } else {
                 info!("channel hung up: {:?}", last_table_name);
                 break;
             }
+        }
+    }
+
+    pub fn exponential_backoff() -> ExponentialBackoff {
+        ExponentialBackoff {
+            max_elapsed_time: Some(TEN_MINUTES),
+            ..ExponentialBackoff::default()
         }
     }
 }
