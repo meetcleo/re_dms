@@ -1,0 +1,6 @@
+---
+- name: Start re_dms
+  systemd:
+    name: re_dms
+    state: started
+    enabled: yes
