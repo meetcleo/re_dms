@@ -98,6 +98,9 @@ async fn drain_collector_and_transmit(
 ) {
     let final_changes: Vec<_> = collector.drain_final_changes();
     for change in final_changes {
-        transmitter.send(change).await.unwrap();
+        transmitter
+            .send(change)
+            .await
+            .expect("Error draining collector and sending to channel");
     }
 }
