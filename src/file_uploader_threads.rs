@@ -26,7 +26,7 @@ impl UploaderStageResult {
             Self::DdlChange(ddl_change, ..) => ddl_change.table_name(),
         }
     }
-    // TODO
+
     pub fn wal_file(&self) -> WalFile {
         match self {
             Self::S3File(cleo_s3_file) => cleo_s3_file.wal_file.clone(),
