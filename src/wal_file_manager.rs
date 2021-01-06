@@ -298,6 +298,7 @@ pub enum WalLineResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{BufRead, BufReader};
 
     // NOTE: I think this is actually run globally before all tests. Seems fine to me though.
     #[ctor::ctor]
