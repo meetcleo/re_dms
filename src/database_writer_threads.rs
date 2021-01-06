@@ -6,6 +6,7 @@ use tokio::sync::mpsc;
 use log::{debug, error, info, log_enabled, Level};
 
 use crate::database_writer::DatabaseWriter;
+use crate::exponential_backoff::*;
 use crate::file_uploader_threads::{
     GenericTableThread, GenericTableThreadSplitter, UploaderStageResult, DEFAULT_CHANNEL_SIZE,
 };
@@ -39,10 +40,13 @@ impl DatabaseWriterThreads {
             let received = receiver.recv().await;
             if let Some(s3_file) = received {
                 let table_name = s3_file.table_name();
+                let current_table_name = table_name.clone();
                 let sender = database_uploader_stream.get_sender(table_name);
-                // TODO: handle error
                 if let Some(ref mut inner_sender) = sender.sender {
-                    inner_sender.send(s3_file).await;
+                    inner_sender.send(s3_file).await.expect(&format!(
+                        "Sending to database_uploader_streame {:?} failed, channel already closed.",
+                        current_table_name
+                    ));
                 }
             } else {
                 info!("channel hung up main");
@@ -85,16 +89,41 @@ impl DatabaseWriterThreads {
         let mut last_table_name = None;
         loop {
             // need to do things this way rather than a match for the borrow checker
-            let mut received = receiver.recv().await;
-            if let Some(ref mut uploader_stage_result) = received {
+            let received = receiver.recv().await;
+            if let Some(ref uploader_stage_result) = received {
                 let table_name = uploader_stage_result.table_name();
+                // so we can register an error if we fail
+                let mut wal_file = uploader_stage_result.wal_file();
                 last_table_name = Some(table_name);
-                match uploader_stage_result {
-                    UploaderStageResult::S3File(ref mut cleo_s3_file) => {
-                        uploader.import_table(cleo_s3_file).await;
-                    }
-                    UploaderStageResult::DdlChange(ddl_change) => {
-                        uploader.handle_ddl(&ddl_change).await;
+                let backoff_result = (|| async {
+                    match uploader_stage_result {
+                        UploaderStageResult::S3File(cleo_s3_file) => {
+                            // dereference to get the struct, then clone,
+                            // so we have a mutable reference to a cloned version of this struct.
+                            // we can't hold a mutable reference to something outside of this async closure because then
+                            // rust isn't happy because we've got these dangling mutable references around.
+                            // (our closure can't be FnOnce, and there's problems if it's FnMut, here we make
+                            // it an Fn at the expense of this clone)
+                            // it took me a _loooooong_ time to grok all of that.
+                            let mut mutable_s3_file = (*cleo_s3_file).clone();
+                            uploader.apply_s3_changes(&mut mutable_s3_file).await?;
+                        }
+                        UploaderStageResult::DdlChange(ddl_change, _) => {
+                            uploader.handle_ddl(&ddl_change).await?;
+                        }
+                    };
+                    Ok(())
+                })
+                .retry(default_exponential_backoff())
+                .await;
+                match backoff_result {
+                    Ok(..) => {}
+                    Err(err) => {
+                        wal_file.register_error();
+                        panic!(
+                            "Database writing and exponential backoff failed for {:?}. err: {:?}",
+                            last_table_name, err
+                        );
                     }
                 }
             } else {

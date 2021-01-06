@@ -12,6 +12,7 @@ pub type ColumnName = ArcIntern<String>;
 pub type ColumnType = ArcIntern<String>;
 
 lazy_static! {
+    // leave these as unwrap
     static ref PARSE_COLUMN_REGEX: regex::Regex = Regex::new(r"(^[^\[^\]]+)\[([^:]+)\]:").unwrap();
     static ref COLUMN_TYPE_REGEX: regex::Regex = Regex::new(r"^.+\[\]$").unwrap();
 }
@@ -25,7 +26,8 @@ pub trait SchemaAndTable {
 // we assume a valid table name, so unwrap
 impl SchemaAndTable for TableName {
     fn schema_and_table_name(&self) -> (&str, &str) {
-        self.split_once('.').unwrap()
+        self.split_once('.')
+            .expect("can't split schema and table name. No `.` character")
     }
 }
 
@@ -272,7 +274,9 @@ impl ColumnValue {
     }
     fn parse_integer<'a>(string: &'a str) -> (ColumnValue, &'a str) {
         let (start, rest) = ColumnValue::split_until_char_or_end(string, ' ');
-        let integer: i64 = start.parse().unwrap();
+        let integer: i64 = start
+            .parse()
+            .expect("Unable to parse integer from integer type");
         (ColumnValue::Integer(integer), rest)
     }
     fn parse_text<'a>(string: &'a str, continue_parse: bool) -> (ColumnValue, &'a str) {
@@ -371,7 +375,9 @@ impl Parser {
             const SIZE_OF_BEGIN_TAG: usize = "BEGIN ".len();
             let rest_of_string = &string[SIZE_OF_BEGIN_TAG..string.len()];
             // "BEGIN 1234"
-            let xid: i64 = rest_of_string.parse().unwrap();
+            let xid: i64 = rest_of_string
+                .parse()
+                .expect("Unable to parse BEGIN xid as i64");
             debug!("parsed begin {}", xid);
             ParsedLine::Begin(xid)
         } else {
@@ -386,7 +392,9 @@ impl Parser {
             const SIZE_OF_COMMIT_TAG: usize = "COMMIT ".len();
             let rest_of_string = &string[SIZE_OF_COMMIT_TAG..string.len()];
             // "BEGIN 1234"
-            let xid: i64 = rest_of_string.parse().unwrap();
+            let xid: i64 = rest_of_string
+                .parse()
+                .expect("Unable to parse COMMIT xid as i64");
             debug!("parsed commit {}", xid);
             ParsedLine::Commit(xid)
         } else {
@@ -458,7 +466,9 @@ impl Parser {
 
     fn parse_column<'a>(&self, string: &'a str) -> (Column, &'a str) {
         let re = &PARSE_COLUMN_REGEX;
-        let captures = re.captures(string).unwrap();
+        let captures = re
+            .captures(string)
+            .expect("Unable to match PARSE_COLUMN_REGEX to line");
 
         let column_name = captures
             .get(1)
@@ -509,7 +519,9 @@ impl Parser {
                 table_name,
                 mut columns,
             }) => {
-                let incomplete_column = columns.pop().unwrap();
+                let incomplete_column = columns
+                    .pop()
+                    .expect("error: continue parse called without any columns? wtf?");
                 assert!(matches!(incomplete_column, Column::IncompleteColumn { .. }));
                 match incomplete_column {
                     Column::IncompleteColumn { column_info: ColumnInfo{name, column_type}, value: incomplete_value } => {

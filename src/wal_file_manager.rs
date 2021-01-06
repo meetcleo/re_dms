@@ -4,7 +4,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use std::io::{BufRead, BufReader, Write};
+use std::io::Write;
 use std::time::Duration;
 
 #[allow(unused_imports)]
@@ -89,9 +89,18 @@ impl WalFile {
         let path = Self::path_for_wal_file_class(wal_file_number, wal_file_directory);
         let directory_path =
             Self::path_for_wal_directory_class(wal_file_number, wal_file_directory);
-        let _directory = fs::create_dir_all(directory_path.clone()).unwrap();
+        let _directory = fs::create_dir_all(directory_path.clone()).expect(&format!(
+            "Unable to create directory: {}",
+            directory_path
+                .clone()
+                .to_str()
+                .unwrap_or("unprintable non-utf-8 directory")
+        ));
         info!("creating wal file {:?}", path);
-        let file = File::create(path).unwrap();
+        let file = File::create(path.clone()).expect(&format!(
+            "Unable to create wal file: {}",
+            path.to_str().unwrap_or("unprintable non-utf-8 path")
+        ));
         info!("creating wal directory {:?}", directory_path);
         WalFile {
             file_number: wal_file_number,
@@ -129,10 +138,12 @@ impl WalFile {
     fn write(&mut self, string: &str) {
         self.with_locked_internal_file()
             .write(format!("{}\n", string).as_bytes())
-            .unwrap();
+            .expect("Unable to write line to wal_file");
     }
     pub fn flush(&mut self) {
-        self.with_locked_internal_file().flush().unwrap();
+        self.with_locked_internal_file()
+            .flush()
+            .expect("Unable to flush wal_file");
     }
     pub fn register_error(&mut self) {
         self.with_locked_internal_file().register_error();
@@ -142,14 +153,14 @@ impl WalFile {
         self.file
             .as_ref() // tbh, I don't even know why we need two as_ref here, but we do
             .as_ref() // ref to option
-            .unwrap() // unwrapped option, which is our mutex
+            .expect("Trying to lock internal file, but it's not there?") // unwrapped option, which is our mutex
             .lock() // lock the mutex
-            .unwrap() // check for error on unlock
+            .expect("Error unlocking mutex for wal file") // check for error on unlock
     }
 
     pub fn maybe_remove_wal_file(&mut self) {
         // we only want to remove the wal file if we're the only pointer to this file
-        println!(
+        debug!(
             "Maybe remove wal file {}: arc count: {}",
             self.file_number,
             Arc::strong_count(&self.file)
@@ -167,10 +178,9 @@ impl WalFile {
             if locked_internal_file.has_errors() {
                 return;
             }
-            // TODO delete file and folder.
             // We've locked our mutex, so we're safe from races
-            std::fs::remove_file(file_path).unwrap();
-            std::fs::remove_dir_all(directory_path).unwrap();
+            std::fs::remove_file(file_path).expect("Error removing wal file");
+            std::fs::remove_dir_all(directory_path).expect("Error removing wal directory");
         }
 
         // borrow dropped by here
@@ -203,17 +213,25 @@ impl WalFileManager {
 
     fn get_next_wal_filenumber_from_filesystem(wal_directory: &Path) -> u64 {
         let wal_glob = wal_directory.join("*".to_owned() + ".wal");
-        glob(wal_glob.to_str().unwrap())
-            .unwrap()
-            .map(|file_path| match file_path {
-                Ok(path) => {
-                    let file_name = path.file_stem().unwrap().to_str().unwrap();
-                    u64::from_str_radix(file_name, 16).unwrap()
-                }
+        glob(
+            wal_glob
+                .to_str()
+                .expect("Error creating next wal file glob string"),
+        )
+        .expect("Error running wal glob pattern on directory")
+        .map(|file_path| match file_path {
+            Ok(path) => {
+                let file_name = path
+                    .file_stem()
+                    .expect("error getting path stem of wal file")
+                    .to_str()
+                    .expect("error turning wal path stem to string");
+                u64::from_str_radix(file_name, 16).expect("error parsing wal file name as u64")
+            }
 
-                Err(_e) => panic!("unreadable path. What did you do?"),
-            })
-            .fold(0, std::cmp::max)
+            Err(_e) => panic!("unreadable path. What did you do?"),
+        })
+        .fold(0, std::cmp::max)
             + 1
     }
 
@@ -280,6 +298,7 @@ pub enum WalLineResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{BufRead, BufReader};
 
     // NOTE: I think this is actually run globally before all tests. Seems fine to me though.
     #[ctor::ctor]
@@ -379,8 +398,6 @@ mod tests {
         wal_file_manager.swap_wal();
         assert_eq!(wal_file_manager.current_wal().file_number, 2);
         let swap_wal = wal_file_manager.next_line(&"BEGIN".to_owned());
-
-        assert!(matches!(swap_wal, WalLineResult::SwapWal(..)))
     }
 
     fn last_line_of_wal(wal_file: &WalFile) -> String {

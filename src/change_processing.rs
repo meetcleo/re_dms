@@ -18,8 +18,8 @@ pub enum DdlChange {
 impl DdlChange {
     pub fn table_name(&self) -> TableName {
         match self {
-            Self::AddColumn(.., table_name) => table_name.clone(),
-            Self::RemoveColumn(.., table_name) => table_name.clone(),
+            Self::AddColumn(_, table_name) => table_name.clone(),
+            Self::RemoveColumn(_, table_name) => table_name.clone(),
         }
     }
 }
@@ -35,7 +35,7 @@ struct ChangeSet {
 #[derive(Debug)]
 pub enum ChangeProcessingResult {
     TableChanges(file_writer::FileWriter),
-    DdlChange(DdlChange),
+    DdlChange(DdlChange, WalFile),
 }
 
 impl ChangeProcessingResult {
@@ -43,7 +43,7 @@ impl ChangeProcessingResult {
     pub fn table_name(&self) -> TableName {
         match self {
             Self::TableChanges(file_writer) => file_writer.table_name.clone(),
-            Self::DdlChange(ddl_change) => ddl_change.table_name(),
+            Self::DdlChange(ddl_change, _) => ddl_change.table_name(),
         }
     }
 }
@@ -221,24 +221,6 @@ impl ChangeSetWithColumnType {
             }
         }
     }
-
-    fn clear(&mut self) {
-        match self {
-            ChangeSetWithColumnType::IntColumnType(btree) => {
-                btree.clear();
-            }
-            ChangeSetWithColumnType::UuidColumnType(btree) => {
-                btree.clear();
-            }
-        }
-    }
-}
-
-// this holds the existing number of files that have been created for a table
-struct FileCounter {
-    update_files_count: i32,
-    insert_files_count: i32,
-    delete_files_count: i32,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -361,6 +343,8 @@ impl Table {
     }
 
     fn ddl_changes(&self, parsed_line: &ParsedLine) -> Vec<DdlChange> {
+        // these unwraps are safe, because we only call this if has_ddl_changes
+        // so the Option can't be None
         let new_column_info = &parsed_line.column_info_set().unwrap();
         let old_column_info = &self.column_info.clone().unwrap();
         if !self.has_ddl_changes(parsed_line) {
@@ -470,12 +454,19 @@ impl ChangeProcessing {
                         let mut start_vec = vec![ChangeProcessingResult::TableChanges(
                             Self::write_files_for_table(
                                 returned_table,
-                                self.associated_wal_file.clone().unwrap(),
+                                self.associated_wal_file
+                                    .clone()
+                                    .expect("Error: Trying to write files with no wal file?"),
                             ),
                         )];
                         if let Some(ddl_changes) = maybe_ddl_changes {
                             for ddl_change in ddl_changes {
-                                start_vec.push(ChangeProcessingResult::DdlChange(ddl_change))
+                                start_vec.push(ChangeProcessingResult::DdlChange(
+                                    ddl_change,
+                                    self.associated_wal_file
+                                        .clone()
+                                        .expect("Unable to find wal_file for ddl_change"),
+                                ))
                             }
                         }
                         start_vec
@@ -484,6 +475,8 @@ impl ChangeProcessing {
             }
         }
     }
+
+    #[allow(dead_code)]
     pub fn get_stats(&self) -> HashMap<&TableName, usize> {
         self.table_holder
             .tables
@@ -526,8 +519,12 @@ impl ChangeProcessing {
             .drain()
             .map(|(_table_name, table)| {
                 // need to clone again because this is in a loop
-                let file_writer =
-                    Self::write_files_for_table(table, maybe_associated_wal_file.clone().unwrap());
+                let file_writer = Self::write_files_for_table(
+                    table,
+                    maybe_associated_wal_file
+                        .clone()
+                        .expect("Error: trying to write tables with no wal file"),
+                );
                 ChangeProcessingResult::TableChanges(file_writer)
             })
             .collect();
@@ -629,8 +626,10 @@ mod tests {
                 ChangeProcessingResult::TableChanges(..)
             ));
             let ddl_change = change_vec.remove(0);
-            if let ChangeProcessingResult::DdlChange(DdlChange::AddColumn(column_info, TableName)) =
-                ddl_change
+            if let ChangeProcessingResult::DdlChange(
+                DdlChange::AddColumn(column_info, _table_name),
+                _,
+            ) = ddl_change
             {
                 assert_eq!(column_info, new_column_info);
             } else {
@@ -712,7 +711,7 @@ mod tests {
             ));
             let ddl_change = change_vec.remove(0);
 
-            if let ChangeProcessingResult::DdlChange(DdlChange::RemoveColumn(column_info, ..)) =
+            if let ChangeProcessingResult::DdlChange(DdlChange::RemoveColumn(column_info, ..), _) =
                 ddl_change
             {
                 assert_eq!(column_info, removed_column_info);
@@ -819,7 +818,7 @@ mod tests {
             let returned_ddl_set: HashSet<DdlChange> = change_vec
                 .iter()
                 .map(|x| {
-                    if let ChangeProcessingResult::DdlChange(ddl_change) = x {
+                    if let ChangeProcessingResult::DdlChange(ddl_change, _) = x {
                         ddl_change.clone()
                     } else {
                         panic!("found element that's not ddl change");

@@ -1,14 +1,15 @@
-// extern crate futures;
-
+use crate::wal_file_manager::WalFile;
+use backoff::Error as BackoffError;
 use futures::TryStreamExt;
-use rusoto_core::{ByteStream, Region};
-use rusoto_s3::{PutObjectRequest, S3Client, S3};
+use rusoto_core::{ByteStream, Region, RusotoError};
+use rusoto_s3::{PutObjectError, PutObjectRequest, S3Client, S3};
 use tokio::fs::File;
 use tokio_util::codec;
 
 #[allow(unused_imports)]
 use log::{debug, error, info, log_enabled, Level};
 
+use crate::exponential_backoff::*;
 use crate::file_writer::{FileStruct, FileWriter};
 use crate::parser::{ChangeKind, ColumnInfo, TableName};
 use crate::wal_file_manager;
@@ -18,6 +19,7 @@ pub struct FileUploader {
 }
 
 // little bag of data
+#[derive(Debug, Clone)]
 pub struct CleoS3File {
     pub remote_filename: String,
     pub kind: ChangeKind,
@@ -41,13 +43,12 @@ impl FileUploader {
             s3_client: S3Client::new(Region::UsEast1),
         }
     }
-    // Not actually async yet here
     pub async fn upload_to_s3(
         &self,
-        wal_file: wal_file_manager::WalFile,
+        wal_file: &wal_file_manager::WalFile,
         file_name: &str,
         file_struct: &FileStruct,
-    ) -> CleoS3File {
+    ) -> Result<CleoS3File, BackoffError<RusotoError<PutObjectError>>> {
         // info!("copying file {}", file_name);
         let local_filename = file_name;
         let remote_filename = "mike-test-2/".to_owned() + file_name;
@@ -64,15 +65,12 @@ impl FileUploader {
                 // Essentially, we have an async file, and want an immutable bytestream that we can read from it.
                 // our s3 library can then stream that to s3. This means we pause the async task on every bit of both read and
                 // write IO and are very efficient.
-                // map_ok is a future combinator, that will apply the closure to each frame (freeze-ing the frame to make it immutable)
+                // map_ok is a future combinator, that will apply the closure to each frame
+                // (freeze-ing the frame to make it immutable since this is needed by the rusoto api)
                 let byte_stream = codec::FramedRead::new(tokio_file, codec::BytesCodec::new())
                     .map_ok(|frame| frame.freeze());
-                // // sync
-                // let mut file = std::fs::File::open(file_name).unwrap();
-                // let mut buffer = Vec::new();
-                // file.read_to_end(&mut buffer);
 
-                info!("{} {}", meta.len(), file_name);
+                debug!("file_length: {} file_name: {}", meta.len(), file_name);
                 let put_request = PutObjectRequest {
                     bucket: BUCKET_NAME.to_owned(),
                     key: remote_filename.clone(),
@@ -88,23 +86,27 @@ impl FileUploader {
                         info!("uploaded file {}", remote_filename);
                     }
                     Err(result) => {
-                        panic!("Failed to upload file {} {:?}", remote_filename, result);
+                        // treat s3 errors as transient
+                        return Err(BackoffError::Transient(result));
                     }
                 }
                 if let Some(columns) = &file_struct.columns {
-                    CleoS3File {
+                    Ok(CleoS3File {
                         remote_filename: remote_filename.clone(),
                         kind: file_struct.kind,
                         table_name: file_struct.table_name.clone(),
                         columns: columns.clone(),
-                        wal_file: wal_file,
-                    }
+                        wal_file: (*wal_file).clone(),
+                    })
                 } else {
+                    // logic error
                     panic!("columns not initialized on file {}", file_name);
                 }
             }
             Err(err) => {
-                panic!("problem with {:?} {:?}", file_name, err);
+                // bail early for local file disk errors
+                // Is this right? should be retry reading from disk?
+                panic!("Error reading file from disk {:?} {:?}", file_name, err);
             }
         }
     }
@@ -116,7 +118,7 @@ impl FileUploader {
         let insert_file = &file_writer.insert_file;
         let deletes_file = &file_writer.delete_file;
         let wal_file = &file_writer.wal_file;
-        let updates_files: Vec<_> = file_writer
+        let updates_files: Vec<(WalFile, &FileStruct)> = file_writer
             .update_files
             .values()
             .map(|file| (wal_file.clone(), file))
@@ -126,10 +128,10 @@ impl FileUploader {
         upload_files_vec.extend(updates_files);
 
         let s3_file_results = upload_files_vec
-            .iter()
+            .iter_mut()
             .filter(|(_wal_file, file)| file.exists())
             .map(|(wal_file, file)| async move {
-                self.upload_to_s3(wal_file.to_owned(), file.file_name.to_str().unwrap(), &file)
+                self.upload_to_s3_with_backoff(wal_file, file.file_name.to_str().unwrap(), &file)
                     .await
             })
             .collect::<Vec<_>>();
@@ -138,5 +140,25 @@ impl FileUploader {
         // but secondly, we'd need to clean up the wal file
         file_writer.wal_file.maybe_remove_wal_file();
         cleo_s3_files
+    }
+
+    pub async fn upload_to_s3_with_backoff(
+        &self,
+        wal_file: &mut wal_file_manager::WalFile,
+        file_name: &str,
+        file_struct: &FileStruct,
+    ) -> CleoS3File {
+        // for simplicity, this
+        let result = (|| async { self.upload_to_s3(wal_file, file_name, file_struct).await })
+            .retry(default_exponential_backoff())
+            .await;
+        match result {
+            Ok(s3_file) => s3_file,
+            Err(err) => {
+                // belt and bracers, this won't get deleted
+                wal_file.register_error();
+                panic!("File Upload failed for {}, error: {}", file_name, err);
+            }
+        }
     }
 }
