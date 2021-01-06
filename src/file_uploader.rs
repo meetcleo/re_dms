@@ -1,6 +1,5 @@
 use crate::wal_file_manager::WalFile;
 use backoff::Error as BackoffError;
-use backoff::{future::FutureOperation as _, ExponentialBackoff};
 use futures::TryStreamExt;
 use rusoto_core::{ByteStream, Region, RusotoError};
 use rusoto_s3::{PutObjectError, PutObjectRequest, S3Client, S3};
@@ -10,6 +9,7 @@ use tokio_util::codec;
 #[allow(unused_imports)]
 use log::{debug, error, info, log_enabled, Level};
 
+use crate::exponential_backoff::*;
 use crate::file_writer::{FileStruct, FileWriter};
 use crate::parser::{ChangeKind, ColumnInfo, TableName};
 use crate::wal_file_manager;
@@ -17,8 +17,6 @@ use crate::wal_file_manager;
 pub struct FileUploader {
     s3_client: S3Client,
 }
-
-const TEN_MINUTES: core::time::Duration = core::time::Duration::from_millis(60_000);
 
 // little bag of data
 #[derive(Debug, Clone)]
@@ -152,7 +150,7 @@ impl FileUploader {
     ) -> CleoS3File {
         // for simplicity, this
         let result = (|| async { self.upload_to_s3(wal_file, file_name, file_struct).await })
-            .retry(Self::exponential_backoff())
+            .retry(default_exponential_backoff())
             .await;
         match result {
             Ok(s3_file) => s3_file,
@@ -161,13 +159,6 @@ impl FileUploader {
                 wal_file.register_error();
                 panic!("File Upload failed for {}, error: {}", file_name, err);
             }
-        }
-    }
-
-    pub fn exponential_backoff() -> ExponentialBackoff {
-        ExponentialBackoff {
-            max_elapsed_time: Some(TEN_MINUTES),
-            ..ExponentialBackoff::default()
         }
     }
 }

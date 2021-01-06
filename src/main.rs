@@ -9,6 +9,7 @@ use tokio::sync::mpsc;
 mod change_processing;
 mod database_writer;
 mod database_writer_threads;
+mod exponential_backoff;
 mod file_uploader;
 mod file_uploader_threads;
 mod file_writer;
