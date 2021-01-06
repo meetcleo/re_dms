@@ -2,8 +2,8 @@ use crate::wal_file_manager::WalFile;
 use backoff::Error as BackoffError;
 use backoff::{future::FutureOperation as _, ExponentialBackoff};
 use futures::TryStreamExt;
-use rusoto_core::{ByteStream, Region};
-use rusoto_s3::{PutObjectRequest, S3Client, S3Error, S3};
+use rusoto_core::{ByteStream, Region, RusotoError};
+use rusoto_s3::{PutObjectError, PutObjectRequest, S3Client, S3};
 use tokio::fs::File;
 use tokio_util::codec;
 
@@ -50,7 +50,7 @@ impl FileUploader {
         wal_file: &wal_file_manager::WalFile,
         file_name: &str,
         file_struct: &FileStruct,
-    ) -> Result<CleoS3File, BackoffError<S3Error>> {
+    ) -> Result<CleoS3File, BackoffError<RusotoError<PutObjectError>>> {
         // info!("copying file {}", file_name);
         let local_filename = file_name;
         let remote_filename = "mike-test-2/".to_owned() + file_name;
@@ -88,7 +88,8 @@ impl FileUploader {
                         info!("uploaded file {}", remote_filename);
                     }
                     Err(result) => {
-                        panic!("Failed to upload file {} {:?}", remote_filename, result);
+                        // treat s3 errors as transient
+                        return Err(BackoffError::Transient(result));
                     }
                 }
                 if let Some(columns) = &file_struct.columns {
@@ -100,11 +101,14 @@ impl FileUploader {
                         wal_file: (*wal_file).clone(),
                     })
                 } else {
+                    // logic error
                     panic!("columns not initialized on file {}", file_name);
                 }
             }
             Err(err) => {
-                panic!("problem with {:?} {:?}", file_name, err);
+                // bail early for local file disk errors
+                // Is this right? should be retry reading from disk?
+                panic!("Error reading file from disk {:?} {:?}", file_name, err);
             }
         }
     }
