@@ -95,7 +95,7 @@ impl DatabaseWriterThreads {
             if let Some(ref uploader_stage_result) = received {
                 let table_name = uploader_stage_result.table_name();
                 last_table_name = Some(table_name);
-                (|| async {
+                let backoff_result = (|| async {
                     match uploader_stage_result {
                         UploaderStageResult::S3File(cleo_s3_file) => {
                             // dereference to get the struct, then clone,
@@ -127,11 +127,17 @@ impl DatabaseWriterThreads {
                 // /// The default maximum elapsed time in milliseconds (15 minutes).
                 // pub const MAX_ELAPSED_TIME_MILLIS: u64 = 900_000;
                 .retry(Self::exponential_backoff())
-                .await
-                .expect(&format!(
-                    "Database writing and exponential backoff failed for {:?}",
-                    last_table_name,
-                ));
+                .await;
+                match backoff_result {
+                    Ok(..) => {}
+                    Err(err) => {
+                        // TODO: wal_file.register_error();
+                        panic!(
+                            "Database writing and exponential backoff failed for {:?}",
+                            last_table_name,
+                        );
+                    }
+                }
             } else {
                 info!("channel hung up: {:?}", last_table_name);
                 break;
