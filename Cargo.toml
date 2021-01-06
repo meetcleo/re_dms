@@ -4,6 +4,13 @@ version = "0.1.0"
 authors = ["Michael Hauser-Raspe <michael@meetcleo.com>"]
 edition = "2018"
 
+# we want a panic in a thread to tear everything down.
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
@@ -38,6 +45,9 @@ tokio = { version = "0.2.9", features = ["full"] }
 # let's get async up in here
 tokio-util = {version = "0.3.1", features = ["codec"] }
 futures = "0.3.1"
+
+# backoff
+backoff = {version = "0.2.1", features = ["tokio"]}
 
 # string internment
 internment = "0.4.1"

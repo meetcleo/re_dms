@@ -8,12 +8,14 @@ use log::{debug, error, info, log_enabled, Level};
 use crate::change_processing;
 use crate::file_uploader::{CleoS3File, FileUploader};
 use crate::parser::TableName;
+use crate::wal_file_manager::WalFile;
 
 pub const DEFAULT_CHANNEL_SIZE: usize = 1000;
 
+#[derive(Debug)]
 pub enum UploaderStageResult {
     S3File(CleoS3File),
-    DdlChange(change_processing::DdlChange),
+    DdlChange(change_processing::DdlChange, WalFile),
 }
 
 impl UploaderStageResult {
@@ -21,7 +23,14 @@ impl UploaderStageResult {
     pub fn table_name(&self) -> TableName {
         match self {
             Self::S3File(cleo_s3_file) => cleo_s3_file.table_name.clone(),
-            Self::DdlChange(ddl_change) => ddl_change.table_name(),
+            Self::DdlChange(ddl_change, ..) => ddl_change.table_name(),
+        }
+    }
+
+    pub fn wal_file(&self) -> WalFile {
+        match self {
+            Self::S3File(cleo_s3_file) => cleo_s3_file.wal_file.clone(),
+            Self::DdlChange(_, wal_file) => wal_file.clone(),
         }
     }
 }
@@ -103,10 +112,13 @@ impl FileUploaderThreads {
             let received = receiver.recv().await;
             if let Some(file_writer) = received {
                 let table_name = file_writer.table_name();
-                let sender = file_uploader_stream.get_sender(table_name, &result_sender);
+                let sender = file_uploader_stream.get_sender(table_name.clone(), &result_sender);
                 // TODO: handle error
                 if let Some(ref mut inner_sender) = sender.sender {
-                    inner_sender.send(file_writer).await;
+                    inner_sender.send(file_writer).await.expect(&format!(
+                        "Unable to send from file_uploader_stream main to {}",
+                        table_name
+                    ));
                 }
                 sender
                     .sender
@@ -165,19 +177,22 @@ impl FileUploaderThreads {
                         file_writer.flush_all();
                         let s3_files = uploader.upload_table_to_s3(file_writer).await;
                         for s3_file in s3_files {
-                            // TODO handle errors
                             let result_change = UploaderStageResult::S3File(s3_file);
-                            result_sender.send(result_change).await;
+                            result_sender.send(result_change).await.expect(
+                                &format!("Unable to send UploaderStageResult table_changes from file_uploader_stream {:?} to database writer", last_table_name.clone())
+                            );
                         }
                     }
-                    change_processing::ChangeProcessingResult::DdlChange(ddl_change) => {
+                    change_processing::ChangeProcessingResult::DdlChange(ddl_change, wal_file) => {
                         // rewrap into the output enum
-                        let result_change = UploaderStageResult::DdlChange(ddl_change);
-                        result_sender.send(result_change).await;
+                        let result_change = UploaderStageResult::DdlChange(ddl_change, wal_file);
+                        result_sender.send(result_change).await.expect(
+                            &format!("Unable to send UploaderStageResult ddl_changes from file_uploader_stream {:?} to database writer", last_table_name.clone())
+                        );
                     }
                 }
             } else {
-                // info!("channel hung up: {:?}", last_table_name);
+                info!("file uploader channel hung up: {:?}", last_table_name);
                 drop(result_sender);
                 break;
             }

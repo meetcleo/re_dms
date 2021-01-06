@@ -22,6 +22,12 @@ struct Config {
     pg: deadpool_postgres::Config,
 }
 
+#[derive(Debug)]
+pub enum DatabaseWriterError {
+    PoolError(deadpool_postgres::PoolError),
+    TokioError(tokio_postgres::Error),
+}
+
 impl Config {
     pub fn from_env() -> Result<Self, ::config::ConfigError> {
         let mut cfg = ::config::Config::new();
@@ -39,17 +45,20 @@ impl DatabaseWriter {
 
     fn create_connection_pool() -> Pool {
         dotenv().ok();
-        let mut cfg = Config::from_env().unwrap();
-        // cfg.dbname = Some("cleo_development".to_string());
+        // fail fast
+        let mut cfg = Config::from_env().expect("Unable to build config from environment");
         cfg.pg.manager = Some(ManagerConfig {
             recycling_method: RecyclingMethod::Fast,
         });
-        let builder = SslConnector::builder(SslMethod::tls()).expect("fuck");
+        let builder = SslConnector::builder(SslMethod::tls())
+            .expect("Unable to build ssl connector. Are ssl libraries configured correctly?");
         let connector = MakeTlsConnector::new(builder.build());
-        cfg.pg.create_pool(connector).unwrap()
+        cfg.pg
+            .create_pool(connector)
+            .expect("Unable to build database connection pool")
     }
 
-    pub async fn handle_ddl(&self, ddl_change: &DdlChange) {
+    pub async fn handle_ddl(&self, ddl_change: &DdlChange) -> Result<(), DatabaseWriterError> {
         let alter_table_statement = match ddl_change {
             DdlChange::AddColumn(column_info, table_name) => {
                 self.add_column_statement(column_info, table_name)
@@ -59,11 +68,19 @@ impl DatabaseWriter {
             }
         };
         info!("alter table statement: {}", alter_table_statement.as_str());
-        let client = self.connection_pool.get().await.unwrap();
+        let client = self
+            .connection_pool
+            .get()
+            .await
+            .map_err(DatabaseWriterError::PoolError)?;
 
-        let result = client.execute(alter_table_statement.as_str(), &[]).await;
+        client
+            .execute(alter_table_statement.as_str(), &[])
+            .await
+            .map_err(DatabaseWriterError::TokioError)?;
 
         info!("alter table finished: {}", alter_table_statement.as_str());
+        Ok(())
     }
 
     fn add_column_statement(&self, column_info: &ColumnInfo, table_name: &TableName) -> String {
@@ -88,7 +105,10 @@ impl DatabaseWriter {
         )
     }
 
-    pub async fn import_table(&self, s3_file: &mut CleoS3File) {
+    pub async fn apply_s3_changes(
+        &self,
+        s3_file: &mut CleoS3File,
+    ) -> Result<(), DatabaseWriterError> {
         let kind = &s3_file.kind;
         let table_name = &s3_file.table_name;
         if [
@@ -97,20 +117,26 @@ impl DatabaseWriter {
         ]
         .contains(&table_name.as_str())
         {
-            return;
+            return Ok(());
         }
         // temp tables are present in the session, so we still need to drop it at the end of the transaction
         info!("BEGIN INSERT {}", table_name);
-        let client = self.connection_pool.get().await.unwrap();
+        let client = self
+            .connection_pool
+            .get()
+            .await
+            .map_err(DatabaseWriterError::PoolError)?;
         // let transaction = client.transaction().await.unwrap();
         let transaction = client;
         info!("GOT CONNECTION {}", table_name);
         let (schema_name, just_table_name) = table_name.schema_and_table_name();
         assert!(!table_name.contains('"'));
         let staging_name = self.staging_name(s3_file);
-        let return_early = self.create_table_if_not_exists(s3_file, &transaction).await;
+        let return_early = self
+            .create_table_if_not_exists(s3_file, &transaction)
+            .await?;
         if return_early {
-            return;
+            return Ok(());
         }
         let create_staging_table = self.query_for_create_staging_table(
             kind,
@@ -122,8 +148,10 @@ impl DatabaseWriter {
         info!("{}", create_staging_table);
 
         let remote_filepath = s3_file.remote_path();
-        let access_key_id = env::var("AWS_ACCESS_KEY_ID").unwrap();
-        let secret_access_key = env::var("AWS_SECRET_ACCESS_KEY").unwrap();
+        let access_key_id =
+            env::var("AWS_ACCESS_KEY_ID").expect("Unable to find AWS_ACCESS_KEY_ID");
+        let secret_access_key =
+            env::var("AWS_SECRET_ACCESS_KEY").expect("Unable to find AWS_SECRET_ACCESS_KEY");
         let credentials_string = format!(
             "aws_access_key_id={aws_access_key_id};aws_secret_access_key={secret_access_key}",
             aws_access_key_id = access_key_id,
@@ -174,26 +202,28 @@ impl DatabaseWriter {
         transaction
             .execute(copy_to_staging_table.as_str(), &[])
             .await
-            .unwrap();
+            .map_err(DatabaseWriterError::TokioError)?;
         info!("COPIED TO STAGING TABLE {}", table_name);
         transaction
             .execute(data_migration_query_string.as_str(), &[])
             .await
-            .unwrap();
+            .map_err(DatabaseWriterError::TokioError)?;
         info!("INSERTED FROM STAGING TABLE {}", table_name);
         transaction
             .execute(drop_staging_table.as_str(), &[])
             .await
-            .unwrap();
+            .map_err(DatabaseWriterError::TokioError)?;
         info!("DROPPED STAGING TABLE {}", table_name);
         // TEMP
         // serialiseable isolation error. might be to do with dms.
         // transaction.commit().await.unwrap();
-        info!("COMMITTED TX {}", table_name);
+        // info!("COMMITTED TX {}", table_name);
 
         info!("INSERTED {} {}", &remote_filepath, table_name);
 
         s3_file.wal_file.maybe_remove_wal_file();
+
+        Ok(())
     }
 
     // bool is whether we return early. Only necessary for delete where the table
@@ -202,7 +232,7 @@ impl DatabaseWriter {
         &self,
         s3_file: &CleoS3File,
         database_client: &Client,
-    ) -> bool {
+    ) -> Result<bool, DatabaseWriterError> {
         let (schema_name, just_table_name) = s3_file.table_name.schema_and_table_name();
         let query = "
             SELECT EXISTS (
@@ -213,14 +243,14 @@ impl DatabaseWriter {
         let row = database_client
             .query_one(query, &[&schema_name, &just_table_name])
             .await
-            .unwrap();
+            .map_err(DatabaseWriterError::TokioError)?;
         let result: bool = row.get(0);
         if !result {
             // check this isn't a delete command, because if it is,
             // we've got no table so job done (good thing because there's no schema)
             if s3_file.kind == ChangeKind::Delete {
                 error!("Delete when there's no table {:?}!", s3_file.table_name);
-                return true;
+                return Ok(true);
             } else if s3_file.kind == ChangeKind::Update {
                 panic!("update when there's no table {:?}!", s3_file.table_name);
             }
@@ -232,22 +262,31 @@ impl DatabaseWriter {
                 just_table_name = just_table_name,
                 columns = self.values_description_for_table(&s3_file.columns)
             );
-            let row = database_client
+            database_client
                 .execute(create_table_query.as_str(), &[])
                 .await
-                .unwrap();
+                .map_err(DatabaseWriterError::TokioError)?;
             info!("finished creating table {} ", s3_file.table_name);
         } // else the table exists and do nothing
-        false
+        Ok(false)
     }
 
     fn staging_name<'a>(&self, s3_file: &'a CleoS3File) -> String {
         // s3://bucket/path/schema.table_name_insert.tar.gz -> table_name_insert_staging
         //                         ^^^^^^^^^^^^^^^^^
+        // unwrap, because if this isn't true, it's a logic error
         let remote_filename = &s3_file.remote_filename;
-        let last_slash = &remote_filename[remote_filename.rfind('/').unwrap() + 1..];
-        let dot_after_last_slash = &last_slash[last_slash.find('.').unwrap() + 1..];
-        let dot_until_dot = &dot_after_last_slash[..dot_after_last_slash.find('.').unwrap()];
+        let last_slash = &remote_filename[remote_filename
+            .rfind('/')
+            .expect("Unable to find / in s3 filename")
+            + 1..];
+        let dot_after_last_slash = &last_slash[last_slash
+            .find('.')
+            .expect("Unable to find dot after schema in s3 filename")
+            + 1..];
+        let dot_until_dot = &dot_after_last_slash[..dot_after_last_slash
+            .find('.')
+            .expect("Unable to find file extension . in s3 file name")];
         format!("{}_staging", dot_until_dot)
     }
 
@@ -373,20 +412,4 @@ impl DatabaseWriter {
         };
         return_type.to_string()
     }
-
-    // pub async fn run_query_with_no_args(&self, query_string: &str) {
-    // }
-
-    // pub async fn test(&self) {
-    //     let ref pool = &self.connection_pool;
-    //     let foo: Vec<_> = (1..10).map(|i| async move {
-    //         let client = pool.get().await.unwrap();
-    //         // let stmt = client.prepare("SELECT 1 + $1;SELECT 1").await.unwrap();
-    //         let rows = client.query("select 1 + $1", &[&i]).await.unwrap();
-    //         let value: i32 = rows[0].get(0);
-    //         assert_eq!(value, i + 1);
-    //         info!("{}", value);
-    //     }).collect();
-    //     futures::future::join_all(foo).await;
-    // }
 }

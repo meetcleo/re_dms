@@ -1,16 +1,16 @@
 #![feature(str_split_once)]
+#![deny(warnings)]
 
 use std::io::{self, BufRead};
 use std::path::PathBuf;
 // use log::{debug, error, log_enabled, info, Level};
 
-// use std::io::prelude::*;
-// use std::fs;
 use tokio::sync::mpsc;
 
 mod change_processing;
 mod database_writer;
 mod database_writer_threads;
+mod exponential_backoff;
 mod file_uploader;
 mod file_uploader_threads;
 mod file_writer;
@@ -57,7 +57,9 @@ async fn main() {
                     if let Some(change_vec) = collector.add_change(parsed_line) {
                         for change in change_vec {
                             // TODO error handling
-                            file_transmitter.send(change).await;
+                            file_transmitter.send(change).await.expect(
+                                "Error writing to file_transmitter channel. Channel dropped.",
+                            );
                         }
                     }
                 }
@@ -78,13 +80,17 @@ async fn main() {
     // make sure we close the channel to let things propogate
     drop(file_transmitter);
     // make sure we wait for our uploads to finish
-    file_uploader_threads_join_handle.await;
+    file_uploader_threads_join_handle
+        .await
+        .expect("Error joining file uploader threads");
 
-    database_writer_threads_join_handle.await;
+    database_writer_threads_join_handle
+        .await
+        .expect("Error joining database writer threads");
 
     // remove wal file from collector
     collector.register_wal_file(None);
-    // clean up wal file in manager
+    // clean up wal file in manager it should be the last one now.
     wal_file_manager.clean_up_final_wal_file();
 }
 
@@ -94,7 +100,9 @@ async fn drain_collector_and_transmit(
 ) {
     let final_changes: Vec<_> = collector.drain_final_changes();
     for change in final_changes {
-        // TODO error handling
-        transmitter.send(change).await;
+        transmitter
+            .send(change)
+            .await
+            .expect("Error draining collector and sending to channel");
     }
 }

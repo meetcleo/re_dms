@@ -71,6 +71,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cdb031dd78e28731d87d56cc8ffef4a8f36ca26c38fe2de700543e627f8a464a"
 
 [[package]]
+name = "backoff"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "721c249ab59cbc483ad4294c9ee2671835c1e43e9ffc277e6b4ecfef733cfdc5"
+dependencies = [
+ "futures-core",
+ "instant",
+ "pin-project 0.4.27",
+ "rand",
+ "tokio",
+]
+
+[[package]]
 name = "base-x"
 version = "0.2.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1388,6 +1401,7 @@ dependencies = [
 name = "re_dms"
 version = "0.1.0"
 dependencies = [
+ "backoff",
  "config",
  "csv",
  "ctor",
