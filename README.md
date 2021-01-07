@@ -62,6 +62,23 @@ Docs on `pg_recvlogical` [here](https://www.postgresql.org/docs/10/app-pgrecvlog
 
 ## Deploying to EC2
 
+### Pre-reqsuisites
+
+1. Have ansible installed locally
+1. Have Docker running locally
+1. Have a target instance with the following:
+    1. Debian or Ubuntu (based on `Stretch`) installed
+    1. Writable directory (ideally with persistent storage) for keeping WAL files
+    1. SSL headers (e.g. `libssl1.1_1.1.0g-2ubuntu4_amd64.deb`)
+    1. Ability to communicate with source and target DB
+1. SSH config for target instance, name of connection specified in `hosts` file (copy from `hosts.example`)
+1. `roles/re_dms/files/re_dms.conf.example` copied to `roles/re_dms/files/re_dms.conf`, including the following:
+    1. Write creds for Redshift
+    1. S3 bucket for storing changes to be applied
+    1. AWS creds for writing to S3 bucket
+
+### Commands
+
 Build the executable for Linux:
 
 `make build`
@@ -75,3 +92,13 @@ Deploy using ansible:
 Clean any build artefacts:
 
 `make clean`
+
+## Runbook
+
+Checking the status of the service:
+
+`$ sudo systemctl status re_dms`
+
+Tailing the logs of the service:
+
+`$ sudo journalctl -f -u re_dms`
