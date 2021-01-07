@@ -1,5 +1,7 @@
 ---
 - hosts: myservers
+  vars:
+    data_dir: /re_dms
   become: yes
   become_user: root
   roles:

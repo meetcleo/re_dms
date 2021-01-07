@@ -5,20 +5,6 @@
     name: postgresql-client-10
     state: present
 
-- name: create re_dms group
-  group:
-    name: re_dms
-    state: present
-
-- name: create re_dms user
-  user:
-    name: re_dms
-    groups: re_dms
-    shell: /sbin/nologin
-    append: yes
-    state: present
-    create_home: no
-
 - name: Copy systemd config file to server
   copy:
     src: pg_recvlogical.conf
