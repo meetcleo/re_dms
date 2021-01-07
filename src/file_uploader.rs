@@ -52,7 +52,7 @@ impl FileUploader {
     ) -> Result<CleoS3File, BackoffError<RusotoError<PutObjectError>>> {
         // info!("copying file {}", file_name);
         let local_filename = file_name;
-        let remote_filename = "mike-test-2/".to_owned() + file_name;
+        let remote_filename = "re_dms/".to_owned() + file_name;
         // info!("remote key {}", remote_filename);
         // async
         // info!("{}", local_filename);
