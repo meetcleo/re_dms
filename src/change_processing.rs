@@ -538,6 +538,7 @@ mod tests {
     use super::*;
     use crate::parser::*;
     use maplit::{hashmap, hashset};
+    use std::fs;
     use std::path::PathBuf;
 
     // NOTE: I think this is actually run globally before all tests. Seems fine to me though.
@@ -553,9 +554,19 @@ mod tests {
         WalFile::new(1, PathBuf::from(TESTING_PATH).as_path())
     }
 
+    fn clear_testing_directory() {
+        // clear directory
+        let directory_path = PathBuf::from(TESTING_PATH);
+        if directory_path.exists() {
+            fs::remove_dir_all(directory_path.clone()).unwrap();
+        }
+        fs::create_dir_all(directory_path.clone()).unwrap();
+    }
+
     // this is basically an integration test, but that's fine
     #[test]
     fn ddl_change_add_column() {
+        clear_testing_directory();
         let table_name = TableName::new("foobar".to_string());
         let id_column_info = ColumnInfo::new("id", "bigint");
         let new_column_info = ColumnInfo::new("foobar", "bigint");
@@ -642,6 +653,7 @@ mod tests {
 
     #[test]
     fn ddl_change_remove_column() {
+        clear_testing_directory();
         let table_name = TableName::new("foobar".to_string());
         let id_column_info = ColumnInfo::new("id", "bigint");
         let removed_column_info = ColumnInfo::new("foobar", "bigint");
@@ -725,6 +737,7 @@ mod tests {
 
     #[test]
     fn ddl_changes_add_and_remove_multiple_columns() {
+        clear_testing_directory();
         let table_name = TableName::new("foobar".to_string());
         let id_column_info = ColumnInfo::new("id", "bigint");
         let new_column_info = ColumnInfo::new("foobar", "bigint");
