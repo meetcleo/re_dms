@@ -2,5 +2,6 @@
 - name: Start re_dms
   systemd:
     name: re_dms
-    state: started
+    state: restarted
     enabled: yes
+    daemon_reload: yes
