@@ -1,4 +1,5 @@
 use glob::glob;
+use lazy_static::lazy_static;
 use std::fs::{self, File, OpenOptions};
 use std::path::Path;
 use std::path::PathBuf;
@@ -13,8 +14,12 @@ use log::{debug, error, info, log_enabled, Level};
 #[cfg(test)]
 use mock_instant::{Instant, MockClock};
 
-// TODO: config
-const SECONDS_UNTIL_WAL_SWITCH: u64 = 600;
+lazy_static! {
+    static ref SECONDS_UNTIL_WAL_SWITCH: u64 = std::env::var("SECONDS_UNTIL_WAL_SWITCH")
+        .expect("SECONDS_UNTIL_WAL_SWITCH env is not set")
+        .parse::<u64>()
+        .expect("SECONDS_UNTIL_WAL_SWITCH is not a valid integer");
+}
 
 #[cfg(not(test))]
 use std::time::Instant;
@@ -259,7 +264,7 @@ impl WalFileManager {
     fn should_swap_wal(&self) -> bool {
         // 10 minutes
         let should_swap_wal =
-            self.last_swapped_wal.elapsed() >= Duration::new(SECONDS_UNTIL_WAL_SWITCH, 0);
+            self.last_swapped_wal.elapsed() >= Duration::new(*SECONDS_UNTIL_WAL_SWITCH, 0);
         if should_swap_wal {
             info!("SWAP_WAL_ELAPSED {:?}", self.last_swapped_wal.elapsed());
             info!("LAST_SWAPPED_WAL {:?}", self.last_swapped_wal);
@@ -308,6 +313,7 @@ mod tests {
     // NOTE: I think this is actually run globally before all tests. Seems fine to me though.
     #[ctor::ctor]
     fn create_tmp_directory() {
+        std::env::set_var("SECONDS_UNTIL_WAL_SWITCH", "600");
         std::fs::create_dir_all(TESTING_PATH).unwrap();
     }
 
