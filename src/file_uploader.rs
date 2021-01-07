@@ -36,6 +36,8 @@ impl CleoS3File {
 lazy_static! {
     static ref BUCKET_NAME: String =
         std::env::var("BUCKET_NAME").expect("BUCKET_NAME env is not set");
+    static ref BUCKET_FOLDER: String =
+        std::env::var("BUCKET_FOLDER").expect("BUCKET_FOLDER env is not set");
 }
 
 impl FileUploader {
@@ -52,7 +54,7 @@ impl FileUploader {
     ) -> Result<CleoS3File, BackoffError<RusotoError<PutObjectError>>> {
         // info!("copying file {}", file_name);
         let local_filename = file_name;
-        let remote_filename = "re_dms/".to_owned() + file_name;
+        let remote_filename = BUCKET_FOLDER.to_owned() + file_name;
         // info!("remote key {}", remote_filename);
         // async
         // info!("{}", local_filename);
