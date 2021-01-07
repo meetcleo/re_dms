@@ -12,4 +12,5 @@ deploy: build
 
 clean:
 	rm -rf bin
+	rm -rf roles/re_dms/files/re_dms
 	docker rm -f re_dms
