@@ -1,0 +1,11 @@
+[Unit]
+Description=re_dms service
+
+[Service]
+User=re_dms
+Group=re_dms
+EnvironmentFile=/etc/re_dms.conf
+ExecStart=/usr/local/bin/re_dms
+
+[Install]
+WantedBy=multi-user.target

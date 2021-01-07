@@ -2,7 +2,16 @@
 // first part provides the `.retry` function, second part provides the config struct
 pub use backoff::{future::FutureOperation as _, ExponentialBackoff};
 
-const TEN_MINUTES: core::time::Duration = core::time::Duration::from_millis(600_000);
+use lazy_static::lazy_static;
+lazy_static! {
+    static ref SECONDS_UNTIL_END_OF_EXPONENTIAL_BACKOFF: core::time::Duration =
+        core::time::Duration::from_secs(
+            std::env::var("SECONDS_UNTIL_END_OF_EXPONENTIAL_BACKOFF")
+                .expect("SECONDS_UNTIL_END_OF_EXPONENTIAL_BACKOFF env is not set")
+                .parse::<u64>()
+                .expect("SECONDS_UNTIL_END_OF_EXPONENTIAL_BACKOFF is not a valid integer")
+        );
+}
 
 // NOTE: default exponential backoff
 // /// The default initial interval value in milliseconds (0.5 seconds).
@@ -18,7 +27,7 @@ const TEN_MINUTES: core::time::Duration = core::time::Duration::from_millis(600_
 // pub const MAX_ELAPSED_TIME_MILLIS: u64 = 900_000;
 pub fn default_exponential_backoff() -> ExponentialBackoff {
     ExponentialBackoff {
-        max_elapsed_time: Some(TEN_MINUTES),
+        max_elapsed_time: Some(*SECONDS_UNTIL_END_OF_EXPONENTIAL_BACKOFF),
         ..ExponentialBackoff::default()
     }
 }
