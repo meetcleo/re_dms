@@ -1,0 +1,39 @@
+---
+# Needs to use client v10 https://forums.aws.amazon.com/thread.jspa?messageID=936554
+- name: Install postgresql-client
+  package:
+    name: postgresql-client-10
+    state: present
+
+- name: create re_dms group
+  group:
+    name: re_dms
+    state: present
+
+- name: create re_dms user
+  user:
+    name: re_dms
+    groups: re_dms
+    shell: /sbin/nologin
+    append: yes
+    state: present
+    create_home: no
+
+- name: Copy systemd config file to server
+  copy:
+    src: pg_recvlogical.conf
+    dest: /etc
+    owner: root
+    group: root
+    mode: 0660
+  notify:
+    - Start pg_recvlogical
+
+- name: Copy systemd service file to server
+  copy:
+    src: pg_recvlogical.service
+    dest: /etc/systemd/system
+    owner: root
+    group: root
+  notify:
+    - Start pg_recvlogical

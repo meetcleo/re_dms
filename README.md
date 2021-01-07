@@ -76,6 +76,9 @@ Docs on `pg_recvlogical` [here](https://www.postgresql.org/docs/10/app-pgrecvlog
     1. Write creds for Redshift
     1. S3 bucket for storing changes to be applied
     1. AWS creds for writing to S3 bucket
+1. `roles/pg_recvlogical/files/pg_recvlogical.conf.example` copied to `roles/pg_recvlogical/files/pg_recvlogical.conf`, including the following:
+    1. Connection string to source DB, source DB needs to have logical replication enabled - user needs to either be a superuser or have replication privileges
+    1. Name of the replication slot to be used (one will be created if it does not already exists)
 
 ### Commands
 
@@ -95,10 +98,18 @@ Clean any build artefacts:
 
 ## Runbook
 
-Checking the status of the service:
+Checking the status of the re_dms service:
 
 `$ sudo systemctl status re_dms`
 
-Tailing the logs of the service:
+Tailing the logs of the re_dms service:
 
 `$ sudo journalctl -f -u re_dms`
+
+Checking the status of the pg_recvlogical service:
+
+`$ sudo systemctl status pg_recvlogical`
+
+Tailing the logs of the pg_recvlogical service:
+
+`$ sudo journalctl -f -u pg_recvlogical`
