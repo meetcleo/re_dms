@@ -41,7 +41,9 @@ Ensure your local postgres has wal replication enabled, on OSX:
 
 Ensure the tests pass:
 
-`$ cargo test`
+* NOTE: currently the tests modify some state in a testing directory (in tmp). Because of this, to have stable test runs you need to set `RUST_TEST_THREADS=1` or `cargo test -- --test-threads=1`
+
+`$ cargo test -- --test-threads=1`
 
 ### Build and run
 
@@ -55,5 +57,5 @@ Start logical replication, piping it into re_dms:
 
 Docs on `pg_recvlogical` [here](https://www.postgresql.org/docs/10/app-pgrecvlogical.html)
 
-## Errors
+### Errors
 * any errors sending to a channel are logic errors, so panic.

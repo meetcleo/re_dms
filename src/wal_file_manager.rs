@@ -1,5 +1,5 @@
 use glob::glob;
-use std::fs::{self, File};
+use std::fs::{self, File, OpenOptions};
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -97,10 +97,15 @@ impl WalFile {
                 .unwrap_or("unprintable non-utf-8 directory")
         ));
         info!("creating wal file {:?}", path);
-        let file = File::create(path.clone()).expect(&format!(
-            "Unable to create wal file: {}",
-            path.to_str().unwrap_or("unprintable non-utf-8 path")
-        ));
+        // use atomic file creation. Bail if a file already exists
+        let file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path.clone())
+            .expect(&format!(
+                "Unable to create wal file: {}",
+                path.to_str().unwrap_or("unprintable non-utf-8 path")
+            ));
         info!("creating wal directory {:?}", directory_path);
         WalFile {
             file_number: wal_file_number,
@@ -309,7 +314,9 @@ mod tests {
     fn clear_testing_directory() {
         // clear directory
         let directory_path = PathBuf::from(TESTING_PATH);
-        fs::remove_dir_all(directory_path.clone()).unwrap();
+        if directory_path.exists() {
+            fs::remove_dir_all(directory_path.clone()).unwrap();
+        }
         fs::create_dir_all(directory_path.clone()).unwrap();
     }
 
@@ -358,6 +365,7 @@ mod tests {
 
     #[test]
     fn new_wal_file() {
+        clear_testing_directory();
         let directory_path = PathBuf::from(TESTING_PATH);
         let mut wal_file = WalFile::new(1, directory_path.as_path());
         assert_eq!(wal_file.file_number, 1);
@@ -368,6 +376,7 @@ mod tests {
 
     #[test]
     fn wal_file_wont_be_deleted_if_cloned() {
+        clear_testing_directory();
         let directory_path = PathBuf::from(TESTING_PATH);
         let mut wal_file = WalFile::new(1, directory_path.as_path());
         let _cloned_wal_file = wal_file.clone();
@@ -380,6 +389,7 @@ mod tests {
 
     #[test]
     fn wal_file_wont_be_deleted_if_there_is_an_error() {
+        clear_testing_directory();
         let directory_path = PathBuf::from(TESTING_PATH);
         let mut wal_file = WalFile::new(1, directory_path.as_path());
         wal_file.register_error();
@@ -397,11 +407,11 @@ mod tests {
         let mut wal_file_manager = WalFileManager::new(directory_path.as_path());
         wal_file_manager.swap_wal();
         assert_eq!(wal_file_manager.current_wal().file_number, 2);
-        let swap_wal = wal_file_manager.next_line(&"BEGIN".to_owned());
     }
 
-    fn last_line_of_wal(wal_file: &WalFile) -> String {
+    fn last_line_of_wal(wal_file: &mut WalFile) -> String {
         let path = wal_file.path_for_wal_file();
+        wal_file.flush();
         let file = BufReader::new(File::open(path).unwrap());
         let mut lines: Vec<_> = file.lines().map(|line| line.unwrap()).collect();
         lines.reverse();
@@ -424,17 +434,17 @@ mod tests {
 
         // 3 blocks of begin, table, commit
         for _ in 0..3 {
-            let current_wal_file = wal_file_manager.current_wal();
+            let mut current_wal_file = wal_file_manager.current_wal();
             let begin = wal_file_manager.next_line(&iter.next().unwrap().unwrap());
             if let WalLineResult::WalLine() = begin {
-                assert!(last_line_of_wal(&current_wal_file).starts_with("BEGIN"));
+                assert!(last_line_of_wal(&mut current_wal_file).starts_with("BEGIN"));
             } else {
                 panic!("begin line doesn't match {:?}", begin)
             }
 
             let table = wal_file_manager.next_line(&iter.next().unwrap().unwrap());
             if let WalLineResult::WalLine() = table {
-                assert!(last_line_of_wal(&current_wal_file).starts_with("table"));
+                assert!(last_line_of_wal(&mut current_wal_file).starts_with("table"));
             } else {
                 panic!("table line doesn't match {:?}", table);
             }
@@ -444,7 +454,7 @@ mod tests {
             let commit = wal_file_manager.next_line(&iter.next().unwrap().unwrap());
             if let WalLineResult::SwapWal(..) = commit {
                 assert_ne!(wal_file_manager.current_wal(), current_wal_file);
-                assert!(last_line_of_wal(&current_wal_file).starts_with("COMMIT"));
+                assert!(last_line_of_wal(&mut current_wal_file).starts_with("COMMIT"));
             } else {
                 panic!("commit line doesn't match {:?}", commit);
             }
