@@ -1,6 +1,7 @@
 use crate::wal_file_manager::WalFile;
 use backoff::Error as BackoffError;
 use futures::TryStreamExt;
+use lazy_static::lazy_static;
 use rusoto_core::{ByteStream, Region, RusotoError};
 use rusoto_s3::{PutObjectError, PutObjectRequest, S3Client, S3};
 use tokio::fs::File;
@@ -32,10 +33,10 @@ impl CleoS3File {
         "s3://".to_owned() + BUCKET_NAME.as_ref() + "/" + self.remote_filename.as_ref()
     }
 }
-
-// just use a constant for now
-// use config later
-const BUCKET_NAME: &str = "cleo-data-science";
+lazy_static! {
+    static ref BUCKET_NAME: String =
+        std::env::var("BUCKET_NAME").expect("BUCKET_NAME env is not set");
+}
 
 impl FileUploader {
     pub fn new() -> FileUploader {
