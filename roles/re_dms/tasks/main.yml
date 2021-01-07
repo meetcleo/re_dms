@@ -13,6 +13,13 @@
     state: present
     create_home: no
 
+- name: Create named pipe for communication between processes
+  command: "mkfifo -m 660 {{ data_dir }}/re_dms.sock"
+  become: true
+  become_user: re_dms
+  args:
+    creates: "{{ data_dir }}/re_dms.sock"
+
 - name: Copy systemd config file to server
   copy:
     src: re_dms.conf
