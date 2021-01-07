@@ -1,0 +1,11 @@
+[Unit]
+Description=pg_recvlogical service
+
+[Service]
+User=re_dms
+Group=re_dms
+EnvironmentFile=/etc/pg_recvlogical.conf
+ExecStart=/usr/lib/postgresql/10/bin/pg_recvlogical --create-slot --start --if-not-exists --fsync-interval=0 --file=- --plugin=test_decoding --slot=${REPLICATION_SLOT} -d ${CONNECTION_STRING}
+
+[Install]
+WantedBy=multi-user.target

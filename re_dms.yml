@@ -4,3 +4,4 @@
   become_user: root
   roles:
     - re_dms
+    - pg_recvlogical
