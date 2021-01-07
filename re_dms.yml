@@ -1,0 +1,6 @@
+---
+- hosts: myservers
+  become: yes
+  become_user: root
+  roles:
+    - re_dms

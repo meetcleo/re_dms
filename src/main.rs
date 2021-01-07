@@ -1,6 +1,7 @@
 #![feature(str_split_once)]
 #![deny(warnings)]
 
+use lazy_static::lazy_static;
 use std::io::{self, BufRead};
 use std::path::PathBuf;
 // use log::{debug, error, log_enabled, info, Level};
@@ -18,6 +19,11 @@ mod parser;
 mod wal_file_manager;
 
 use file_uploader_threads::DEFAULT_CHANNEL_SIZE;
+
+lazy_static! {
+    static ref OUTPUT_WAL_DIRECTORY: String =
+        std::env::var("OUTPUT_WAL_DIRECTORY").expect("OUTPUT_WAL_DIRECTORY env is not set");
+}
 
 // use std::collections::{ HashSet };
 
@@ -44,8 +50,9 @@ async fn main() {
         database_writer_threads::DatabaseWriterThreads::spawn_database_writer_stream(
             database_receiver,
         );
-    let mut wal_file_manager =
-        wal_file_manager::WalFileManager::new(PathBuf::from("output_wal").as_path());
+    let mut wal_file_manager = wal_file_manager::WalFileManager::new(
+        PathBuf::from(OUTPUT_WAL_DIRECTORY.clone()).as_path(),
+    );
     collector.register_wal_file(Some(wal_file_manager.current_wal()));
 
     for line in io::stdin().lock().lines() {
