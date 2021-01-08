@@ -15,7 +15,7 @@
   notify:
     - Start pg_recvlogical
 
-- name: Copy systemd service file to server
+- name: Copy pg_recvlogical systemd service file to server
   copy:
     src: pg_recvlogical.service
     dest: /etc/systemd/system
@@ -23,3 +23,12 @@
     group: root
   notify:
     - Start pg_recvlogical
+
+- name: Copy systemd target file to server
+  copy:
+    src: replication.target
+    dest: /etc/systemd/system
+    owner: root
+    group: root
+  notify:
+    - Start replication

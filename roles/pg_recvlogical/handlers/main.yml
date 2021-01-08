@@ -5,3 +5,9 @@
     state: restarted
     enabled: yes
     daemon_reload: yes
+- name: Start replication
+  systemd:
+    name: replication.target
+    state: started
+    enabled: yes
+    daemon_reload: yes

@@ -1,9 +1,10 @@
 [Unit]
 Description=re_dms socket
+PartOf=replication.target
 
 [Socket]
 ListenFIFO={{ socket_path }}
 SocketUser=re_dms
 SocketGroup=re_dms
 SocketMode=0600
-RemoveOnStop=false
+RemoveOnStop=true
