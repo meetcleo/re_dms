@@ -1,6 +1,7 @@
 [Unit]
 Description=re_dms service
-Wants=pg_recvlogical.service
+Requires=re_dms.socket
+After=re_dms.socket
 
 [Service]
 User=re_dms

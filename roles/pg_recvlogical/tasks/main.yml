@@ -16,7 +16,7 @@
     - Start pg_recvlogical
 
 - name: Copy systemd service file to server
-  template:
+  copy:
     src: pg_recvlogical.service
     dest: /etc/systemd/system
     owner: root
