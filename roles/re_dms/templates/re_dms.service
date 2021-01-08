@@ -8,6 +8,8 @@ Group=re_dms
 EnvironmentFile=/etc/re_dms.conf
 Sockets=re_dms.socket
 StandardInput=fd:re_dms.socket
+StandardOutput=journal
+StandardError=journal
 ExecStart=/usr/local/bin/re_dms
 
 [Install]
