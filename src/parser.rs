@@ -442,7 +442,7 @@ impl Parser {
         // "pg_recvlogical: could not send replication command..."
         const SIZE_OF_TAG: usize = "pg_recvlogical: ".len();
         let rest_of_string = &string[SIZE_OF_TAG..string.len()];
-        debug!("parsed commit {}", rest_of_string);
+        info!("parsed pg_rcvlogical message {}", rest_of_string);
         ParsedLine::PgRcvlogicalMsg(rest_of_string.to_string())
     }
 
