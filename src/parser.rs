@@ -203,6 +203,7 @@ pub enum ParsedLine {
     },
     TruncateTable, // TODO
     ContinueParse, // this is to signify that we're halfway through parsing a change
+    PgRcvlogicalMsg(String),
 }
 
 impl ParsedLine {
@@ -364,6 +365,7 @@ impl Parser {
             x if { x.starts_with("COMMIT") } => self.parse_commit(x),
             x if { x.starts_with("table") } => self.parse_change(x),
             x if { self.parse_state.currently_parsing.is_some() } => self.continue_parse(x),
+            x if { x.starts_with("pg_recvlogical") } => self.parse_pg_rcvlogical_msg(x),
             x => {
                 panic!("Unknown change kind: {}!", x);
             }
@@ -434,6 +436,14 @@ impl Parser {
 
         let columns = self.parse_columns(string_without_kind);
         self.handle_parse_changed_data(table_name, kind, columns)
+    }
+
+    fn parse_pg_rcvlogical_msg(&self, string: &str) -> ParsedLine {
+        // "pg_recvlogical: could not send replication command..."
+        const SIZE_OF_TAG: usize = "pg_recvlogical: ".len();
+        let rest_of_string = &string[SIZE_OF_TAG..string.len()];
+        debug!("parsed commit {}", rest_of_string);
+        ParsedLine::PgRcvlogicalMsg(rest_of_string.to_string())
     }
 
     fn column_is_incomplete(&self, columns: &Vec<Column>) -> bool {
