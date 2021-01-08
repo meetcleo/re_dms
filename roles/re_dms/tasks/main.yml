@@ -33,7 +33,7 @@
     - Start re_dms
 
 - name: Copy systemd service file to server
-  template:
+  copy:
     src: re_dms.service
     dest: /etc/systemd/system
     owner: root
