@@ -1,10 +1,13 @@
 [Unit]
 Description=re_dms service
+Wants=pg_recvlogical.service
 
 [Service]
 User=re_dms
 Group=re_dms
 EnvironmentFile=/etc/re_dms.conf
+Sockets=re_dms.socket
+StandardInput=fd:re_dms.socket
 ExecStart=/usr/local/bin/re_dms
 
 [Install]
