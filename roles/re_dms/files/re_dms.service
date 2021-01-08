@@ -2,6 +2,7 @@
 Description=re_dms service
 Requires=re_dms.socket
 After=re_dms.socket
+PartOf=replication.target
 
 [Service]
 User=re_dms

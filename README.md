@@ -107,6 +107,10 @@ Tailing the logs of the re_dms service:
 
 `$ sudo journalctl -f -u re_dms`
 
+Checking the status of the re_dms socket:
+
+`$ sudo systemctl status re_dms.socket`
+
 Checking the status of the pg_recvlogical service:
 
 `$ sudo systemctl status pg_recvlogical`
@@ -114,3 +118,7 @@ Checking the status of the pg_recvlogical service:
 Tailing the logs of the pg_recvlogical service:
 
 `$ sudo journalctl -f -u pg_recvlogical`
+
+Managing the services:
+
+`$ sudo systemctl start|stop|restart replication.target`
