@@ -13,12 +13,14 @@
     state: present
     create_home: no
 
-- name: Create named pipe for communication between processes
-  command: "mkfifo -m 660 {{ data_dir }}/re_dms.sock"
-  become: true
-  become_user: re_dms
-  args:
-    creates: "{{ data_dir }}/re_dms.sock"
+- name: Copy socket systemd config file to server
+  template:
+    src: re_dms.socket
+    dest: /etc/systemd/system
+    owner: root
+    group: root
+  notify:
+    - Start re_dms
 
 - name: Copy systemd config file to server
   copy:
@@ -31,7 +33,7 @@
     - Start re_dms
 
 - name: Copy systemd service file to server
-  copy:
+  template:
     src: re_dms.service
     dest: /etc/systemd/system
     owner: root

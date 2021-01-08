@@ -1,7 +1,7 @@
 ---
 - hosts: myservers
   vars:
-    data_dir: /re_dms
+    socket_path: /re_dms/re_dms.socket
   become: yes
   become_user: root
   roles:
