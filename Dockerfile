@@ -1,4 +1,4 @@
-FROM rustlang/rust:nightly-stretch as builder
+FROM rustlang/rust:nightly-buster as builder
 
 # Two step build: one to build dependences, one to build the re_dms app, which allows for faster docker builds once the dependencies layer has been built (it will rarely change)
 # app

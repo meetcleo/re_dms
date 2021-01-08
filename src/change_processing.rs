@@ -444,7 +444,10 @@ impl ChangeProcessing {
     }
     pub fn add_change(&mut self, parsed_line: ParsedLine) -> Option<Vec<ChangeProcessingResult>> {
         match parsed_line {
-            ParsedLine::Begin(_) | ParsedLine::Commit(_) | ParsedLine::TruncateTable => None, // TODO
+            ParsedLine::Begin(_)
+            | ParsedLine::Commit(_)
+            | ParsedLine::TruncateTable // TODO
+            | ParsedLine::PgRcvlogicalMsg(_) => None,
             ParsedLine::ContinueParse => None, // need to be exhaustive
             ParsedLine::ChangedData { .. } => {
                 // map here maps over the option

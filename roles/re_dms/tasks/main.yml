@@ -13,6 +13,15 @@
     state: present
     create_home: no
 
+- name: Copy socket systemd config file to server
+  template:
+    src: re_dms.socket
+    dest: /etc/systemd/system
+    owner: root
+    group: root
+  notify:
+    - Start re_dms
+
 - name: Copy systemd config file to server
   copy:
     src: re_dms.conf

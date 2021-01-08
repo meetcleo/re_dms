@@ -2,6 +2,7 @@
 /data
 /output
 /output_wal
+/roles/pg_recvlogical/files/pg_recvlogical.conf
 /roles/re_dms/files/re_dms.conf
 /roles/re_dms/files/re_dms
 /bin
