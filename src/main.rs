@@ -25,10 +25,6 @@ lazy_static! {
         std::env::var("OUTPUT_WAL_DIRECTORY").expect("OUTPUT_WAL_DIRECTORY env is not set");
 }
 
-// use std::collections::{ HashSet };
-
-// TEMP
-
 #[tokio::main]
 async fn main() {
     env_logger::init();
@@ -63,7 +59,6 @@ async fn main() {
                 _ => {
                     if let Some(change_vec) = collector.add_change(parsed_line) {
                         for change in change_vec {
-                            // TODO error handling
                             file_transmitter.send(change).await.expect(
                                 "Error writing to file_transmitter channel. Channel dropped.",
                             );
