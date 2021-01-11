@@ -655,8 +655,6 @@ mod tests {
 
     #[test]
     fn quote_escaping_works() {
-        env_logger::init();
-
         let string = "I''m sorry about this damn quote escaping";
         assert!(is_quote_escaped(&string, 1));
         assert!(!is_quote_escaped(&string, 3));
