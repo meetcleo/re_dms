@@ -7,6 +7,7 @@
 * then create a bunch of csv files to upload to s3
 * it will then upload all of this data to s3
 * process them loading them into redshift.
+* NOTE: any text based columns that have a single null byte as the value of the text will come through as null values (we could fix this, but _come on!_).
 
 ## Structure
 * files are parsed into structures by `parser.rs`
