@@ -482,4 +482,46 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn wal_file_byte_swap_integration_test() {
+        std::env::set_var("MAX_BYTES_UNTIL_WAL_SWITCH", "939");
+        let directory_path = PathBuf::from(TESTING_PATH);
+        let mut wal_file_manager = WalFileManager::new(directory_path.as_path());
+
+        let filename = "test/same_bytes_swap_wal.txt";
+        let input_file = File::open(filename).unwrap();
+        let reader = BufReader::new(input_file);
+        let mut iter = reader.lines();
+
+        // 3 blocks of begin, table, commit
+        for _ in 0..3 {
+            println!("FOOBAR");
+            let mut current_wal_file = wal_file_manager.current_wal();
+            let begin = wal_file_manager.next_line(&iter.next().unwrap().unwrap());
+            if let WalLineResult::WalLine() = begin {
+                assert!(last_line_of_wal(&mut current_wal_file).starts_with("BEGIN"));
+            } else {
+                panic!("begin line doesn't match {:?}", begin)
+            }
+
+            let table = wal_file_manager.next_line(&iter.next().unwrap().unwrap());
+            if let WalLineResult::WalLine() = table {
+                assert!(last_line_of_wal(&mut current_wal_file).starts_with("table"));
+            } else {
+                panic!("table line doesn't match {:?}", table);
+            }
+
+            // We have set the number of bytes to make the wal swap occur here
+            let commit = wal_file_manager.next_line(&iter.next().unwrap().unwrap());
+            if let WalLineResult::SwapWal(..) = commit {
+                assert_ne!(wal_file_manager.current_wal(), current_wal_file);
+                assert!(last_line_of_wal(&mut current_wal_file).starts_with("COMMIT"));
+            } else {
+                panic!("commit line doesn't match {:?}", commit);
+            }
+        }
+
+        std::env::set_var("MAX_BYTES_UNTIL_WAL_SWITCH", "1000000000");
+    }
 }
