@@ -19,6 +19,10 @@ lazy_static! {
         .expect("SECONDS_UNTIL_WAL_SWITCH env is not set")
         .parse::<u64>()
         .expect("SECONDS_UNTIL_WAL_SWITCH is not a valid integer");
+    static ref MAX_BYTES_FOR_WAL_SWITCH: usize = std::env::var("MAX_BYTES_UNTIL_WAL_SWITCH")
+        .unwrap_or("1000000000".to_string()) // 1 GB default
+        .parse::<usize>()
+        .expect("MAX_BYTES_FOR_WAL_SWITCH is not a valid integer");
 }
 
 #[cfg(not(test))]
@@ -53,6 +57,7 @@ struct WalFileInternal {
     file: File,
     // we want this to be locked by the mutex
     had_errors_loading: bool,
+    pub current_number_of_bytes: usize,
 }
 
 impl WalFileInternal {
@@ -60,6 +65,7 @@ impl WalFileInternal {
         WalFileInternal {
             file: file,
             had_errors_loading: false,
+            current_number_of_bytes: 0,
         }
     }
     fn register_error(&mut self) {
@@ -73,6 +79,7 @@ impl WalFileInternal {
 // just pass writes straight to the file
 impl std::io::Write for WalFileInternal {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.current_number_of_bytes += buf.len();
         self.file.write(buf)
     }
     fn flush(&mut self) -> std::io::Result<()> {
@@ -197,6 +204,9 @@ impl WalFile {
         // now we replace Arc value with None.
         self.file = Arc::new(None);
     }
+    pub fn current_bytes(&mut self) -> usize {
+        self.with_locked_internal_file().current_number_of_bytes
+    }
 }
 
 #[derive(Debug)]
@@ -256,20 +266,21 @@ impl WalFileManager {
             self.current_wal_file_number,
             self.output_wal_directory.as_path(),
         );
-        // this will only delete, if we didn't send any changes off to the change processor
+        // this will only delete if we didn't send any changes off to the change processor
         self.current_wal_file.maybe_remove_wal_file();
         self.current_wal_file = next_wal;
     }
 
-    fn should_swap_wal(&self) -> bool {
+    fn should_swap_wal(&mut self) -> bool {
         // 10 minutes
-        let should_swap_wal =
+        let should_swap_wal_time =
             self.last_swapped_wal.elapsed() >= Duration::new(*SECONDS_UNTIL_WAL_SWITCH, 0);
-        if should_swap_wal {
+        if should_swap_wal_time {
             info!("SWAP_WAL_ELAPSED {:?}", self.last_swapped_wal.elapsed());
             info!("LAST_SWAPPED_WAL {:?}", self.last_swapped_wal);
         }
-        should_swap_wal
+        let should_swap_wal_bytes = self.current_wal_bytes() >= *MAX_BYTES_FOR_WAL_SWITCH;
+        should_swap_wal_time || should_swap_wal_bytes
     }
 
     // we explictly don't implement Iterator because we need to be able to iterate
@@ -296,6 +307,11 @@ impl WalFileManager {
 
     pub fn clean_up_final_wal_file(&mut self) {
         self.current_wal_file.maybe_remove_wal_file()
+    }
+
+    // mutable as we lock the internal file
+    pub fn current_wal_bytes(&mut self) -> usize {
+        self.current_wal_file.current_bytes()
     }
 }
 
