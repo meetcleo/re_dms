@@ -165,8 +165,7 @@ impl DatabaseWriter {
             TRUNCATECOLUMNS
             IGNOREHEADER 1
             DELIMITER ','
-            emptyasnull
-            blanksasnull
+            NULL as '\\0'
             compupdate off
             statupdate off
 ",
