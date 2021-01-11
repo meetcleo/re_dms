@@ -269,14 +269,7 @@ impl Table {
         } else {
             // no ddl changes, add the line as normal
             self.add_change_to_changeset(parsed_line);
-            if self.time_to_swap_tables() {
-                // we don't actually remove the table
-                // we just clear any non-schema
-                let returned_table = self.reset_and_return_table_data();
-                Some((returned_table, None))
-            } else {
-                None
-            }
+            None
         }
     }
 
@@ -372,12 +365,6 @@ impl Table {
             added_ddl.extend(removed_ddl);
             added_ddl
         }
-    }
-
-    // we have superceded this by the WAL_SWITCH. Might delete later.
-    fn time_to_swap_tables(&self) -> bool {
-        // return self.changeset.len() >= CHANGES_PER_TABLE;
-        return false;
     }
 
     fn get_stats(&self) -> (usize, usize) {
