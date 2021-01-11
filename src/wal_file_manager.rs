@@ -276,10 +276,20 @@ impl WalFileManager {
         let should_swap_wal_time =
             self.last_swapped_wal.elapsed() >= Duration::new(*SECONDS_UNTIL_WAL_SWITCH, 0);
         if should_swap_wal_time {
-            info!("SWAP_WAL_ELAPSED {:?}", self.last_swapped_wal.elapsed());
-            info!("LAST_SWAPPED_WAL {:?}", self.last_swapped_wal);
+            info!(
+                "should_swap_wal: SWAP_WAL_ELAPSED {:?}",
+                self.last_swapped_wal.elapsed()
+            );
+            info!(
+                "should_swap_wal: LAST_SWAPPED_WAL {:?}",
+                self.last_swapped_wal
+            );
         }
-        let should_swap_wal_bytes = self.current_wal_bytes() >= *MAX_BYTES_FOR_WAL_SWITCH;
+        let current_wal_bytes = self.current_wal_bytes();
+        let should_swap_wal_bytes = current_wal_bytes >= *MAX_BYTES_FOR_WAL_SWITCH;
+        if should_swap_wal_bytes {
+            info!("should_swap_wal: CURRENT_WAL_BYTES {:?}", current_wal_bytes);
+        }
         should_swap_wal_time || should_swap_wal_bytes
     }
 
@@ -328,7 +338,10 @@ mod tests {
 
     // NOTE: I think this is actually run globally before all tests. Seems fine to me though.
     #[ctor::ctor]
-    fn create_tmp_directory() {
+    fn setup_tests() {
+        // init logger
+        env_logger::init();
+        // set required variable
         std::env::set_var("SECONDS_UNTIL_WAL_SWITCH", "600");
         std::fs::create_dir_all(TESTING_PATH).unwrap();
     }
@@ -496,7 +509,6 @@ mod tests {
 
         // 3 blocks of begin, table, commit
         for _ in 0..3 {
-            println!("FOOBAR");
             let mut current_wal_file = wal_file_manager.current_wal();
             let begin = wal_file_manager.next_line(&iter.next().unwrap().unwrap());
             if let WalLineResult::WalLine() = begin {
