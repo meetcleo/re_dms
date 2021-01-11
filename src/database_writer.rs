@@ -3,7 +3,6 @@ use openssl::ssl::{SslConnector, SslMethod};
 use postgres_openssl::MakeTlsConnector;
 use serde::Deserialize;
 // use config;
-use dotenv::dotenv;
 use std::env;
 
 #[allow(unused_imports)]
@@ -44,7 +43,6 @@ impl DatabaseWriter {
     }
 
     fn create_connection_pool() -> Pool {
-        dotenv().ok();
         // fail fast
         let mut cfg = Config::from_env().expect("Unable to build config from environment");
         cfg.pg.manager = Some(ManagerConfig {

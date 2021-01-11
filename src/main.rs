@@ -6,6 +6,8 @@ use std::io::{self, BufRead};
 use std::path::PathBuf;
 // use log::{debug, error, log_enabled, info, Level};
 
+use dotenv::dotenv;
+
 use tokio::sync::mpsc;
 
 mod change_processing;
@@ -27,6 +29,7 @@ lazy_static! {
 
 #[tokio::main]
 async fn main() {
+    dotenv().ok();
     env_logger::init();
     let mut parser = parser::Parser::new(true);
     let mut collector = change_processing::ChangeProcessing::new();
