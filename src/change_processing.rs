@@ -24,9 +24,6 @@ impl DdlChange {
     }
 }
 
-// CONFIG HACK:
-const CHANGES_PER_TABLE: usize = 100000;
-
 #[derive(Debug, Eq, PartialEq)]
 struct ChangeSet {
     changes: Option<ParsedLine>,
@@ -377,11 +374,10 @@ impl Table {
         }
     }
 
-    // TODO make this configurable, just for testing.
-    // NOTE: important config hack
-    // NOTE: important that this cannot trigger when we only have one line (so we don't process a ddl change, and then swap tables after)
+    // we have superceded this by the WAL_SWITCH. Might delete later.
     fn time_to_swap_tables(&self) -> bool {
-        return self.changeset.len() >= CHANGES_PER_TABLE;
+        // return self.changeset.len() >= CHANGES_PER_TABLE;
+        return false;
     }
 
     fn get_stats(&self) -> (usize, usize) {
