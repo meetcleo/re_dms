@@ -19,6 +19,10 @@ lazy_static! {
         .expect("SECONDS_UNTIL_WAL_SWITCH env is not set")
         .parse::<u64>()
         .expect("SECONDS_UNTIL_WAL_SWITCH is not a valid integer");
+    static ref MAX_BYTES_FOR_WAL_SWITCH: usize = std::env::var("MAX_BYTES_UNTIL_WAL_SWITCH")
+        .unwrap_or("1000000000".to_string()) // 1 GB default
+        .parse::<usize>()
+        .expect("MAX_BYTES_FOR_WAL_SWITCH is not a valid integer");
 }
 
 #[cfg(not(test))]
@@ -53,6 +57,7 @@ struct WalFileInternal {
     file: File,
     // we want this to be locked by the mutex
     had_errors_loading: bool,
+    pub current_number_of_bytes: usize,
 }
 
 impl WalFileInternal {
@@ -60,6 +65,7 @@ impl WalFileInternal {
         WalFileInternal {
             file: file,
             had_errors_loading: false,
+            current_number_of_bytes: 0,
         }
     }
     fn register_error(&mut self) {
@@ -73,6 +79,7 @@ impl WalFileInternal {
 // just pass writes straight to the file
 impl std::io::Write for WalFileInternal {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.current_number_of_bytes += buf.len();
         self.file.write(buf)
     }
     fn flush(&mut self) -> std::io::Result<()> {
@@ -197,6 +204,9 @@ impl WalFile {
         // now we replace Arc value with None.
         self.file = Arc::new(None);
     }
+    pub fn current_bytes(&mut self) -> usize {
+        self.with_locked_internal_file().current_number_of_bytes
+    }
 }
 
 #[derive(Debug)]
@@ -256,20 +266,31 @@ impl WalFileManager {
             self.current_wal_file_number,
             self.output_wal_directory.as_path(),
         );
-        // this will only delete, if we didn't send any changes off to the change processor
+        // this will only delete if we didn't send any changes off to the change processor
         self.current_wal_file.maybe_remove_wal_file();
         self.current_wal_file = next_wal;
     }
 
-    fn should_swap_wal(&self) -> bool {
+    fn should_swap_wal(&mut self) -> bool {
         // 10 minutes
-        let should_swap_wal =
+        let should_swap_wal_time =
             self.last_swapped_wal.elapsed() >= Duration::new(*SECONDS_UNTIL_WAL_SWITCH, 0);
-        if should_swap_wal {
-            info!("SWAP_WAL_ELAPSED {:?}", self.last_swapped_wal.elapsed());
-            info!("LAST_SWAPPED_WAL {:?}", self.last_swapped_wal);
+        if should_swap_wal_time {
+            info!(
+                "should_swap_wal: SWAP_WAL_ELAPSED {:?}",
+                self.last_swapped_wal.elapsed()
+            );
+            info!(
+                "should_swap_wal: LAST_SWAPPED_WAL {:?}",
+                self.last_swapped_wal
+            );
         }
-        should_swap_wal
+        let current_wal_bytes = self.current_wal_bytes();
+        let should_swap_wal_bytes = current_wal_bytes >= *MAX_BYTES_FOR_WAL_SWITCH;
+        if should_swap_wal_bytes {
+            info!("should_swap_wal: CURRENT_WAL_BYTES {:?}", current_wal_bytes);
+        }
+        should_swap_wal_time || should_swap_wal_bytes
     }
 
     // we explictly don't implement Iterator because we need to be able to iterate
@@ -297,6 +318,11 @@ impl WalFileManager {
     pub fn clean_up_final_wal_file(&mut self) {
         self.current_wal_file.maybe_remove_wal_file()
     }
+
+    // mutable as we lock the internal file
+    pub fn current_wal_bytes(&mut self) -> usize {
+        self.current_wal_file.current_bytes()
+    }
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -312,7 +338,10 @@ mod tests {
 
     // NOTE: I think this is actually run globally before all tests. Seems fine to me though.
     #[ctor::ctor]
-    fn create_tmp_directory() {
+    fn setup_tests() {
+        // init logger
+        env_logger::init();
+        // set required variable
         std::env::set_var("SECONDS_UNTIL_WAL_SWITCH", "600");
         std::fs::create_dir_all(TESTING_PATH).unwrap();
     }
@@ -465,5 +494,46 @@ mod tests {
                 panic!("commit line doesn't match {:?}", commit);
             }
         }
+    }
+
+    #[test]
+    fn wal_file_byte_swap_integration_test() {
+        std::env::set_var("MAX_BYTES_UNTIL_WAL_SWITCH", "939");
+        let directory_path = PathBuf::from(TESTING_PATH);
+        let mut wal_file_manager = WalFileManager::new(directory_path.as_path());
+
+        let filename = "test/same_bytes_swap_wal.txt";
+        let input_file = File::open(filename).unwrap();
+        let reader = BufReader::new(input_file);
+        let mut iter = reader.lines();
+
+        // 3 blocks of begin, table, commit
+        for _ in 0..3 {
+            let mut current_wal_file = wal_file_manager.current_wal();
+            let begin = wal_file_manager.next_line(&iter.next().unwrap().unwrap());
+            if let WalLineResult::WalLine() = begin {
+                assert!(last_line_of_wal(&mut current_wal_file).starts_with("BEGIN"));
+            } else {
+                panic!("begin line doesn't match {:?}", begin)
+            }
+
+            let table = wal_file_manager.next_line(&iter.next().unwrap().unwrap());
+            if let WalLineResult::WalLine() = table {
+                assert!(last_line_of_wal(&mut current_wal_file).starts_with("table"));
+            } else {
+                panic!("table line doesn't match {:?}", table);
+            }
+
+            // We have set the number of bytes to make the wal swap occur here
+            let commit = wal_file_manager.next_line(&iter.next().unwrap().unwrap());
+            if let WalLineResult::SwapWal(..) = commit {
+                assert_ne!(wal_file_manager.current_wal(), current_wal_file);
+                assert!(last_line_of_wal(&mut current_wal_file).starts_with("COMMIT"));
+            } else {
+                panic!("commit line doesn't match {:?}", commit);
+            }
+        }
+
+        std::env::set_var("MAX_BYTES_UNTIL_WAL_SWITCH", "1000000000");
     }
 }
