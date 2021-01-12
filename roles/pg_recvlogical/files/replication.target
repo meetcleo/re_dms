@@ -2,6 +2,7 @@
 Description=replication services
 Requires=re_dms.service pg_recvlogical.service re_dms.socket
 After=re_dms.service pg_recvlogical.service re_dms.socket
+StartLimitBurst=1
 
 [Install]
 WantedBy=multi-user.target

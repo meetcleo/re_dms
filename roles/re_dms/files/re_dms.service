@@ -1,8 +1,9 @@
 [Unit]
 Description=re_dms service
-Requires=re_dms.socket
+BindsTo=re_dms.socket
 After=re_dms.socket
 PartOf=replication.target
+StartLimitBurst=1
 
 [Service]
 User=re_dms
@@ -12,6 +13,7 @@ Sockets=re_dms.socket
 StandardInput=fd:re_dms.socket
 StandardOutput=journal
 StandardError=journal
+Restart=no
 ExecStart=/usr/local/bin/re_dms
 
 [Install]
