@@ -55,6 +55,13 @@ pub enum ColumnValue {
     UnchangedToast,
 }
 
+pub enum ColumnTypeEnum {
+    Boolean,
+    Integer,
+    Numeric,
+    Text,
+}
+
 impl fmt::Display for ColumnValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -108,6 +115,10 @@ impl ColumnInfo {
     }
     pub fn column_type(&self) -> &str {
         self.column_type.as_ref()
+    }
+
+    pub fn column_type_enum(&self) -> ColumnTypeEnum {
+        ColumnValue::column_type_for_str(self.column_type())
     }
     pub fn new<T: ToString>(name: T, column_type: T) -> ColumnInfo {
         ColumnInfo {
@@ -249,28 +260,38 @@ impl ColumnValue {
             let (_start, rest) = ColumnValue::split_until_char_or_end(string, ' ');
             (None, rest)
         } else {
-            let (column_value, rest_of_string): (ColumnValue, &str) = match column_type {
-                "bigint" => ColumnValue::parse_integer(string),
-                "smallint" => ColumnValue::parse_integer(string),
-                "integer" => ColumnValue::parse_integer(string),
-                "character varying" => ColumnValue::parse_text(string, continue_parse),
-                "public.citext" => ColumnValue::parse_text(string, continue_parse), // extensions come through as public.
-                "text" => ColumnValue::parse_text(string, continue_parse),
-                "numeric" => ColumnValue::parse_numeric(string),
-                "decimal" => ColumnValue::parse_numeric(string),
-                "double precision" => ColumnValue::parse_numeric(string),
-                "boolean" => ColumnValue::parse_boolean(string),
-                "timestamp without time zone" => ColumnValue::parse_text(string, continue_parse),
-                "date" => ColumnValue::parse_text(string, continue_parse),
-                "uuid" => ColumnValue::parse_text(string, continue_parse),
-                "jsonb" => ColumnValue::parse_text(string, continue_parse),
-                "json" => ColumnValue::parse_text(string, continue_parse),
-                "public.hstore" => ColumnValue::parse_text(string, continue_parse),
-                "interval" => ColumnValue::parse_text(string, continue_parse),
-                "array" => ColumnValue::parse_text(string, continue_parse),
-                _ => panic!("Unknown column type: {:?}", column_type),
-            };
+            let (column_value, rest_of_string): (ColumnValue, &str) =
+                match Self::column_type_for_str(column_type) {
+                    ColumnTypeEnum::Integer => ColumnValue::parse_integer(string),
+                    ColumnTypeEnum::Boolean => ColumnValue::parse_boolean(string),
+                    ColumnTypeEnum::Numeric => ColumnValue::parse_numeric(string),
+                    ColumnTypeEnum::Text => ColumnValue::parse_text(string, continue_parse),
+                };
             (Some(column_value), rest_of_string)
+        }
+    }
+
+    pub fn column_type_for_str(column_type_str: &str) -> ColumnTypeEnum {
+        match column_type_str {
+            "bigint" => ColumnTypeEnum::Integer,
+            "smallint" => ColumnTypeEnum::Integer,
+            "integer" => ColumnTypeEnum::Integer,
+            "numeric" => ColumnTypeEnum::Numeric,
+            "decimal" => ColumnTypeEnum::Numeric,
+            "double precision" => ColumnTypeEnum::Numeric,
+            "boolean" => ColumnTypeEnum::Boolean,
+            "character varying" => ColumnTypeEnum::Text,
+            "public.citext" => ColumnTypeEnum::Text, // extensions come through as public.
+            "text" => ColumnTypeEnum::Text,
+            "timestamp without time zone" => ColumnTypeEnum::Text,
+            "date" => ColumnTypeEnum::Text,
+            "uuid" => ColumnTypeEnum::Text,
+            "jsonb" => ColumnTypeEnum::Text,
+            "json" => ColumnTypeEnum::Text,
+            "public.hstore" => ColumnTypeEnum::Text,
+            "interval" => ColumnTypeEnum::Text,
+            "array" => ColumnTypeEnum::Text,
+            _ => panic!("Unknown column type: {:?}", column_type_str),
         }
     }
     fn parse_integer<'a>(string: &'a str) -> (ColumnValue, &'a str) {
