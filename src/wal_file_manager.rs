@@ -11,6 +11,8 @@ use std::time::Duration;
 #[allow(unused_imports)]
 use log::{debug, error, info, log_enabled, Level};
 
+use crate::logger::Logger;
+
 #[cfg(test)]
 use mock_instant::{Instant, MockClock};
 
@@ -101,6 +103,12 @@ impl WalFile {
         let path = Self::path_for_wal_file_class(wal_file_number, wal_file_directory);
         let directory_path =
             Self::path_for_wal_directory_class(wal_file_number, wal_file_directory);
+        Logger::info(
+            Some(wal_file_number as usize),
+            None,
+            "WalFile::new",
+            &format!("creating wal directory: {:?}", directory_path),
+        );
         let _directory = fs::create_dir_all(directory_path.clone()).expect(&format!(
             "Unable to create directory: {}",
             directory_path
@@ -108,7 +116,12 @@ impl WalFile {
                 .to_str()
                 .unwrap_or("unprintable non-utf-8 directory")
         ));
-        info!("creating wal file {:?}", path);
+        Logger::info(
+            Some(wal_file_number as usize),
+            None,
+            "WalFile::new",
+            &format!("creating wal file {:?}", path),
+        );
         // use atomic file creation. Bail if a file already exists
         let file = OpenOptions::new()
             .write(true)
@@ -118,7 +131,6 @@ impl WalFile {
                 "Unable to create wal file: {}",
                 path.to_str().unwrap_or("unprintable non-utf-8 path")
             ));
-        info!("creating wal directory {:?}", directory_path);
         WalFile {
             file_number: wal_file_number,
             file: Arc::new(Some(Mutex::new(WalFileInternal::new(file)))),
