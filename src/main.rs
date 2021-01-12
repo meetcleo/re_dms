@@ -5,7 +5,6 @@ use lazy_static::lazy_static;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
-// use log::{debug, error, log_enabled, info, Level};
 
 use dotenv::dotenv;
 
@@ -18,6 +17,7 @@ mod exponential_backoff;
 mod file_uploader;
 mod file_uploader_threads;
 mod file_writer;
+mod logger;
 mod parser;
 mod wal_file_manager;
 
