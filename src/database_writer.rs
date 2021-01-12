@@ -6,7 +6,9 @@ use serde::Deserialize;
 use std::env;
 
 #[allow(unused_imports)]
-use log::{debug, error, info, log_enabled, Level};
+use crate::{function, logger_debug, logger_error, logger_info, logger_panic};
+
+use log::{debug, error, info};
 
 use crate::change_processing::DdlChange;
 use crate::file_uploader::CleoS3File;
@@ -56,7 +58,12 @@ impl DatabaseWriter {
             .expect("Unable to build database connection pool")
     }
 
-    pub async fn handle_ddl(&self, ddl_change: &DdlChange) -> Result<(), DatabaseWriterError> {
+    pub async fn handle_ddl(
+        &self,
+        ddl_change: &DdlChange,
+        wal_file_number: u64,
+    ) -> Result<(), DatabaseWriterError> {
+        let table_name = ddl_change.table_name();
         let alter_table_statement = match ddl_change {
             DdlChange::AddColumn(column_info, table_name) => {
                 self.add_column_statement(column_info, table_name)
@@ -65,7 +72,11 @@ impl DatabaseWriter {
                 self.remove_column_statement(column_info, table_name)
             }
         };
-        info!("alter table statement: {}", alter_table_statement.as_str());
+        logger_debug!(
+            Some(wal_file_number),
+            Some(table_name.clone()),
+            &format!("alter_table_statement:{}", alter_table_statement.as_str())
+        );
         let client = self
             .connection_pool
             .get()
@@ -77,7 +88,12 @@ impl DatabaseWriter {
             .await
             .map_err(DatabaseWriterError::TokioError)?;
 
-        info!("alter table finished: {}", alter_table_statement.as_str());
+        logger_info!(
+            Some(wal_file_number),
+            Some(table_name),
+            &format!("alter_table_finished_successfully:{:?}", ddl_change)
+        );
+
         Ok(())
     }
 

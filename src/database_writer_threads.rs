@@ -110,8 +110,13 @@ impl DatabaseWriterThreads {
                             let mut mutable_s3_file = (*cleo_s3_file).clone();
                             uploader.apply_s3_changes(&mut mutable_s3_file).await?;
                         }
-                        UploaderStageResult::DdlChange(ddl_change, _) => {
-                            uploader.handle_ddl(&ddl_change).await?;
+                        UploaderStageResult::DdlChange(ddl_change, wal_file) => {
+                            // I don't think we need to handle a ddl change being the last
+                            // change in a wal file, since it relies on a difference, so there must be a line after it
+                            // so we don't need to call maybe_remove_wal_file();
+                            uploader
+                                .handle_ddl(&ddl_change, wal_file.file_number)
+                                .await?;
                         }
                     };
                     Ok(())
