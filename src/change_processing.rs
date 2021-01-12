@@ -7,7 +7,7 @@ use crate::file_writer;
 use either::Either;
 
 #[allow(unused_imports)]
-use log::{debug, error, info, log_enabled, Level};
+use crate::{function, logger_debug, logger_error, logger_info, logger_panic};
 
 #[derive(Debug, Eq, PartialEq, Hash, Clone)]
 pub enum DdlChange {
@@ -492,7 +492,7 @@ impl ChangeProcessing {
             .iter()
             .for_each(|(table_name, table)| {
                 let (ids, _changes) = table.get_stats();
-                info!("{} {}", ids, table_name)
+                println!("{} {}", ids, table_name)
             });
     }
 
@@ -530,7 +530,11 @@ impl ChangeProcessing {
                 ChangeProcessingResult::TableChanges(file_writer)
             })
             .collect();
-        info!("DRAINED FINAL CHANGES!!!!! {}", self.table_holder.len());
+        logger_info!(
+            maybe_associated_wal_file.map(|x| x.file_number),
+            None, // all tables
+            &format!("drained_final_changes:{}", self.table_holder.len())
+        );
         resulting_vec
     }
 }
