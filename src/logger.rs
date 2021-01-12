@@ -3,6 +3,8 @@ use log::{debug, error, info};
 
 pub struct Logger {}
 
+// get name of function, with struct e.t.c.
+// e.g. re_dms::wal_file_manager::WalFileManager::should_swap_wal
 #[macro_export]
 macro_rules! function {
     () => {{
