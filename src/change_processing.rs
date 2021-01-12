@@ -1073,7 +1073,7 @@ mod tests {
         let change_1 = ParsedLine::ChangedData {
             kind: ChangeKind::Delete,
             table_name: table_name.clone(),
-            columns: changed_columns_1.clone(),
+            columns: vec![changed_columns_1[0].clone()],
         };
         let change_2 = ParsedLine::ChangedData {
             kind: ChangeKind::Insert,
