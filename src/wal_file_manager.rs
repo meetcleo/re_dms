@@ -8,10 +8,10 @@ use std::sync::{Arc, Mutex};
 use std::io::Write;
 use std::time::Duration;
 
-// #[allow(unused_imports)]
 // use log::{debug, error, info, log_enabled, Level};
 
-use crate::logger::Logger;
+#[allow(unused_imports)]
+use crate::{function, logger_debug, logger_error, logger_info, logger_panic};
 
 #[cfg(test)]
 use mock_instant::{Instant, MockClock};
@@ -103,11 +103,10 @@ impl WalFile {
         let path = Self::path_for_wal_file_class(wal_file_number, wal_file_directory);
         let directory_path =
             Self::path_for_wal_directory_class(wal_file_number, wal_file_directory);
-        Logger::info(
+        logger_info!(
             Some(wal_file_number),
             None,
-            "WalFile::new",
-            &format!("creating wal directory:{:?}", directory_path),
+            &format!("creating wal directory:{:?}", directory_path)
         );
         let _directory = fs::create_dir_all(directory_path.clone()).expect(&format!(
             "Unable to create directory: {}",
@@ -116,11 +115,10 @@ impl WalFile {
                 .to_str()
                 .unwrap_or("unprintable non-utf-8 directory")
         ));
-        Logger::info(
+        logger_info!(
             Some(wal_file_number),
             None,
-            "WalFile::new",
-            &format!("creating wal file {:?}", path),
+            &format!("creating wal file {:?}", path)
         );
         // use atomic file creation. Bail if a file already exists
         let file = OpenOptions::new()
@@ -189,14 +187,13 @@ impl WalFile {
 
     pub fn maybe_remove_wal_file(&mut self) {
         // we only want to remove the wal file if we're the only pointer to this file
-        Logger::debug(
+        logger_debug!(
             Some(self.file_number),
             None,
-            "WalFile::maybe_remove_wal_file",
             &format!(
                 "maybe_remove_wal_file_arc_count:{}",
                 Arc::strong_count(&self.file)
-            ),
+            )
         );
         if Arc::strong_count(&self.file) != 1 {
             return;
@@ -292,25 +289,23 @@ impl WalFileManager {
         let should_swap_wal_time =
             self.last_swapped_wal.elapsed() >= Duration::new(*SECONDS_UNTIL_WAL_SWITCH, 0);
         if should_swap_wal_time {
-            Logger::info(
+            logger_info!(
                 Some(self.current_wal_file_number),
                 None,
-                "WalFileManager::should_swap_wal",
                 &format!(
                     "swap_wal_elapsed:{:?} last_swapped_wal:{:?}",
                     self.last_swapped_wal.elapsed(),
                     self.last_swapped_wal
-                ),
+                )
             );
         }
         let current_wal_bytes = self.current_wal_bytes();
         let should_swap_wal_bytes = current_wal_bytes >= *MAX_BYTES_FOR_WAL_SWITCH;
         if should_swap_wal_bytes {
-            Logger::info(
+            logger_info!(
                 Some(self.current_wal_file_number),
                 None,
-                "WalFileManager::should_swap_wal",
-                &format!("current_wal_bytes:{:?}", current_wal_bytes),
+                &format!("current_wal_bytes:{:?}", current_wal_bytes)
             )
         }
         should_swap_wal_time || should_swap_wal_bytes

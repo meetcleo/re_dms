@@ -7,7 +7,7 @@ use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::HashSet;
 
-use crate::logger::Logger;
+use crate::{function, logger_debug};
 
 pub type TableName = ArcIntern<String>;
 pub type ColumnName = ArcIntern<String>;
@@ -433,11 +433,11 @@ impl Parser {
             let xid: i64 = rest_of_string
                 .parse()
                 .expect("Unable to parse BEGIN xid as i64");
-            Logger::debug(
+            logger_debug!(
                 self.parse_state.wal_file_number,
                 None,
-                "Parser::parse_begin",
-                &format!("xid:{}", xid),
+                // "Parser::parse_begin",
+                &format!("xid:{}", xid)
             );
             ParsedLine::Begin(xid)
         } else {
@@ -455,7 +455,7 @@ impl Parser {
             let xid: i64 = rest_of_string
                 .parse()
                 .expect("Unable to parse COMMIT xid as i64");
-            debug!("parsed commit {}", xid);
+            // Logger::debug("parsed commit {}", xid);
             ParsedLine::Commit(xid)
         } else {
             ParsedLine::Commit(0)
