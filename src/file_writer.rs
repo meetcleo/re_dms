@@ -3,7 +3,7 @@ use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
 
-use crate::parser::{ChangeKind, ColumnInfo, ParsedLine, TableName};
+use crate::parser::{ChangeKind, ColumnInfo, ColumnTypeEnum, ParsedLine, TableName};
 use crate::wal_file_manager;
 use std::collections::HashMap; //{ HashMap, BTreeMap, HashSet };
 
@@ -172,7 +172,10 @@ impl FileStruct {
                         if let Some(value) = x.column_value_for_changed_column() {
                             value.to_string()
                         } else {
-                            "\0".to_owned()
+                            match x.column_info().column_type_enum() {
+                                ColumnTypeEnum::Text => "\0".to_owned(),
+                                _ => "".to_owned(),
+                            }
                         } // remember null byte as nulls
                     })
                     .collect();
