@@ -118,7 +118,7 @@ impl DatabaseWriter {
             return Ok(());
         }
         // temp tables are present in the session, so we still need to drop it at the end of the transaction
-        info!("BEGIN INSERT {}", table_name);
+        info!("apply_s3_changes: begin insert: {}", table_name);
         let client = self
             .connection_pool
             .get()
@@ -126,7 +126,7 @@ impl DatabaseWriter {
             .map_err(DatabaseWriterError::PoolError)?;
         // let transaction = client.transaction().await.unwrap();
         let transaction = client;
-        info!("GOT CONNECTION {}", table_name);
+        debug!("apply_s3_changes: got connection: {}", table_name);
         let (schema_name, just_table_name) = table_name.schema_and_table_name();
         assert!(!table_name.contains('"'));
         let staging_name = self.staging_name(s3_file);
@@ -143,7 +143,10 @@ impl DatabaseWriter {
             &schema_name,
             &just_table_name,
         );
-        info!("{}", create_staging_table);
+        debug!(
+            "apply_s3_changes: create staging table: {}",
+            create_staging_table
+        );
 
         let remote_filepath = s3_file.remote_path();
         let access_key_id =
@@ -182,13 +185,12 @@ impl DatabaseWriter {
             &s3_file.columns,
         );
         let drop_staging_table = format!("drop table if exists {}", &staging_name);
-        // let insert_query = format!();
         let result = transaction
             .execute(create_staging_table.as_str(), &[])
             .await;
         if let Err(err) = result {
             error!(
-                "Received error: {} {} {} {:?}",
+                "apply_s3_errors: {} {} {} {:?}",
                 table_name,
                 remote_filepath,
                 create_staging_table.as_str(),
@@ -196,10 +198,18 @@ impl DatabaseWriter {
             );
         }
         info!("CREATED STAGING TABLE {}", table_name);
-        transaction
+        debug!("copy_to_staging_table {}", copy_to_staging_table);
+        let result = transaction
             .execute(copy_to_staging_table.as_str(), &[])
-            .await
-            .map_err(DatabaseWriterError::TokioError)?;
+            .await;
+        // .map_err(DatabaseWriterError::TokioError)?;
+        match result {
+            Ok(..) => {}
+            Err(err) => {
+                panic!("copy_to_staging_table got error {:?}", err);
+                // Err(err).map_err(DatabaseWriterError::TokioError)?
+            }
+        }
         info!("COPIED TO STAGING TABLE {}", table_name);
         transaction
             .execute(data_migration_query_string.as_str(), &[])
