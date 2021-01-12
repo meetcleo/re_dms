@@ -56,6 +56,7 @@ async fn main() {
 
     for line in io::stdin().lock().lines() {
         if let Ok(ip) = line {
+            let wal_file_manager_result = wal_file_manager.next_line(&ip);
             let parsed_line = parser.parse(&ip);
             match parsed_line {
                 parser::ParsedLine::ContinueParse => {} // Intentionally left blank, continue parsing
@@ -69,9 +70,7 @@ async fn main() {
                     }
                 }
             }
-            if let wal_file_manager::WalLineResult::SwapWal(wal_file) =
-                wal_file_manager.next_line(&ip)
-            {
+            if let wal_file_manager::WalLineResult::SwapWal(wal_file) = wal_file_manager_result {
                 // drain the collector of all it's tables, and send to file transmitter
                 drain_collector_and_transmit(&mut collector, &mut file_transmitter).await;
                 collector.register_wal_file(Some(wal_file.clone()));
