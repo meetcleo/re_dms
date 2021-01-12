@@ -8,8 +8,8 @@ use std::sync::{Arc, Mutex};
 use std::io::Write;
 use std::time::Duration;
 
-#[allow(unused_imports)]
-use log::{debug, error, info, log_enabled, Level};
+// #[allow(unused_imports)]
+// use log::{debug, error, info, log_enabled, Level};
 
 use crate::logger::Logger;
 
@@ -107,7 +107,7 @@ impl WalFile {
             Some(wal_file_number),
             None,
             "WalFile::new",
-            &format!("creating wal directory: {:?}", directory_path),
+            &format!("creating wal directory:{:?}", directory_path),
         );
         let _directory = fs::create_dir_all(directory_path.clone()).expect(&format!(
             "Unable to create directory: {}",
@@ -189,10 +189,14 @@ impl WalFile {
 
     pub fn maybe_remove_wal_file(&mut self) {
         // we only want to remove the wal file if we're the only pointer to this file
-        debug!(
-            "Maybe remove wal file {}: arc count: {}",
-            self.file_number,
-            Arc::strong_count(&self.file)
+        Logger::debug(
+            Some(self.file_number),
+            None,
+            "WalFile::maybe_remove_wal_file",
+            &format!(
+                "maybe_remove_wal_file_arc_count:{}",
+                Arc::strong_count(&self.file)
+            ),
         );
         if Arc::strong_count(&self.file) != 1 {
             return;
@@ -302,7 +306,12 @@ impl WalFileManager {
         let current_wal_bytes = self.current_wal_bytes();
         let should_swap_wal_bytes = current_wal_bytes >= *MAX_BYTES_FOR_WAL_SWITCH;
         if should_swap_wal_bytes {
-            info!("should_swap_wal: CURRENT_WAL_BYTES {:?}", current_wal_bytes);
+            Logger::info(
+                Some(self.current_wal_file_number),
+                None,
+                "WalFileManager::should_swap_wal",
+                &format!("current_wal_bytes:{:?}", current_wal_bytes),
+            )
         }
         should_swap_wal_time || should_swap_wal_bytes
     }

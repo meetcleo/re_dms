@@ -60,6 +60,8 @@ async fn main() {
         PathBuf::from(OUTPUT_WAL_DIRECTORY.clone()).as_path(),
     );
     collector.register_wal_file(Some(wal_file_manager.current_wal()));
+    // for logging
+    parser.register_wal_number(wal_file_manager.current_wal().file_number);
 
     let child = Command::new(PG_RECVLOGICAL_PATH.clone())
         .args(&[
@@ -100,6 +102,7 @@ async fn main() {
                 // drain the collector of all it's tables, and send to file transmitter
                 drain_collector_and_transmit(&mut collector, &mut file_transmitter).await;
                 collector.register_wal_file(Some(wal_file.clone()));
+                parser.register_wal_number(wal_file.file_number);
             }
         }
     }
