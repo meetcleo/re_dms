@@ -43,6 +43,13 @@ impl ChangeProcessingResult {
             Self::DdlChange(ddl_change, _) => ddl_change.table_name(),
         }
     }
+
+    pub fn wal_file_number(&self) -> u64 {
+        match self {
+            Self::TableChanges(file_writer) => file_writer.wal_file.file_number,
+            Self::DdlChange(_, wal_file) => wal_file.file_number,
+        }
+    }
 }
 
 impl ChangeSet {

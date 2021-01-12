@@ -3,7 +3,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 
 #[allow(unused_imports)]
-use log::{debug, error, info, log_enabled, Level};
+use crate::{function, logger_debug, logger_error, logger_info, logger_panic};
 
 use crate::change_processing;
 use crate::file_uploader::{CleoS3File, FileUploader};
@@ -32,6 +32,10 @@ impl UploaderStageResult {
             Self::S3File(cleo_s3_file) => cleo_s3_file.wal_file.clone(),
             Self::DdlChange(_, wal_file) => wal_file.clone(),
         }
+    }
+
+    pub fn wal_file_number(&self) -> u64 {
+        self.wal_file().file_number
     }
 }
 
@@ -63,9 +67,13 @@ impl<SharedResource, ChannelType> GenericTableThreadSplitter<SharedResource, Cha
                 table_thread.drop_sender_and_return_join_handle()
             })
             .collect::<Vec<_>>();
-        info!("got all join_handles file_uploader waiting");
+        logger_info!(
+            None,
+            None,
+            "all_join_handles_collected_file_uploader_waiting"
+        );
         futures::future::join_all(join_handles).await;
-        info!("finished waiting on all file_uploader join handles");
+        logger_info!(None, None, "join_handles_finished_waiting");
     }
 
     pub fn get_shared_resource(&self) -> Arc<SharedResource> {
@@ -103,6 +111,7 @@ impl FileUploaderThreads {
         ))
     }
 
+    // here we fan out to the individual file uploader threads
     pub async fn file_uploader_stream(
         mut receiver: mpsc::Receiver<change_processing::ChangeProcessingResult>,
         result_sender: mpsc::Sender<UploaderStageResult>,
@@ -125,10 +134,10 @@ impl FileUploaderThreads {
                     .as_ref()
                     .map(|inner_sender| async move { inner_sender });
             } else {
-                info!("channel hung up main");
+                logger_info!(None, None, "main_channel_hung_up");
                 file_uploader_stream.join_all_table_threads().await;
 
-                info!("finished waiting on threads");
+                logger_info!(None, None, "finished_waiting_on_table_threads");
                 break;
             }
         }
@@ -166,11 +175,13 @@ impl FileUploaderThreads {
         mut result_sender: mpsc::Sender<UploaderStageResult>,
     ) {
         let mut last_table_name = None;
+        let mut last_wal_number = None;
         loop {
             // need to do things this way rather than a match for the borrow checker
             let received = receiver.recv().await;
             if let Some(change) = received {
                 let table_name = change.table_name();
+                last_wal_number = Some(change.wal_file_number());
                 last_table_name = Some(table_name);
                 match change {
                     change_processing::ChangeProcessingResult::TableChanges(mut file_writer) => {
@@ -192,7 +203,11 @@ impl FileUploaderThreads {
                     }
                 }
             } else {
-                info!("file uploader channel hung up: {:?}", last_table_name);
+                logger_info!(
+                    last_wal_number,
+                    last_table_name,
+                    "file_uploader_channel_finished"
+                );
                 drop(result_sender);
                 break;
             }
