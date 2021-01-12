@@ -4,7 +4,6 @@ use tokio::sync::mpsc;
 
 #[allow(unused_imports)]
 use crate::{function, logger_debug, logger_error, logger_info, logger_panic};
-// use log::{debug, error, info, log_enabled, Level};
 
 use crate::database_writer::DatabaseWriter;
 use crate::exponential_backoff::*;
