@@ -103,6 +103,17 @@ pub enum Column {
     },
 }
 
+impl fmt::Display for Column {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}:{}",
+            self.column_info().column_name(),
+            self.column_info().column_type()
+        )
+    }
+}
+
 // happy to clone it, it only holds two pointers
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
 pub struct ColumnInfo {
@@ -306,11 +317,21 @@ impl ColumnValue {
     fn parse_text<'a>(string: &'a str, continue_parse: bool) -> (ColumnValue, &'a str) {
         if string.starts_with("unchanged-toast-datum") {
             let (start, rest) = ColumnValue::split_until_char_or_end(string, ' ');
-            assert_eq!(start, "unchanged-toast-datum");
+            assert_eq!(
+                start, "unchanged-toast-datum",
+                "expected 'unchanged-toast-datum' at start of string, got: `{}` when parsing `{}`",
+                start, string
+            );
             return (ColumnValue::UnchangedToast, rest);
         }
         if !continue_parse {
-            assert_eq!(&string[0..1], "'");
+            assert_eq!(
+                &string[0..1],
+                "'",
+                "expected ', got `{}` when parsing `{}`",
+                &string[0..1],
+                string
+            );
         }
         let mut total_index: usize = 0;
         let mut complete_text: bool = false;
@@ -343,7 +364,13 @@ impl ColumnValue {
         let (start, end) = without_first_quote.split_at(total_index);
         // move past final quote if found
         let (column, text) = if complete_text {
-            assert_eq!(&end[0..1], "'");
+            assert_eq!(
+                &end[0..1],
+                "'",
+                "expected ', got `{}` when parsing `{}`",
+                &end[0..1],
+                string
+            );
             (ColumnValue::Text(start.to_owned()), &end[1..])
         } else {
             (ColumnValue::IncompleteText(start.to_owned()), end)
@@ -437,7 +464,10 @@ impl Parser {
         // + 2 for colon + space
         assert_eq!(
             &string_without_tag[table_name.len()..table_name.len() + 2],
-            ": "
+            ": ",
+            "expected `: `, got `{}` when parsing `{}`",
+            &string_without_tag[table_name.len()..table_name.len() + 2],
+            string
         );
         let string_without_table =
             &string_without_tag[table_name.len() + 2..string_without_tag.len()];
@@ -452,7 +482,10 @@ impl Parser {
         // + 2 for colon + space
         assert_eq!(
             &string_without_table[kind_string.len()..kind_string.len() + 2],
-            ": "
+            ": ",
+            "expected `: `, got `{}` when parsing `{}`",
+            &string_without_table[kind_string.len()..kind_string.len() + 2],
+            string
         );
         let string_without_kind =
             &string_without_table[kind_string.len() + 2..string_without_table.len()];
