@@ -60,6 +60,7 @@ pub enum ColumnTypeEnum {
     Integer,
     Numeric,
     Text,
+    Timestamp,
 }
 
 impl fmt::Display for ColumnValue {
@@ -266,6 +267,7 @@ impl ColumnValue {
                     ColumnTypeEnum::Boolean => ColumnValue::parse_boolean(string),
                     ColumnTypeEnum::Numeric => ColumnValue::parse_numeric(string),
                     ColumnTypeEnum::Text => ColumnValue::parse_text(string, continue_parse),
+                    ColumnTypeEnum::Timestamp => ColumnValue::parse_text(string, continue_parse),
                 };
             (Some(column_value), rest_of_string)
         }
@@ -283,8 +285,8 @@ impl ColumnValue {
             "character varying" => ColumnTypeEnum::Text,
             "public.citext" => ColumnTypeEnum::Text, // extensions come through as public.
             "text" => ColumnTypeEnum::Text,
-            "timestamp without time zone" => ColumnTypeEnum::Text,
-            "date" => ColumnTypeEnum::Text,
+            "timestamp without time zone" => ColumnTypeEnum::Timestamp,
+            "date" => ColumnTypeEnum::Timestamp,
             "uuid" => ColumnTypeEnum::Text,
             "jsonb" => ColumnTypeEnum::Text,
             "json" => ColumnTypeEnum::Text,
