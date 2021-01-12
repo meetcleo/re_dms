@@ -20,7 +20,6 @@ impl Logger {
         );
     }
 
-    #[allow(dead_code)]
     pub fn debug(wal_number: Option<u64>, table_name: Option<TableName>, tag: &str, message: &str) {
         debug!(
             "{}",

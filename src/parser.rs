@@ -7,6 +7,8 @@ use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::HashSet;
 
+use crate::logger::Logger;
+
 pub type TableName = ArcIntern<String>;
 pub type ColumnName = ArcIntern<String>;
 pub type ColumnType = ArcIntern<String>;
@@ -37,6 +39,7 @@ struct ParserConfig {
 }
 struct ParserState {
     currently_parsing: Option<ParsedLine>,
+    wal_file_number: Option<u64>,
 }
 
 // define config later
@@ -341,7 +344,6 @@ impl ColumnValue {
             &string[1..]
         };
 
-        // debug!("total_index {}", total_index);
         while total_index + 1 <= without_first_quote.len() {
             let found_index_option = without_first_quote[total_index..].find("'");
             match found_index_option {
@@ -405,6 +407,7 @@ impl Parser {
             config: ParserConfig { include_xids },
             parse_state: ParserState {
                 currently_parsing: None,
+                wal_file_number: None,
             },
         }
     }
@@ -430,7 +433,12 @@ impl Parser {
             let xid: i64 = rest_of_string
                 .parse()
                 .expect("Unable to parse BEGIN xid as i64");
-            debug!("parsed begin {}", xid);
+            Logger::debug(
+                self.parse_state.wal_file_number,
+                None,
+                "Parser::parse_begin",
+                &format!("xid:{}", xid),
+            );
             ParsedLine::Begin(xid)
         } else {
             ParsedLine::Begin(0)
@@ -653,6 +661,10 @@ impl Parser {
         };
         debug!("returning change struct: {:?}", result);
         result
+    }
+
+    pub fn register_wal_number(&mut self, wal_file_number: u64) {
+        self.parse_state.wal_file_number = Some(wal_file_number);
     }
 }
 
