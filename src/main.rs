@@ -6,6 +6,8 @@ use std::io::{self, BufRead};
 use std::path::PathBuf;
 // use log::{debug, error, log_enabled, info, Level};
 
+use dotenv::dotenv;
+
 use tokio::sync::mpsc;
 
 mod change_processing;
@@ -25,12 +27,9 @@ lazy_static! {
         std::env::var("OUTPUT_WAL_DIRECTORY").expect("OUTPUT_WAL_DIRECTORY env is not set");
 }
 
-// use std::collections::{ HashSet };
-
-// TEMP
-
 #[tokio::main]
 async fn main() {
+    dotenv().ok();
     env_logger::init();
     let mut parser = parser::Parser::new(true);
     let mut collector = change_processing::ChangeProcessing::new();
@@ -63,7 +62,6 @@ async fn main() {
                 _ => {
                     if let Some(change_vec) = collector.add_change(parsed_line) {
                         for change in change_vec {
-                            // TODO error handling
                             file_transmitter.send(change).await.expect(
                                 "Error writing to file_transmitter channel. Channel dropped.",
                             );

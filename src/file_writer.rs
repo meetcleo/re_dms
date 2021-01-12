@@ -172,8 +172,8 @@ impl FileStruct {
                         if let Some(value) = x.column_value_for_changed_column() {
                             value.to_string()
                         } else {
-                            "".to_owned()
-                        } // remember blank as nulls
+                            "\0".to_owned()
+                        } // remember null byte as nulls
                     })
                     .collect();
                 self.write(&strings);
