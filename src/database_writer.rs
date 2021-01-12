@@ -125,14 +125,6 @@ impl DatabaseWriter {
     ) -> Result<(), DatabaseWriterError> {
         let kind = &s3_file.kind;
         let table_name = &s3_file.table_name;
-        if [
-            "public.transaction_descriptions",
-            "public.user_relationships_timestamps",
-        ]
-        .contains(&table_name.as_str())
-        {
-            return Ok(());
-        }
         // temp tables are present in the session, so we still need to drop it at the end of the transaction
         info!("apply_s3_changes: begin insert: {}", table_name);
         let client = self
