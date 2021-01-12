@@ -104,7 +104,7 @@ impl WalFile {
         let directory_path =
             Self::path_for_wal_directory_class(wal_file_number, wal_file_directory);
         Logger::info(
-            Some(wal_file_number as usize),
+            Some(wal_file_number),
             None,
             "WalFile::new",
             &format!("creating wal directory: {:?}", directory_path),
@@ -117,7 +117,7 @@ impl WalFile {
                 .unwrap_or("unprintable non-utf-8 directory")
         ));
         Logger::info(
-            Some(wal_file_number as usize),
+            Some(wal_file_number),
             None,
             "WalFile::new",
             &format!("creating wal file {:?}", path),
@@ -288,13 +288,15 @@ impl WalFileManager {
         let should_swap_wal_time =
             self.last_swapped_wal.elapsed() >= Duration::new(*SECONDS_UNTIL_WAL_SWITCH, 0);
         if should_swap_wal_time {
-            info!(
-                "should_swap_wal: SWAP_WAL_ELAPSED {:?}",
-                self.last_swapped_wal.elapsed()
-            );
-            info!(
-                "should_swap_wal: LAST_SWAPPED_WAL {:?}",
-                self.last_swapped_wal
+            Logger::info(
+                Some(self.current_wal_file_number),
+                None,
+                "WalFileManager::should_swap_wal",
+                &format!(
+                    "swap_wal_elapsed:{:?} last_swapped_wal:{:?}",
+                    self.last_swapped_wal.elapsed(),
+                    self.last_swapped_wal
+                ),
             );
         }
         let current_wal_bytes = self.current_wal_bytes();
