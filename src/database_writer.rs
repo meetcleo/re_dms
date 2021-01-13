@@ -71,10 +71,8 @@ impl DatabaseWriter {
             }
         };
         let client = self
-            .connection_pool
-            .get()
-            .await
-            .map_err(DatabaseWriterError::PoolError)?;
+            .get_connection_from_pool(wal_file_number, &table_name)
+            .await?;
 
         self.execute_single_query(
             &client,
@@ -110,6 +108,25 @@ impl DatabaseWriter {
         )
     }
 
+    async fn get_connection_from_pool(
+        &self,
+        wal_file_number: u64,
+        table_name: &TableName,
+    ) -> Result<Client, DatabaseWriterError> {
+        let client = self.connection_pool.get().await;
+        match client {
+            Ok(ok) => Ok(ok),
+            Err(err) => {
+                logger_error!(
+                    Some(wal_file_number),
+                    Some(table_name),
+                    &format!("error_getting_connection:{:?}", err)
+                );
+                Err(err).map_err(DatabaseWriterError::PoolError)
+            }
+        }
+    }
+
     pub async fn apply_s3_changes(
         &self,
         s3_file: &mut CleoS3File,
@@ -126,10 +143,8 @@ impl DatabaseWriter {
         );
 
         let client = self
-            .connection_pool
-            .get()
-            .await
-            .map_err(DatabaseWriterError::PoolError)?;
+            .get_connection_from_pool(wal_file_number, table_name)
+            .await?;
 
         // let transaction = client.transaction().await.unwrap();
         let transaction = client;
