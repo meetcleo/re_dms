@@ -328,10 +328,11 @@ impl DatabaseWriter {
     }
 
     // NOTE: if you have a column named "tag" it needs to be surrounded by quotes
+    // NOTE: you also need to remove quotes from the column name
     fn column_and_type_for_column(&self, column_info: &ColumnInfo) -> String {
         format!(
             "\"{column_name}\" {column_type}",
-            column_name = column_info.column_name(),
+            column_name = column_info.column_name().replace("\"", ""),
             column_type = self.column_type_mapping(column_info.column_type()).as_str()
         )
     }
@@ -377,7 +378,7 @@ impl DatabaseWriter {
                     columns_to_update = columns
                         .iter()
                         .filter(|x| !x.is_id_column())
-                        .map(|x| x.column_name())
+                        .map(|x| x.column_name().replace("\"", ""))
                         .map(|x| format!("\"{}\" = s.\"{}\"", x, x))
                         .collect::<Vec<_>>()
                         .join(","),

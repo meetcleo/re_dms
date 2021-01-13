@@ -107,9 +107,11 @@ impl ChangeSet {
         } = new_change
         {
             match kind {
-                ChangeKind::Insert => {
-                    self.untoasted_changes(columns, table_name, ChangeKind::Update)
-                }
+                ChangeKind::Insert => Some(ParsedLine::ChangedData {
+                    columns: columns,
+                    kind: ChangeKind::Update,
+                    table_name: table_name,
+                }),
                 ChangeKind::Update => {
                     panic!("attempting to update a record after it's been deleted")
                 }
