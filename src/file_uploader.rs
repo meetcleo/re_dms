@@ -75,7 +75,7 @@ impl FileUploader {
 
                 logger_debug!(
                     Some(wal_file.file_number),
-                    Some(file_struct.table_name.clone()),
+                    Some(&file_struct.table_name),
                     &format!("file_length:{} file_name:{}", meta.len(), file_name)
                 );
                 let put_request = PutObjectRequest {
@@ -92,7 +92,7 @@ impl FileUploader {
                     Ok(_result) => {
                         logger_info!(
                             Some(wal_file.file_number),
-                            Some(file_struct.table_name.clone()),
+                            Some(&file_struct.table_name),
                             &format!("uploaded_file:{}", remote_filename)
                         );
                     }

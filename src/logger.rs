@@ -1,4 +1,4 @@
-use crate::parser::TableName;
+// use crate::parser::String;
 use log::{debug, error, info};
 
 pub struct Logger {}
@@ -48,32 +48,30 @@ macro_rules! logger_panic {
 
 // lets structure our logger so that we can grep our logs more easily
 impl Logger {
-    pub fn info(wal_number: Option<u64>, table_name: Option<TableName>, tag: &str, message: &str) {
+    pub fn info(wal_number: Option<u64>, table_name: Option<&String>, tag: &str, message: &str) {
         info!(
             "{}",
             Self::structured_format(wal_number, table_name, tag, message)
         );
     }
 
-    #[allow(dead_code)]
-    pub fn error(wal_number: Option<u64>, table_name: Option<TableName>, tag: &str, message: &str) {
+    pub fn error(wal_number: Option<u64>, table_name: Option<&String>, tag: &str, message: &str) {
         error!(
             "{}",
             Self::structured_format(wal_number, table_name, tag, message)
         );
     }
 
-    pub fn debug(wal_number: Option<u64>, table_name: Option<TableName>, tag: &str, message: &str) {
+    pub fn debug(wal_number: Option<u64>, table_name: Option<&String>, tag: &str, message: &str) {
         debug!(
             "{}",
             Self::structured_format(wal_number, table_name, tag, message)
         );
     }
 
-    #[allow(dead_code)]
     pub fn structured_panic(
         wal_number: Option<u64>,
-        table_name: Option<TableName>,
+        table_name: Option<&String>,
         tag: &str,
         message: &str,
     ) {
@@ -84,7 +82,7 @@ impl Logger {
 
     pub fn structured_format(
         wal_number: Option<u64>,
-        table_name: Option<TableName>,
+        table_name: Option<&String>,
         tag: &str,
         message: &str,
     ) -> String {
