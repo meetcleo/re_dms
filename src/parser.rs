@@ -541,7 +541,7 @@ impl Parser {
         column_vector
     }
 
-    fn parse_column<'a>(&self, string: &'a str, table_name: TableName) -> (Column, &'a str) {
+    fn parse_column<'a>(&self, string: &'a str, _table_name: TableName) -> (Column, &'a str) {
         let re = &PARSE_COLUMN_REGEX;
         let captures = re
             .captures(string)
