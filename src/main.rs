@@ -2,7 +2,7 @@
 #![deny(warnings)]
 
 use lazy_static::lazy_static;
-use std::io::{BufRead, BufReader};
+use std::io::{self, BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
@@ -22,6 +22,8 @@ mod parser;
 mod wal_file_manager;
 
 use file_uploader_threads::DEFAULT_CHANNEL_SIZE;
+
+use either::Either;
 
 lazy_static! {
     static ref OUTPUT_WAL_DIRECTORY: String =
@@ -63,26 +65,17 @@ async fn main() {
     // for logging
     parser.register_wal_number(wal_file_manager.current_wal().file_number);
 
-    let child = Command::new(PG_RECVLOGICAL_PATH.clone())
-        .args(&[
-            "--create-slot",
-            "--start",
-            "--if-not-exists",
-            "--fsync-interval=0",
-            "--file=-",
-            "--plugin=test_decoding",
-            &format!("--slot={}", *REPLICATION_SLOT),
-            &format!("--dbname={}", *SOURCE_CONNECTION_STRING),
-        ])
-        .stdin(Stdio::null())
-        .stderr(Stdio::inherit())
-        .stdout(Stdio::piped())
-        .spawn()
-        .expect("Failed to execute pg_recvlogical");
-    let stdout = child
-        .stdout
-        .expect("Failed to get stdout for pg_recvlogical");
-    for line in BufReader::new(stdout).lines() {
+    // need to define this at this level so it lives long enough
+    let stdin = io::stdin();
+    let locked_stdin = stdin.lock();
+
+    let buffered_reader = if false {
+        Either::Left(get_buffered_reader_process())
+    } else {
+        Either::Right(locked_stdin)
+    };
+
+    for line in buffered_reader.lines() {
         if let Ok(ip) = line {
             let wal_file_manager_result = wal_file_manager.next_line(&ip);
             let parsed_line = parser.parse(&ip);
@@ -138,4 +131,32 @@ async fn drain_collector_and_transmit(
             .await
             .expect("Error draining collector and sending to channel");
     }
+}
+
+// enum BufferedReaderOptions {
+//     Process,
+//     Stdin,
+// }
+
+fn get_buffered_reader_process() -> BufReader<std::process::ChildStdout> {
+    let child = Command::new(PG_RECVLOGICAL_PATH.clone())
+        .args(&[
+            "--create-slot",
+            "--start",
+            "--if-not-exists",
+            "--fsync-interval=0",
+            "--file=-",
+            "--plugin=test_decoding",
+            &format!("--slot={}", *REPLICATION_SLOT),
+            &format!("--dbname={}", *SOURCE_CONNECTION_STRING),
+        ])
+        .stdin(Stdio::null())
+        .stderr(Stdio::inherit())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("Failed to execute pg_recvlogical");
+    let stdout = child
+        .stdout
+        .expect("Failed to get stdout for pg_recvlogical");
+    BufReader::new(stdout)
 }
