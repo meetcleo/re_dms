@@ -453,7 +453,7 @@ impl DatabaseWriter {
     fn column_name_list(&self, columns: &Vec<ColumnInfo>) -> String {
         columns
             .iter()
-            .map(|x| x.column_name().replace("\"", ""))
+            .map(|x| format!("\"{}\"", x.column_name().replace("\"", ""))) // replace any quotes and wrap in quotes
             .collect::<Vec<_>>()
             .join(",")
     }
