@@ -63,7 +63,7 @@ Docs on `pg_recvlogical` [here](https://www.postgresql.org/docs/10/app-pgrecvlog
 
 ## Deploying to EC2
 
-### Pre-reqsuisites
+### Pre-requisites
 
 1. Have ansible installed locally
 1. Have Docker running locally
