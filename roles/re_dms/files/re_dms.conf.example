@@ -19,5 +19,5 @@ RUST_LOG=info
 PG_RECVLOGICAL_PATH=/usr/lib/postgresql/10/bin/pg_recvlogical
 SOURCE_CONNECTION_STRING=
 REPLICATION_SLOT=re_dms
-# comma separated e.g. TABLE_BLACKLIST="schema_migrations,foobars"
+# comma separated e.g. TABLE_BLACKLIST="public.schema_migrations,some_other_schema.foobars"
 TABLE_BLACKLIST=
