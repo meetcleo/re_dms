@@ -270,6 +270,15 @@ impl WalFileManager {
         self.current_wal_file.clone()
     }
     fn swap_wal(&mut self) {
+        logger_info!(
+            Some(self.current_wal_file_number),
+            None,
+            &format!(
+                "swapping_wal swap_wal_elapsed:{:?} last_swapped_wal:{:?}",
+                self.last_swapped_wal.elapsed(),
+                self.last_swapped_wal
+            )
+        );
         self.current_wal_file.flush();
         self.current_wal_file_number = self.current_wal_file_number + 1;
         self.last_swapped_wal = Instant::now();
@@ -287,7 +296,7 @@ impl WalFileManager {
         let should_swap_wal_time =
             self.last_swapped_wal.elapsed() >= Duration::new(*SECONDS_UNTIL_WAL_SWITCH, 0);
         if should_swap_wal_time {
-            logger_info!(
+            logger_debug!(
                 Some(self.current_wal_file_number),
                 None,
                 &format!(
@@ -300,7 +309,7 @@ impl WalFileManager {
         let current_wal_bytes = self.current_wal_bytes();
         let should_swap_wal_bytes = current_wal_bytes >= *MAX_BYTES_FOR_WAL_SWITCH;
         if should_swap_wal_bytes {
-            logger_info!(
+            logger_debug!(
                 Some(self.current_wal_file_number),
                 None,
                 &format!("current_wal_bytes:{:?}", current_wal_bytes)
