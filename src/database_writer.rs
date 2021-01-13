@@ -71,10 +71,8 @@ impl DatabaseWriter {
             }
         };
         let client = self
-            .connection_pool
-            .get()
-            .await
-            .map_err(DatabaseWriterError::PoolError)?;
+            .get_connection_from_pool(wal_file_number, &table_name)
+            .await?;
 
         self.execute_single_query(
             &client,
@@ -110,6 +108,25 @@ impl DatabaseWriter {
         )
     }
 
+    async fn get_connection_from_pool(
+        &self,
+        wal_file_number: u64,
+        table_name: &TableName,
+    ) -> Result<Client, DatabaseWriterError> {
+        let client = self.connection_pool.get().await;
+        match client {
+            Ok(ok) => Ok(ok),
+            Err(err) => {
+                logger_error!(
+                    Some(wal_file_number),
+                    Some(table_name),
+                    &format!("error_getting_connection:{:?}", err)
+                );
+                Err(err).map_err(DatabaseWriterError::PoolError)
+            }
+        }
+    }
+
     pub async fn apply_s3_changes(
         &self,
         s3_file: &mut CleoS3File,
@@ -126,10 +143,8 @@ impl DatabaseWriter {
         );
 
         let client = self
-            .connection_pool
-            .get()
-            .await
-            .map_err(DatabaseWriterError::PoolError)?;
+            .get_connection_from_pool(wal_file_number, table_name)
+            .await?;
 
         // let transaction = client.transaction().await.unwrap();
         let transaction = client;
@@ -159,12 +174,14 @@ impl DatabaseWriter {
             aws_access_key_id = access_key_id,
             secret_access_key = secret_access_key
         );
+        let column_list = self.column_name_list(&s3_file.columns);
         // no gzip
         let copy_to_staging_table = format!(
-            "copy \"{staging_name}\" from '{remote_filepath}' CREDENTIALS '{credentials_string}' GZIP CSV TRUNCATECOLUMNS IGNOREHEADER 1 DELIMITER ',' NULL as '\\0' compupdate off statupdate off",
+            "copy \"{staging_name}\" ({column_list}) from '{remote_filepath}' CREDENTIALS '{credentials_string}' GZIP CSV TRUNCATECOLUMNS IGNOREHEADER 1 DELIMITER ',' NULL as '\\0' compupdate off statupdate off",
             staging_name = &staging_name,
+            column_list = &column_list,
             remote_filepath = &remote_filepath,
-            credentials_string = &credentials_string
+            credentials_string = &credentials_string,
         );
 
         let data_migration_query_string = self.query_for_change_kind(
@@ -431,6 +448,14 @@ impl DatabaseWriter {
             column_name = column_info.column_name().replace("\"", ""),
             column_type = self.column_type_mapping(column_info.column_type()).as_str()
         )
+    }
+
+    fn column_name_list(&self, columns: &Vec<ColumnInfo>) -> String {
+        columns
+            .iter()
+            .map(|x| x.column_name().replace("\"", ""))
+            .collect::<Vec<_>>()
+            .join(",")
     }
 
     fn query_for_change_kind(
