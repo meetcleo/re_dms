@@ -1,7 +1,0 @@
----
-- name: Start pg_recvlogical
-  systemd:
-    name: pg_recvlogical
-    state: restarted
-    enabled: yes
-    daemon_reload: yes

@@ -133,12 +133,26 @@ impl ChangeSet {
             ..
         }) = &self.changes
         {
-            assert_eq!(new_columns.len(), old_columns.len());
+            assert_eq!(
+                new_columns.len(),
+                old_columns.len(),
+                "discrepancy in number of columns for table {}: {} vs {}",
+                table_name,
+                new_columns.len(),
+                old_columns.len()
+            );
             let untoasted_columns: Vec<Column> = new_columns
                 .iter()
                 .zip(old_columns.iter())
                 .map(|(new_column, old_column)| {
-                    debug_assert_eq!(new_column.column_info(), old_column.column_info());
+                    debug_assert_eq!(
+                        new_column.column_info(),
+                        old_column.column_info(),
+                        "discrepancy in column info for {}.{} vs {}",
+                        table_name,
+                        new_column,
+                        old_column
+                    );
                     if new_column.is_unchanged_toast_column() {
                         old_column
                     } else {
@@ -1073,7 +1087,7 @@ mod tests {
         let change_1 = ParsedLine::ChangedData {
             kind: ChangeKind::Delete,
             table_name: table_name.clone(),
-            columns: changed_columns_1.clone(),
+            columns: vec![changed_columns_1[0].clone()],
         };
         let change_2 = ParsedLine::ChangedData {
             kind: ChangeKind::Insert,
