@@ -4,6 +4,8 @@ use regex::Regex;
 use std::collections::HashSet;
 use std::fmt;
 
+use std::env;
+
 #[allow(unused_imports)]
 use crate::{function, logger_debug, logger_error, logger_info, logger_panic};
 
@@ -15,6 +17,7 @@ lazy_static! {
     // leave these as unwrap
     static ref PARSE_COLUMN_REGEX: regex::Regex = Regex::new(r"(^[^\[^\]]+)\[([^:]+)\]:").unwrap();
     static ref COLUMN_TYPE_REGEX: regex::Regex = Regex::new(r"^.+\[\]$").unwrap();
+    static ref TABLE_BLACKLIST: Vec<String> = env::var("TABLE_BLACKLIST").unwrap_or("".to_owned()).split(",").map(|x| x.to_owned()).collect();
 }
 
 // for tablename
@@ -666,7 +669,14 @@ impl Parser {
             self.parse_state.currently_parsing = Some(changed_data);
             ParsedLine::ContinueParse
         } else {
-            changed_data
+            if TABLE_BLACKLIST.contains(table_name.as_ref()) {
+                // we don't save any parse state, since we're skipping this changed_data and dropping it on the ground
+                // we still want this to be after the continue parse line so we can
+                // handle newlines in our blacklisted tables
+                ParsedLine::ContinueParse
+            } else {
+                changed_data
+            }
         };
         logger_debug!(
             self.parse_state.wal_file_number,
