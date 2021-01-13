@@ -1,4 +1,10 @@
 ---
+# Needs to use client v10 https://forums.aws.amazon.com/thread.jspa?messageID=936554
+- name: Install postgresql-client
+  package:
+    name: postgresql-client-10
+    state: present
+
 - name: create re_dms group
   group:
     name: re_dms
@@ -12,15 +18,6 @@
     append: yes
     state: present
     create_home: no
-
-- name: Copy socket systemd config file to server
-  template:
-    src: re_dms.socket
-    dest: /etc/systemd/system
-    owner: root
-    group: root
-  notify:
-    - Start re_dms
 
 - name: Copy systemd config file to server
   copy:

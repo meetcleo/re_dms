@@ -52,9 +52,9 @@ Build re_dms:
 
 `$ cargo build --release`
 
-Start logical replication, piping it into re_dms:
+Starts re_dms, which will start logical replication using `pg_recvlogical`:
 
-`$ pg_recvlogical --create-slot --start --if-not-exists --fsync-interval=0 --file=- --plugin=test_decoding --slot=re_dms -d postgresql://<you>@localhost/cleo_development | ./target/release/re_dms`
+`$ ./target/release/re_dms`
 
 Docs on `pg_recvlogical` [here](https://www.postgresql.org/docs/10/app-pgrecvlogical.html)
 
@@ -68,16 +68,14 @@ Docs on `pg_recvlogical` [here](https://www.postgresql.org/docs/10/app-pgrecvlog
 1. Have ansible installed locally
 1. Have Docker running locally
 1. Have a target instance with the following:
-    1. Debian or Ubuntu (based on `Stretch`) installed
+    1. Debian or Ubuntu (based on `Buster`) installed
     1. Writable directory (ideally with persistent storage) for keeping WAL files
-    1. SSL headers (e.g. `libssl1.1_1.1.0g-2ubuntu4_amd64.deb`)
     1. Ability to communicate with source and target DB
 1. SSH config for target instance, name of connection specified in `hosts` file (copy from `hosts.example`)
 1. `roles/re_dms/files/re_dms.conf.example` copied to `roles/re_dms/files/re_dms.conf`, including the following:
     1. Write creds for Redshift
     1. S3 bucket for storing changes to be applied
     1. AWS creds for writing to S3 bucket
-1. `roles/pg_recvlogical/files/pg_recvlogical.conf.example` copied to `roles/pg_recvlogical/files/pg_recvlogical.conf`, including the following:
     1. Connection string to source DB, source DB needs to have logical replication enabled - user needs to either be a superuser or have replication privileges
     1. Name of the replication slot to be used (one will be created if it does not already exists)
 
@@ -99,26 +97,11 @@ Clean any build artefacts:
 
 ## Runbook
 
-Checking the status of the re_dms service:
+Managing the status|start|stop|restart of the re_dms service:
 
-`$ sudo systemctl status re_dms`
+`$ sudo systemctl status|start|stop|restart re_dms`
 
 Tailing the logs of the re_dms service:
 
 `$ sudo journalctl -f -u re_dms`
 
-Checking the status of the re_dms socket:
-
-`$ sudo systemctl status re_dms.socket`
-
-Checking the status of the pg_recvlogical service:
-
-`$ sudo systemctl status pg_recvlogical`
-
-Tailing the logs of the pg_recvlogical service:
-
-`$ sudo journalctl -f -u pg_recvlogical`
-
-Managing the services:
-
-`$ sudo systemctl start|stop|restart replication.target`
