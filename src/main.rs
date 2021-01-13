@@ -2,8 +2,9 @@
 #![deny(warnings)]
 
 use lazy_static::lazy_static;
-use std::io::{self, BufRead};
+use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
+use std::process::{Command, Stdio};
 // use log::{debug, error, log_enabled, info, Level};
 
 use dotenv::dotenv;
@@ -25,6 +26,12 @@ use file_uploader_threads::DEFAULT_CHANNEL_SIZE;
 lazy_static! {
     static ref OUTPUT_WAL_DIRECTORY: String =
         std::env::var("OUTPUT_WAL_DIRECTORY").expect("OUTPUT_WAL_DIRECTORY env is not set");
+    static ref PG_RECVLOGICAL_PATH: String =
+        std::env::var("PG_RECVLOGICAL_PATH").expect("PG_RECVLOGICAL_PATH env is not set");
+    static ref REPLICATION_SLOT: String =
+        std::env::var("REPLICATION_SLOT").expect("REPLICATION_SLOT env is not set");
+    static ref SOURCE_CONNECTION_STRING: String =
+        std::env::var("SOURCE_CONNECTION_STRING").expect("SOURCE_CONNECTION_STRING env is not set");
 }
 
 #[tokio::main]
@@ -54,8 +61,28 @@ async fn main() {
     );
     collector.register_wal_file(Some(wal_file_manager.current_wal()));
 
-    for line in io::stdin().lock().lines() {
+    let child = Command::new(PG_RECVLOGICAL_PATH.clone())
+        .args(&[
+            "--create-slot",
+            "--start",
+            "--if-not-exists",
+            "--fsync-interval=0",
+            "--file=-",
+            "--plugin=test_decoding",
+            &format!("--slot={}", *REPLICATION_SLOT),
+            &format!("--dbname={}", *SOURCE_CONNECTION_STRING),
+        ])
+        .stdin(Stdio::null())
+        .stderr(Stdio::inherit())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("Failed to execute pg_recvlogical");
+    let stdout = child
+        .stdout
+        .expect("Failed to get stdout for pg_recvlogical");
+    for line in BufReader::new(stdout).lines() {
         if let Ok(ip) = line {
+            let wal_file_manager_result = wal_file_manager.next_line(&ip);
             let parsed_line = parser.parse(&ip);
             match parsed_line {
                 parser::ParsedLine::ContinueParse => {} // Intentionally left blank, continue parsing
@@ -69,9 +96,7 @@ async fn main() {
                     }
                 }
             }
-            if let wal_file_manager::WalLineResult::SwapWal(wal_file) =
-                wal_file_manager.next_line(&ip)
-            {
+            if let wal_file_manager::WalLineResult::SwapWal(wal_file) = wal_file_manager_result {
                 // drain the collector of all it's tables, and send to file transmitter
                 drain_collector_and_transmit(&mut collector, &mut file_transmitter).await;
                 collector.register_wal_file(Some(wal_file.clone()));
