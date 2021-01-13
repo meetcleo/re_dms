@@ -134,7 +134,11 @@ impl DatabaseWriterThreads {
                     }
                 }
             } else {
-                logger_info!(last_wal_number, last_table_name, "channel_hung_up");
+                logger_info!(
+                    last_wal_number,
+                    last_table_name.as_deref(),
+                    "channel_hung_up"
+                );
                 break;
             }
         }

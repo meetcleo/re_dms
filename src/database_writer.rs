@@ -121,7 +121,7 @@ impl DatabaseWriter {
         let remote_filepath = s3_file.remote_path();
         logger_info!(
             Some(wal_file_number),
-            Some(table_name.clone()),
+            Some(&table_name),
             &format!("begin_import:{}", remote_filepath)
         );
 
@@ -225,7 +225,7 @@ impl DatabaseWriter {
 
         logger_info!(
             Some(wal_file_number),
-            Some(table_name.clone()),
+            Some(&table_name),
             &format!("finished_importing:{}", &remote_filepath)
         );
 
@@ -244,12 +244,12 @@ impl DatabaseWriter {
     ) -> Result<(), DatabaseWriterError> {
         logger_info!(
             Some(wal_file_number),
-            Some(table_name.clone()),
+            Some(&table_name),
             &format!("about_to_execute:{}", log_tag)
         );
         logger_debug!(
             Some(wal_file_number),
-            Some(table_name.clone()),
+            Some(&table_name),
             &format!(
                 "about_to_execute:{} full_query:{}",
                 log_tag, query_to_execute
@@ -260,7 +260,7 @@ impl DatabaseWriter {
             Ok(..) => {
                 logger_info!(
                     Some(wal_file_number),
-                    Some(table_name),
+                    Some(&table_name),
                     &format!("successfully_executed:{}", log_tag)
                 );
                 Ok(())
@@ -268,7 +268,7 @@ impl DatabaseWriter {
             Err(err) => {
                 logger_error!(
                     Some(wal_file_number),
-                    Some(table_name),
+                    Some(&table_name),
                     &format!("error_executing:{} err:{:?}", log_tag, err)
                 );
                 Err(err).map_err(DatabaseWriterError::TokioError)
@@ -303,21 +303,21 @@ impl DatabaseWriter {
             if s3_file.kind == ChangeKind::Delete {
                 logger_error!(
                     Some(wal_file_number),
-                    Some(table_name.clone()),
+                    Some(&table_name),
                     "delete_when_theres_no_table"
                 );
                 return Ok(true);
             } else if s3_file.kind == ChangeKind::Update {
                 logger_panic!(
                     Some(wal_file_number),
-                    Some(table_name.clone()),
+                    Some(&table_name),
                     "update_when_theres_no_table"
                 );
             }
 
             logger_info!(
                 Some(wal_file_number),
-                Some(table_name.clone()),
+                Some(&table_name),
                 "creating_table_that_doesnt_exist"
             );
 

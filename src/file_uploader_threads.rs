@@ -205,7 +205,7 @@ impl FileUploaderThreads {
             } else {
                 logger_info!(
                     last_wal_number,
-                    last_table_name,
+                    last_table_name.as_deref(),
                     "file_uploader_channel_finished"
                 );
                 drop(result_sender);

@@ -257,7 +257,7 @@ impl FileWriter {
         if self.insert_file.is_some() {
             logger_info!(
                 Some(self.wal_file.file_number),
-                Some(self.table_name.clone()),
+                Some(&self.table_name),
                 &format!(
                     "finished_writing:{}",
                     self.insert_file
@@ -272,7 +272,7 @@ impl FileWriter {
             if x.is_some() {
                 logger_info!(
                     Some(self.wal_file.file_number),
-                    Some(self.table_name.clone()),
+                    Some(&self.table_name),
                     &format!(
                         "finished_writing:{}",
                         x.file_name.to_str().expect("Unprintable file name")
@@ -284,7 +284,7 @@ impl FileWriter {
         if self.delete_file.is_some() {
             logger_info!(
                 Some(self.wal_file.file_number),
-                Some(self.table_name.clone()),
+                Some(&self.table_name),
                 &format!(
                     "finished_writing:{}",
                     self.delete_file

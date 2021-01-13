@@ -485,7 +485,7 @@ impl Parser {
 
         logger_debug!(
             self.parse_state.wal_file_number,
-            Some(table_name.clone()),
+            Some(&table_name),
             &format!("kind_string:{}", kind_string)
         );
 
@@ -567,7 +567,7 @@ impl Parser {
 
         logger_debug!(
             self.parse_state.wal_file_number,
-            Some(table_name.clone()),
+            Some(&table_name),
             &format!("column_name:{} column_type:{}", column_name, column_type)
         );
 
@@ -589,7 +589,7 @@ impl Parser {
         };
         logger_debug!(
             self.parse_state.wal_file_number,
-            Some(table_name),
+            Some(&table_name),
             &format!("column_parsed:{:?}", column)
         );
         (column, rest)
@@ -673,7 +673,7 @@ impl Parser {
         };
         logger_debug!(
             self.parse_state.wal_file_number,
-            Some(table_name),
+            Some(&table_name),
             &format!("returning_change_struct:{:?}", result)
         );
         result
