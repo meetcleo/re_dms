@@ -3,7 +3,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 
 #[allow(unused_imports)]
-use log::{debug, error, info, log_enabled, Level};
+use crate::{function, logger_debug, logger_error, logger_info, logger_panic};
 
 use crate::database_writer::DatabaseWriter;
 use crate::exponential_backoff::*;
@@ -49,10 +49,10 @@ impl DatabaseWriterThreads {
                     ));
                 }
             } else {
-                info!("channel hung up main");
+                logger_info!(None, None, "main_channel_hung_up");
                 database_uploader_stream.join_all_table_threads().await;
 
-                info!("finished waiting on threads");
+                logger_info!(None, None, "finished_waiting_on_table_threads");
                 break;
             }
         }
@@ -87,11 +87,13 @@ impl DatabaseWriterThreads {
         uploader: Arc<DatabaseWriter>,
     ) {
         let mut last_table_name = None;
+        let mut last_wal_number = None;
         loop {
             // need to do things this way rather than a match for the borrow checker
             let received = receiver.recv().await;
             if let Some(ref uploader_stage_result) = received {
                 let table_name = uploader_stage_result.table_name();
+                last_wal_number = Some(uploader_stage_result.wal_file_number());
                 // so we can register an error if we fail
                 let mut wal_file = uploader_stage_result.wal_file();
                 last_table_name = Some(table_name);
@@ -108,8 +110,13 @@ impl DatabaseWriterThreads {
                             let mut mutable_s3_file = (*cleo_s3_file).clone();
                             uploader.apply_s3_changes(&mut mutable_s3_file).await?;
                         }
-                        UploaderStageResult::DdlChange(ddl_change, _) => {
-                            uploader.handle_ddl(&ddl_change).await?;
+                        UploaderStageResult::DdlChange(ddl_change, wal_file) => {
+                            // I don't think we need to handle a ddl change being the last
+                            // change in a wal file, since it relies on a difference, so there must be a line after it
+                            // so we don't need to call maybe_remove_wal_file();
+                            uploader
+                                .handle_ddl(&ddl_change, wal_file.file_number)
+                                .await?;
                         }
                     };
                     Ok(())
@@ -127,7 +134,11 @@ impl DatabaseWriterThreads {
                     }
                 }
             } else {
-                info!("channel hung up: {:?}", last_table_name);
+                logger_info!(
+                    last_wal_number,
+                    last_table_name.as_deref(),
+                    "channel_hung_up"
+                );
                 break;
             }
         }

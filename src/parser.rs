@@ -1,11 +1,11 @@
-#[allow(unused_imports)]
-use log::{debug, error, info, log_enabled, Level};
-use std::fmt;
-
 use internment::ArcIntern;
 use lazy_static::lazy_static;
 use regex::Regex;
 use std::collections::HashSet;
+use std::fmt;
+
+#[allow(unused_imports)]
+use crate::{function, logger_debug, logger_error, logger_info, logger_panic};
 
 pub type TableName = ArcIntern<String>;
 pub type ColumnName = ArcIntern<String>;
@@ -37,6 +37,7 @@ struct ParserConfig {
 }
 struct ParserState {
     currently_parsing: Option<ParsedLine>,
+    wal_file_number: Option<u64>,
 }
 
 // define config later
@@ -341,7 +342,6 @@ impl ColumnValue {
             &string[1..]
         };
 
-        // debug!("total_index {}", total_index);
         while total_index + 1 <= without_first_quote.len() {
             let found_index_option = without_first_quote[total_index..].find("'");
             match found_index_option {
@@ -405,6 +405,7 @@ impl Parser {
             config: ParserConfig { include_xids },
             parse_state: ParserState {
                 currently_parsing: None,
+                wal_file_number: None,
             },
         }
     }
@@ -430,7 +431,11 @@ impl Parser {
             let xid: i64 = rest_of_string
                 .parse()
                 .expect("Unable to parse BEGIN xid as i64");
-            debug!("parsed begin {}", xid);
+            logger_debug!(
+                self.parse_state.wal_file_number,
+                None,
+                &format!("xid:{}", xid)
+            );
             ParsedLine::Begin(xid)
         } else {
             ParsedLine::Begin(0)
@@ -447,7 +452,11 @@ impl Parser {
             let xid: i64 = rest_of_string
                 .parse()
                 .expect("Unable to parse COMMIT xid as i64");
-            debug!("parsed commit {}", xid);
+            logger_debug!(
+                self.parse_state.wal_file_number,
+                None,
+                &format!("xid:{}", xid)
+            );
             ParsedLine::Commit(xid)
         } else {
             ParsedLine::Commit(0)
@@ -460,7 +469,7 @@ impl Parser {
         let string_without_tag = &string[SIZE_OF_TABLE_TAG..string.len()];
         // we assume tables can't have colons in their names
         // fuck you if you put a colon in a table name, you psychopath
-        let table_name = slice_until_colon_or_end(string_without_tag);
+        let table_name = TableName::new(slice_until_colon_or_end(string_without_tag).into());
         // + 2 for colon + space
         assert_eq!(
             &string_without_tag[table_name.len()..table_name.len() + 2],
@@ -477,8 +486,6 @@ impl Parser {
 
         let kind = self.parse_kind(kind_string);
 
-        debug!("table: {:?} change: {:?}", table_name, kind_string);
-
         // + 2 for colon + space
         assert_eq!(
             &string_without_table[kind_string.len()..kind_string.len() + 2],
@@ -490,7 +497,7 @@ impl Parser {
         let string_without_kind =
             &string_without_table[kind_string.len() + 2..string_without_table.len()];
 
-        let columns = self.parse_columns(string_without_kind);
+        let columns = self.parse_columns(string_without_kind, table_name.clone());
         self.handle_parse_changed_data(table_name, kind, columns)
     }
 
@@ -498,7 +505,11 @@ impl Parser {
         // "pg_recvlogical: could not send replication command..."
         const SIZE_OF_TAG: usize = "pg_recvlogical: ".len();
         let rest_of_string = &string[SIZE_OF_TAG..string.len()];
-        info!("parsed pg_rcvlogical message {}", rest_of_string);
+        logger_info!(
+            self.parse_state.wal_file_number,
+            None,
+            &format!("parsed_pg_rcvlogical_message:{}", rest_of_string)
+        );
         ParsedLine::PgRcvlogicalMsg(rest_of_string.to_string())
     }
 
@@ -519,18 +530,18 @@ impl Parser {
         }
     }
 
-    fn parse_columns(&self, string: &str) -> Vec<Column> {
+    fn parse_columns(&self, string: &str, table_name: TableName) -> Vec<Column> {
         let mut column_vector = Vec::new();
         let mut remaining_string = string;
         while remaining_string.len() > 0 {
-            let (column, rest_of_string) = self.parse_column(remaining_string);
+            let (column, rest_of_string) = self.parse_column(remaining_string, table_name.clone());
             remaining_string = rest_of_string;
             column_vector.push(column);
         }
         column_vector
     }
 
-    fn parse_column<'a>(&self, string: &'a str) -> (Column, &'a str) {
+    fn parse_column<'a>(&self, string: &'a str, _table_name: TableName) -> (Column, &'a str) {
         let re = &PARSE_COLUMN_REGEX;
         let captures = re
             .captures(string)
@@ -551,9 +562,11 @@ impl Parser {
         let string_without_column_type =
             &string[captures.get(0).map_or("", |m| m.as_str()).len() + 0..];
 
-        debug!("column_name: {}", column_name);
-        debug!("column_type: {}", column_type);
-        debug!("string_without_column_type: {}", string_without_column_type);
+        // logger_debug!(
+        //     self.parse_state.wal_file_number,
+        //     Some(&table_name),
+        //     &format!("column_name:{} column_type:{}", column_name, column_type)
+        // );
 
         let (column_value, rest) =
             ColumnValue::parse(string_without_column_type, column_type, false);
@@ -571,7 +584,11 @@ impl Parser {
                 value: column_value,
             },
         };
-        debug!("parse_column: returned: {:?}", column);
+        // logger_debug!(
+        //     self.parse_state.wal_file_number,
+        //     Some(&table_name),
+        //     &format!("column_parsed:{:?}", column)
+        // );
         (column, rest)
     }
 
@@ -613,12 +630,12 @@ impl Parser {
                         columns.push(updated_column);
                         // because there could be multiple newlines we need to check again
                         if self.column_is_incomplete(&columns) {
-                            return self.handle_parse_changed_data(table_name.as_ref(), kind, columns)
+                            return self.handle_parse_changed_data(table_name, kind, columns)
                         } else {
-                            let mut more_columns = self.parse_columns(rest);
+                            let mut more_columns = self.parse_columns(rest, table_name.clone());
                             // append modifies in place
                             columns.append(&mut more_columns);
-                            self.handle_parse_changed_data(table_name.as_ref(), kind, columns)
+                            self.handle_parse_changed_data(table_name, kind, columns)
                         }
                     },
                     _ => panic!("trying to parse an incomplete_column that's not a Column::IncompleteColumn {:?}", incomplete_column)
@@ -633,13 +650,13 @@ impl Parser {
 
     fn handle_parse_changed_data(
         &mut self,
-        table_name: &str,
+        table_name: TableName,
         kind: ChangeKind,
         columns: Vec<Column>,
     ) -> ParsedLine {
         let incomplete_parse = self.column_is_incomplete(&columns);
         let changed_data = ParsedLine::ChangedData {
-            table_name: ArcIntern::new(table_name.to_owned()),
+            table_name: table_name.clone(),
             kind: kind,
             columns: columns,
         };
@@ -651,8 +668,16 @@ impl Parser {
         } else {
             changed_data
         };
-        debug!("returning change struct: {:?}", result);
+        logger_debug!(
+            self.parse_state.wal_file_number,
+            Some(&table_name),
+            &format!("returning_change_struct:{:?}", result)
+        );
         result
+    }
+
+    pub fn register_wal_number(&mut self, wal_file_number: u64) {
+        self.parse_state.wal_file_number = Some(wal_file_number);
     }
 }
 
@@ -773,8 +798,6 @@ mod tests {
             }
             cnt
         }
-
-        // info!("a {:?}", a);
 
         count(a) == count(b)
     }
