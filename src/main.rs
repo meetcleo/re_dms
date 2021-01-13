@@ -1,6 +1,7 @@
 #![feature(str_split_once)]
 #![deny(warnings)]
 
+use clap::{App, Arg};
 use lazy_static::lazy_static;
 use std::io::{self, BufRead, BufReader};
 use std::path::PathBuf;
@@ -40,6 +41,19 @@ lazy_static! {
 async fn main() {
     dotenv().ok();
     env_logger::init();
+
+    let arg_matches = App::new("re_dms")
+        .version("0.1")
+        .author("MeetCleo. <team@meetcleo.com>")
+        .about("replication from postgres to redshift")
+        .arg(
+            Arg::with_name("read_from_stdin")
+                .short("-")
+                .long("stdin")
+                .help("Makes the process read from stdin instead of starting a subprocess"),
+        )
+        .get_matches();
+
     let mut parser = parser::Parser::new(true);
     let mut collector = change_processing::ChangeProcessing::new();
     // initialize our channels
@@ -69,7 +83,9 @@ async fn main() {
     let stdin = io::stdin();
     let locked_stdin = stdin.lock();
 
-    let buffered_reader = if false {
+    // use either for match arms returning different types
+    // very handy
+    let buffered_reader = if !arg_matches.is_present("read_from_stdin") {
         Either::Left(get_buffered_reader_process())
     } else {
         Either::Right(locked_stdin)
