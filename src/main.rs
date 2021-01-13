@@ -149,11 +149,6 @@ async fn drain_collector_and_transmit(
     }
 }
 
-// enum BufferedReaderOptions {
-//     Process,
-//     Stdin,
-// }
-
 fn get_buffered_reader_process() -> BufReader<std::process::ChildStdout> {
     let child = Command::new(PG_RECVLOGICAL_PATH.clone())
         .args(&[
