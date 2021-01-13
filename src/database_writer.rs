@@ -197,7 +197,30 @@ impl DatabaseWriter {
         match result {
             Ok(..) => {}
             Err(err) => {
-                panic!("copy_to_staging_table got error {:?}", err);
+                if let DatabaseWriterError::TokioError(tokio_error) = err {
+                    // https://github.com/sfackler/rust-postgres/blob/master/tokio-postgres/src/error/mod.rs
+                    // I can't find a better way to determine if something is a Kind::Db. since kind is private.
+                    let error_string = format!("{}", tokio_error);
+                    // we bail early if we have a db error here, as something is wrong.
+                    if error_string.starts_with("db error") {
+                        logger_panic!(
+                            Some(wal_file_number),
+                            Some(&table_name),
+                            &format!("copy_to_staging_table_got_error:{:?}", tokio_error)
+                        );
+                    } else {
+                        // we throw back up to kick in the retry mechanism
+                        // need to recreate it because it's partially moved
+                        // by our match
+                        Err(DatabaseWriterError::TokioError(tokio_error))?
+                    }
+                } else {
+                    logger_panic!(
+                        Some(wal_file_number),
+                        Some(&table_name),
+                        "non_tokio_error_from_execute_single_query"
+                    )
+                }
             }
         }
         self.execute_single_query(
