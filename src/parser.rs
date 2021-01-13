@@ -434,7 +434,6 @@ impl Parser {
             logger_debug!(
                 self.parse_state.wal_file_number,
                 None,
-                // "Parser::parse_begin",
                 &format!("xid:{}", xid)
             );
             ParsedLine::Begin(xid)
@@ -453,7 +452,11 @@ impl Parser {
             let xid: i64 = rest_of_string
                 .parse()
                 .expect("Unable to parse COMMIT xid as i64");
-            // Logger::debug("parsed commit {}", xid);
+            logger_debug!(
+                self.parse_state.wal_file_number,
+                None,
+                &format!("xid:{}", xid)
+            );
             ParsedLine::Commit(xid)
         } else {
             ParsedLine::Commit(0)
@@ -482,12 +485,6 @@ impl Parser {
         // TODO: split early here for truncate columns
 
         let kind = self.parse_kind(kind_string);
-
-        logger_debug!(
-            self.parse_state.wal_file_number,
-            Some(&table_name),
-            &format!("kind_string:{}", kind_string)
-        );
 
         // + 2 for colon + space
         assert_eq!(
@@ -565,11 +562,11 @@ impl Parser {
         let string_without_column_type =
             &string[captures.get(0).map_or("", |m| m.as_str()).len() + 0..];
 
-        logger_debug!(
-            self.parse_state.wal_file_number,
-            Some(&table_name),
-            &format!("column_name:{} column_type:{}", column_name, column_type)
-        );
+        // logger_debug!(
+        //     self.parse_state.wal_file_number,
+        //     Some(&table_name),
+        //     &format!("column_name:{} column_type:{}", column_name, column_type)
+        // );
 
         let (column_value, rest) =
             ColumnValue::parse(string_without_column_type, column_type, false);
@@ -587,11 +584,11 @@ impl Parser {
                 value: column_value,
             },
         };
-        logger_debug!(
-            self.parse_state.wal_file_number,
-            Some(&table_name),
-            &format!("column_parsed:{:?}", column)
-        );
+        // logger_debug!(
+        //     self.parse_state.wal_file_number,
+        //     Some(&table_name),
+        //     &format!("column_parsed:{:?}", column)
+        // );
         (column, rest)
     }
 
@@ -801,8 +798,6 @@ mod tests {
             }
             cnt
         }
-
-        // info!("a {:?}", a);
 
         count(a) == count(b)
     }
