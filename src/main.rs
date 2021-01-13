@@ -1,8 +1,9 @@
 #![feature(str_split_once)]
 #![deny(warnings)]
 
+use clap::{App, Arg};
 use lazy_static::lazy_static;
-use std::io::{BufRead, BufReader};
+use std::io::{self, BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
@@ -23,6 +24,8 @@ mod wal_file_manager;
 
 use file_uploader_threads::DEFAULT_CHANNEL_SIZE;
 
+use either::Either;
+
 lazy_static! {
     static ref OUTPUT_WAL_DIRECTORY: String =
         std::env::var("OUTPUT_WAL_DIRECTORY").expect("OUTPUT_WAL_DIRECTORY env is not set");
@@ -38,6 +41,19 @@ lazy_static! {
 async fn main() {
     dotenv().ok();
     env_logger::init();
+
+    let arg_matches = App::new("re_dms")
+        .version("0.1")
+        .author("MeetCleo. <team@meetcleo.com>")
+        .about("replication from postgres to redshift")
+        .arg(
+            Arg::with_name("read_from_stdin")
+                .short("-")
+                .long("stdin")
+                .help("Makes the process read from stdin instead of starting a subprocess"),
+        )
+        .get_matches();
+
     let mut parser = parser::Parser::new(true);
     let mut collector = change_processing::ChangeProcessing::new();
     // initialize our channels
@@ -63,26 +79,19 @@ async fn main() {
     // for logging
     parser.register_wal_number(wal_file_manager.current_wal().file_number);
 
-    let child = Command::new(PG_RECVLOGICAL_PATH.clone())
-        .args(&[
-            "--create-slot",
-            "--start",
-            "--if-not-exists",
-            "--fsync-interval=0",
-            "--file=-",
-            "--plugin=test_decoding",
-            &format!("--slot={}", *REPLICATION_SLOT),
-            &format!("--dbname={}", *SOURCE_CONNECTION_STRING),
-        ])
-        .stdin(Stdio::null())
-        .stderr(Stdio::inherit())
-        .stdout(Stdio::piped())
-        .spawn()
-        .expect("Failed to execute pg_recvlogical");
-    let stdout = child
-        .stdout
-        .expect("Failed to get stdout for pg_recvlogical");
-    for line in BufReader::new(stdout).lines() {
+    // need to define this at this level so it lives long enough
+    let stdin = io::stdin();
+    let locked_stdin = stdin.lock();
+
+    // use either for match arms returning different types
+    // very handy
+    let buffered_reader = if !arg_matches.is_present("read_from_stdin") {
+        Either::Left(get_buffered_reader_process())
+    } else {
+        Either::Right(locked_stdin)
+    };
+
+    for line in buffered_reader.lines() {
         if let Ok(ip) = line {
             let wal_file_manager_result = wal_file_manager.next_line(&ip);
             let parsed_line = parser.parse(&ip);
@@ -138,4 +147,27 @@ async fn drain_collector_and_transmit(
             .await
             .expect("Error draining collector and sending to channel");
     }
+}
+
+fn get_buffered_reader_process() -> BufReader<std::process::ChildStdout> {
+    let child = Command::new(PG_RECVLOGICAL_PATH.clone())
+        .args(&[
+            "--create-slot",
+            "--start",
+            "--if-not-exists",
+            "--fsync-interval=0",
+            "--file=-",
+            "--plugin=test_decoding",
+            &format!("--slot={}", *REPLICATION_SLOT),
+            &format!("--dbname={}", *SOURCE_CONNECTION_STRING),
+        ])
+        .stdin(Stdio::null())
+        .stderr(Stdio::inherit())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("Failed to execute pg_recvlogical");
+    let stdout = child
+        .stdout
+        .expect("Failed to get stdout for pg_recvlogical");
+    BufReader::new(stdout)
 }
