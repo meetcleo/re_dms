@@ -6,7 +6,7 @@ use serde::Deserialize;
 use std::env;
 
 #[allow(unused_imports)]
-use log::{debug, error, info, log_enabled, Level};
+use crate::{function, logger_debug, logger_error, logger_info, logger_panic};
 
 use crate::change_processing::DdlChange;
 use crate::file_uploader::CleoS3File;
@@ -56,7 +56,12 @@ impl DatabaseWriter {
             .expect("Unable to build database connection pool")
     }
 
-    pub async fn handle_ddl(&self, ddl_change: &DdlChange) -> Result<(), DatabaseWriterError> {
+    pub async fn handle_ddl(
+        &self,
+        ddl_change: &DdlChange,
+        wal_file_number: u64,
+    ) -> Result<(), DatabaseWriterError> {
+        let table_name = ddl_change.table_name();
         let alter_table_statement = match ddl_change {
             DdlChange::AddColumn(column_info, table_name) => {
                 self.add_column_statement(column_info, table_name)
@@ -65,19 +70,21 @@ impl DatabaseWriter {
                 self.remove_column_statement(column_info, table_name)
             }
         };
-        info!("alter table statement: {}", alter_table_statement.as_str());
         let client = self
             .connection_pool
             .get()
             .await
             .map_err(DatabaseWriterError::PoolError)?;
 
-        client
-            .execute(alter_table_statement.as_str(), &[])
-            .await
-            .map_err(DatabaseWriterError::TokioError)?;
+        self.execute_single_query(
+            &client,
+            alter_table_statement.as_str(),
+            &format!("alter_table_statement:{:?}", ddl_change),
+            table_name.clone(),
+            wal_file_number,
+        )
+        .await?;
 
-        info!("alter table finished: {}", alter_table_statement.as_str());
         Ok(())
     }
 
@@ -109,24 +116,23 @@ impl DatabaseWriter {
     ) -> Result<(), DatabaseWriterError> {
         let kind = &s3_file.kind;
         let table_name = &s3_file.table_name;
-        if [
-            "public.transaction_descriptions",
-            "public.user_relationships_timestamps",
-        ]
-        .contains(&table_name.as_str())
-        {
-            return Ok(());
-        }
+        let wal_file_number = s3_file.wal_file.file_number;
         // temp tables are present in the session, so we still need to drop it at the end of the transaction
-        info!("BEGIN INSERT {}", table_name);
+        let remote_filepath = s3_file.remote_path();
+        logger_info!(
+            Some(wal_file_number),
+            Some(&table_name),
+            &format!("begin_import:{}", remote_filepath)
+        );
+
         let client = self
             .connection_pool
             .get()
             .await
             .map_err(DatabaseWriterError::PoolError)?;
+
         // let transaction = client.transaction().await.unwrap();
         let transaction = client;
-        info!("GOT CONNECTION {}", table_name);
         let (schema_name, just_table_name) = table_name.schema_and_table_name();
         assert!(!table_name.contains('"'));
         let staging_name = self.staging_name(s3_file);
@@ -143,9 +149,7 @@ impl DatabaseWriter {
             &schema_name,
             &just_table_name,
         );
-        info!("{}", create_staging_table);
 
-        let remote_filepath = s3_file.remote_path();
         let access_key_id =
             env::var("AWS_ACCESS_KEY_ID").expect("Unable to find AWS_ACCESS_KEY_ID");
         let secret_access_key =
@@ -157,18 +161,7 @@ impl DatabaseWriter {
         );
         // no gzip
         let copy_to_staging_table = format!(
-            "
-            copy \"{staging_name}\" from '{remote_filepath}'
-            CREDENTIALS '{credentials_string}'
-            GZIP
-            CSV
-            TRUNCATECOLUMNS
-            IGNOREHEADER 1
-            DELIMITER ','
-            NULL as '\\0'
-            compupdate off
-            statupdate off
-",
+            "copy \"{staging_name}\" from '{remote_filepath}' CREDENTIALS '{credentials_string}' GZIP CSV TRUNCATECOLUMNS IGNOREHEADER 1 DELIMITER ',' NULL as '\\0' compupdate off statupdate off",
             staging_name = &staging_name,
             remote_filepath = &remote_filepath,
             credentials_string = &credentials_string
@@ -182,45 +175,128 @@ impl DatabaseWriter {
             &s3_file.columns,
         );
         let drop_staging_table = format!("drop table if exists {}", &staging_name);
-        // let insert_query = format!();
-        let result = transaction
-            .execute(create_staging_table.as_str(), &[])
+
+        self.execute_single_query(
+            &transaction,
+            create_staging_table.as_str(),
+            &format!("create_staging_table:{}", &remote_filepath),
+            table_name.clone(),
+            wal_file_number,
+        )
+        .await?;
+
+        let result = self
+            .execute_single_query(
+                &transaction,
+                copy_to_staging_table.as_str(),
+                &format!("copy_to_staging_table:{}", &remote_filepath),
+                table_name.clone(),
+                wal_file_number,
+            )
             .await;
-        if let Err(err) = result {
-            error!(
-                "Received error: {} {} {} {:?}",
-                table_name,
-                remote_filepath,
-                create_staging_table.as_str(),
-                err
-            );
+        match result {
+            Ok(..) => {}
+            Err(err) => {
+                if let DatabaseWriterError::TokioError(tokio_error) = err {
+                    // https://github.com/sfackler/rust-postgres/blob/master/tokio-postgres/src/error/mod.rs
+                    // I can't find a better way to determine if something is a Kind::Db. since kind is private.
+                    let error_string = format!("{}", tokio_error);
+                    // we bail early if we have a db error here, as something is wrong.
+                    if error_string.starts_with("db error") {
+                        logger_panic!(
+                            Some(wal_file_number),
+                            Some(&table_name),
+                            &format!("copy_to_staging_table_got_error:{:?}", tokio_error)
+                        );
+                    } else {
+                        // we throw back up to kick in the retry mechanism
+                        // need to recreate it because it's partially moved
+                        // by our match
+                        Err(DatabaseWriterError::TokioError(tokio_error))?
+                    }
+                } else {
+                    logger_panic!(
+                        Some(wal_file_number),
+                        Some(&table_name),
+                        "non_tokio_error_from_execute_single_query"
+                    )
+                }
+            }
         }
-        info!("CREATED STAGING TABLE {}", table_name);
-        transaction
-            .execute(copy_to_staging_table.as_str(), &[])
-            .await
-            .map_err(DatabaseWriterError::TokioError)?;
-        info!("COPIED TO STAGING TABLE {}", table_name);
-        transaction
-            .execute(data_migration_query_string.as_str(), &[])
-            .await
-            .map_err(DatabaseWriterError::TokioError)?;
-        info!("INSERTED FROM STAGING TABLE {}", table_name);
-        transaction
-            .execute(drop_staging_table.as_str(), &[])
-            .await
-            .map_err(DatabaseWriterError::TokioError)?;
-        info!("DROPPED STAGING TABLE {}", table_name);
+        self.execute_single_query(
+            &transaction,
+            data_migration_query_string.as_str(),
+            &format!("apply_changes_to_real_table:{}", &remote_filepath),
+            table_name.clone(),
+            wal_file_number,
+        )
+        .await?;
+
+        self.execute_single_query(
+            &transaction,
+            drop_staging_table.as_str(),
+            &format!("drop_staging_table:{}", &remote_filepath),
+            table_name.clone(),
+            wal_file_number,
+        )
+        .await?;
+
         // TEMP
         // serialiseable isolation error. might be to do with dms.
         // transaction.commit().await.unwrap();
         // info!("COMMITTED TX {}", table_name);
 
-        info!("INSERTED {} {}", &remote_filepath, table_name);
+        logger_info!(
+            Some(wal_file_number),
+            Some(&table_name),
+            &format!("finished_importing:{}", &remote_filepath)
+        );
 
         s3_file.wal_file.maybe_remove_wal_file();
 
         Ok(())
+    }
+
+    async fn execute_single_query(
+        &self,
+        client: &Client,
+        query_to_execute: &str,
+        log_tag: &str,
+        table_name: TableName,
+        wal_file_number: u64,
+    ) -> Result<(), DatabaseWriterError> {
+        logger_info!(
+            Some(wal_file_number),
+            Some(&table_name),
+            &format!("about_to_execute:{}", log_tag)
+        );
+        logger_debug!(
+            Some(wal_file_number),
+            Some(&table_name),
+            &format!(
+                "about_to_execute:{} full_query:{}",
+                log_tag, query_to_execute
+            )
+        );
+        let result = client.execute(query_to_execute, &[]).await;
+        match result {
+            Ok(..) => {
+                logger_info!(
+                    Some(wal_file_number),
+                    Some(&table_name),
+                    &format!("successfully_executed:{}", log_tag)
+                );
+                Ok(())
+            }
+            Err(err) => {
+                logger_error!(
+                    Some(wal_file_number),
+                    Some(&table_name),
+                    &format!("error_executing:{} err:{:?}", log_tag, err)
+                );
+                Err(err).map_err(DatabaseWriterError::TokioError)
+            }
+        }
     }
 
     // bool is whether we return early. Only necessary for delete where the table
@@ -231,6 +307,8 @@ impl DatabaseWriter {
         database_client: &Client,
     ) -> Result<bool, DatabaseWriterError> {
         let (schema_name, just_table_name) = s3_file.table_name.schema_and_table_name();
+        let table_name = s3_file.table_name.clone();
+        let wal_file_number = s3_file.wal_file.file_number;
         let query = "
             SELECT EXISTS (
                 SELECT 1 FROM information_schema.tables
@@ -246,12 +324,26 @@ impl DatabaseWriter {
             // check this isn't a delete command, because if it is,
             // we've got no table so job done (good thing because there's no schema)
             if s3_file.kind == ChangeKind::Delete {
-                error!("Delete when there's no table {:?}!", s3_file.table_name);
+                logger_error!(
+                    Some(wal_file_number),
+                    Some(&table_name),
+                    "delete_when_theres_no_table"
+                );
                 return Ok(true);
             } else if s3_file.kind == ChangeKind::Update {
-                panic!("update when there's no table {:?}!", s3_file.table_name);
+                logger_panic!(
+                    Some(wal_file_number),
+                    Some(&table_name),
+                    "update_when_theres_no_table"
+                );
             }
-            info!("table {} does not exist creating...", s3_file.table_name);
+
+            logger_info!(
+                Some(wal_file_number),
+                Some(&table_name),
+                "creating_table_that_doesnt_exist"
+            );
+
             // TODO: distkey
             let create_table_query = format!(
                 "create table \"{schema_name}\".\"{just_table_name}\" ({columns}) SORTKEY(id)",
@@ -259,11 +351,15 @@ impl DatabaseWriter {
                 just_table_name = just_table_name,
                 columns = self.values_description_for_table(&s3_file.columns)
             );
-            database_client
-                .execute(create_table_query.as_str(), &[])
-                .await
-                .map_err(DatabaseWriterError::TokioError)?;
-            info!("finished creating table {} ", s3_file.table_name);
+
+            self.execute_single_query(
+                &database_client,
+                create_table_query.as_str(),
+                "create_table_statement",
+                table_name.clone(),
+                wal_file_number,
+            )
+            .await?;
         } // else the table exists and do nothing
         Ok(false)
     }

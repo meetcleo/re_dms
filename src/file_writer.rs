@@ -12,6 +12,9 @@ use itertools::Itertools;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 
+#[allow(unused_imports)]
+use crate::{function, logger_debug, logger_error, logger_info, logger_panic};
+
 // we have one of these per table,
 // it will hold the files to write to and handle the writing
 #[derive(Debug)]
@@ -202,6 +205,11 @@ impl FileStruct {
         }
         self.write_line(change)
     }
+
+    // check whether the internal file has been initialised
+    pub fn is_some(&self) -> bool {
+        self.file.is_some()
+    }
 }
 
 // TODO: write iterator over files
@@ -246,10 +254,46 @@ impl FileWriter {
     }
     pub fn flush_all(&mut self) {
         self.insert_file.file.flush_and_close();
+        if self.insert_file.is_some() {
+            logger_info!(
+                Some(self.wal_file.file_number),
+                Some(&self.table_name),
+                &format!(
+                    "finished_writing:{}",
+                    self.insert_file
+                        .file_name
+                        .to_str()
+                        .expect("Unprintable file name")
+                )
+            )
+        }
         for x in self.update_files.values_mut() {
-            x.file.flush_and_close()
+            x.file.flush_and_close();
+            if x.is_some() {
+                logger_info!(
+                    Some(self.wal_file.file_number),
+                    Some(&self.table_name),
+                    &format!(
+                        "finished_writing:{}",
+                        x.file_name.to_str().expect("Unprintable file name")
+                    )
+                )
+            }
         }
         self.delete_file.file.flush_and_close();
+        if self.delete_file.is_some() {
+            logger_info!(
+                Some(self.wal_file.file_number),
+                Some(&self.table_name),
+                &format!(
+                    "finished_writing:{}",
+                    self.delete_file
+                        .file_name
+                        .to_str()
+                        .expect("Unprintable file name")
+                )
+            )
+        }
     }
 
     // update_files is a hash of our column names to our File

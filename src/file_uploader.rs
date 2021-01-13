@@ -8,7 +8,7 @@ use tokio::fs::File;
 use tokio_util::codec;
 
 #[allow(unused_imports)]
-use log::{debug, error, info, log_enabled, Level};
+use crate::{function, logger_debug, logger_error, logger_info, logger_panic};
 
 use crate::exponential_backoff::*;
 use crate::file_writer::{FileStruct, FileWriter};
@@ -73,7 +73,11 @@ impl FileUploader {
                 let byte_stream = codec::FramedRead::new(tokio_file, codec::BytesCodec::new())
                     .map_ok(|frame| frame.freeze());
 
-                debug!("file_length: {} file_name: {}", meta.len(), file_name);
+                logger_debug!(
+                    Some(wal_file.file_number),
+                    Some(&file_struct.table_name),
+                    &format!("file_length:{} file_name:{}", meta.len(), file_name)
+                );
                 let put_request = PutObjectRequest {
                     bucket: BUCKET_NAME.to_owned(),
                     key: remote_filename.clone(),
@@ -86,7 +90,11 @@ impl FileUploader {
                 let maybe_uploaded = self.s3_client.put_object(put_request).await;
                 match maybe_uploaded {
                     Ok(_result) => {
-                        info!("uploaded file {}", remote_filename);
+                        logger_info!(
+                            Some(wal_file.file_number),
+                            Some(&file_struct.table_name),
+                            &format!("uploaded_file:{}", remote_filename)
+                        );
                     }
                     Err(result) => {
                         // treat s3 errors as transient
