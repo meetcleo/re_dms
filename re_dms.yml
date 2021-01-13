@@ -1,9 +1,6 @@
 ---
 - hosts: myservers
-  vars:
-    socket_path: /re_dms/re_dms.socket
   become: yes
   become_user: root
   roles:
     - re_dms
-    - pg_recvlogical
