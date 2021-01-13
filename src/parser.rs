@@ -4,6 +4,8 @@ use regex::Regex;
 use std::collections::HashSet;
 use std::fmt;
 
+use std::env;
+
 #[allow(unused_imports)]
 use crate::{function, logger_debug, logger_error, logger_info, logger_panic};
 
@@ -15,6 +17,7 @@ lazy_static! {
     // leave these as unwrap
     static ref PARSE_COLUMN_REGEX: regex::Regex = Regex::new(r"(^[^\[^\]]+)\[([^:]+)\]:").unwrap();
     static ref COLUMN_TYPE_REGEX: regex::Regex = Regex::new(r"^.+\[\]$").unwrap();
+    static ref TABLE_BLACKLIST: Vec<String> = env::var("TABLE_BLACKLIST").unwrap_or("".to_owned()).split(",").map(|x| x.to_owned()).collect();
 }
 
 // for tablename
@@ -666,7 +669,22 @@ impl Parser {
             self.parse_state.currently_parsing = Some(changed_data);
             ParsedLine::ContinueParse
         } else {
-            changed_data
+            if TABLE_BLACKLIST.contains(table_name.as_ref()) {
+                logger_info!(
+                    self.parse_state.wal_file_number,
+                    Some(&table_name),
+                    &format!(
+                        "table_skipped_due_to_blacklist:{} blacklist:{:?}",
+                        table_name, *TABLE_BLACKLIST
+                    )
+                );
+                // we don't save any parse state, since we're skipping this changed_data and dropping it on the ground
+                // we still want this to be after the continue parse line so we can
+                // handle newlines in our blacklisted tables
+                ParsedLine::ContinueParse
+            } else {
+                changed_data
+            }
         };
         logger_debug!(
             self.parse_state.wal_file_number,
@@ -738,8 +756,22 @@ fn is_quote_escaped(string: &str, index: usize) -> bool {
 mod tests {
     use super::*;
 
+    #[ctor::ctor]
+    fn setup_tests() {
+        std::env::set_var("TABLE_BLACKLIST", "public.schema_migrations");
+    }
+
     #[test]
-    fn foobar() {
+    fn table_blacklist_works_as_expected() {
+        let mut parser = Parser::new(true);
+        let line =
+            "table public.schema_migrations: INSERT: version[character varying]:'20210112112814'";
+        let parsed_line = parser.parse(&line.to_owned());
+        assert_eq!(parsed_line, ParsedLine::ContinueParse);
+    }
+
+    #[test]
+    fn column_value_text_can_work_as_expected() {
         let foo = ColumnValue::Text("foo".to_owned());
         assert_eq!(foo.to_string().as_str(), "foo");
     }
