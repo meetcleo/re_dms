@@ -86,7 +86,8 @@ async fn main() {
     // use either for match arms returning different types
     // very handy
     let buffered_reader = if !arg_matches.is_present("read_from_stdin") {
-        Either::Left(get_buffered_reader_process())
+        let (_process, bufreader) = get_buffered_reader_process();
+        Either::Left(bufreader)
     } else {
         Either::Right(locked_stdin)
     };
@@ -149,8 +150,8 @@ async fn drain_collector_and_transmit(
     }
 }
 
-fn get_buffered_reader_process() -> BufReader<std::process::ChildStdout> {
-    let child = Command::new(PG_RECVLOGICAL_PATH.clone())
+fn get_buffered_reader_process() -> (std::process::Child, BufReader<std::process::ChildStdout>) {
+    let mut child = Command::new(PG_RECVLOGICAL_PATH.clone())
         .args(&[
             "--create-slot",
             "--start",
@@ -168,6 +169,7 @@ fn get_buffered_reader_process() -> BufReader<std::process::ChildStdout> {
         .expect("Failed to execute pg_recvlogical");
     let stdout = child
         .stdout
+        .take() // take allows us to avoid partially moving the child
         .expect("Failed to get stdout for pg_recvlogical");
-    BufReader::new(stdout)
+    (child, BufReader::new(stdout))
 }
