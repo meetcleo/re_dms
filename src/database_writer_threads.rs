@@ -124,7 +124,10 @@ impl DatabaseWriterThreads {
                 .retry(default_exponential_backoff())
                 .await;
                 match backoff_result {
-                    Ok(..) => {}
+                    Ok(..) => {
+                        // need to clean up our wal file
+                        wal_file.maybe_remove_wal_file();
+                    }
                     Err(err) => {
                         wal_file.register_error();
                         panic!(
@@ -141,6 +144,10 @@ impl DatabaseWriterThreads {
                 );
                 break;
             }
+            // clean up wal file
+            // map because it's in an option, but we don't want to
+            // borrow it
+            received.map(|x| x.consume_and_maybe_remove_wal_file());
         }
     }
 }
