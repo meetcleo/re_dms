@@ -19,10 +19,10 @@ lazy_static! {
         .expect("SECONDS_UNTIL_WAL_SWITCH env is not set")
         .parse::<u64>()
         .expect("SECONDS_UNTIL_WAL_SWITCH is not a valid integer");
-    static ref MAX_BYTES_FOR_WAL_SWITCH: usize = std::env::var("MAX_BYTES_UNTIL_WAL_SWITCH")
+    static ref MAX_BYTES_UNTIL_WAL_SWITCH: usize = std::env::var("MAX_BYTES_UNTIL_WAL_SWITCH")
         .unwrap_or("1000000000".to_string()) // 1 GB default
         .parse::<usize>()
-        .expect("MAX_BYTES_FOR_WAL_SWITCH is not a valid integer");
+        .expect("MAX_BYTES_UNTIL_WAL_SWITCH is not a valid integer");
 }
 
 #[cfg(not(test))]
@@ -307,7 +307,7 @@ impl WalFileManager {
             );
         }
         let current_wal_bytes = self.current_wal_bytes();
-        let should_swap_wal_bytes = current_wal_bytes >= *MAX_BYTES_FOR_WAL_SWITCH;
+        let should_swap_wal_bytes = current_wal_bytes >= *MAX_BYTES_UNTIL_WAL_SWITCH;
         if should_swap_wal_bytes {
             logger_debug!(
                 Some(self.current_wal_file_number),
