@@ -37,6 +37,13 @@ impl UploaderStageResult {
     pub fn wal_file_number(&self) -> u64 {
         self.wal_file().file_number
     }
+
+    pub fn consume_and_maybe_remove_wal_file(self) {
+        match self {
+            Self::S3File(mut cleo_s3_file) => cleo_s3_file.wal_file.maybe_remove_wal_file(),
+            Self::DdlChange(_, mut wal_file) => wal_file.maybe_remove_wal_file(),
+        }
+    }
 }
 
 pub struct GenericTableThreadSplitter<SharedResource, ChannelType> {
