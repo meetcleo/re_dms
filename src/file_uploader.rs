@@ -147,6 +147,8 @@ impl FileUploader {
             })
             .collect::<Vec<_>>();
         let cleo_s3_files = futures::future::join_all(s3_file_results).await;
+        // just make sure we drop any dangling references to wal_files before we try and maybe_remove it
+        drop(upload_files_vec);
         // if we don't have any cleo s3 files... first off, bit weird that we sent a file writer here
         // but secondly, we'd need to clean up the wal file
         file_writer.wal_file.maybe_remove_wal_file();
