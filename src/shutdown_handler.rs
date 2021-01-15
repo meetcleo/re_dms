@@ -57,6 +57,8 @@ impl ShutdownHandler {
     // https://doc.rust-lang.org/std/sync/atomic/struct.AtomicBool.html
     // release acquire pairs I think is something else that should put your googling
     // on the right track iirc
+
+    #[allow(dead_code)]
     pub fn register_clean_shutdown() {
         // we want all threads to see this write
         // synchronisation point!

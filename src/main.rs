@@ -1,5 +1,5 @@
 #![feature(str_split_once)]
-// #![deny(warnings)]
+#![deny(warnings)]
 
 use clap::{App, Arg};
 use either::Either;
