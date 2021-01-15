@@ -104,7 +104,7 @@ impl ShutdownHandler {
         Self::shutting_down_cleanly() || Self::shutting_down_messily()
     }
 
-    pub fn should_break_loop() -> bool {
+    pub fn should_break_main_loop() -> bool {
         Self::shutting_down()
             && SHUTDOWN_HANDLER
                 .lock()

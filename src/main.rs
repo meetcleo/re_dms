@@ -109,7 +109,7 @@ async fn main() {
             let wal_file_manager_result = wal_file_manager.next_line(&ip);
             let shutting_down = ShutdownHandler::shutting_down();
             if shutting_down {
-                if ShutdownHandler::should_break_loop() {
+                if ShutdownHandler::should_break_main_loop() {
                     break;
                 } else if ShutdownHandler::shutting_down_messily() {
                     continue;
