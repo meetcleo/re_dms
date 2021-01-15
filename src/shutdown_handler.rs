@@ -5,6 +5,9 @@ use std::sync::Mutex;
 use nix::sys::signal::{self, Signal};
 use nix::unistd::Pid;
 
+#[allow(unused_imports)]
+use crate::{function, logger_debug, logger_error, logger_info, logger_panic};
+
 static SHUTDOWN_CLEANLY: AtomicBool = AtomicBool::new(false);
 static SHUTDOWN_MESSILY: AtomicBool = AtomicBool::new(false);
 
@@ -57,11 +60,13 @@ impl ShutdownHandler {
     pub fn register_clean_shutdown() {
         // we want all threads to see this write
         // synchronisation point!
+        logger_error!(None, None, "register_clean_shutdown");
         Self::shutdown_shutdown_handler();
         SHUTDOWN_CLEANLY.store(true, std::sync::atomic::Ordering::Release);
     }
 
     pub fn register_messy_shutdown() {
+        logger_error!(None, None, "register_messy_shutdown");
         Self::shutdown_shutdown_handler();
         SHUTDOWN_MESSILY.store(true, std::sync::atomic::Ordering::Release);
     }
