@@ -1,8 +1,10 @@
 #![feature(str_split_once)]
-#![deny(warnings)]
+// #![deny(warnings)]
 
 use clap::{App, Arg};
+use either::Either;
 use lazy_static::lazy_static;
+use std::convert::TryInto;
 use std::io::{self, BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -20,11 +22,11 @@ mod file_uploader_threads;
 mod file_writer;
 mod logger;
 mod parser;
+mod shutdown_handler;
 mod wal_file_manager;
 
 use file_uploader_threads::DEFAULT_CHANNEL_SIZE;
-
-use either::Either;
+use shutdown_handler::{RuntimeType, ShutdownHandler};
 
 lazy_static! {
     static ref OUTPUT_WAL_DIRECTORY: String =
@@ -86,9 +88,19 @@ async fn main() {
     // use either for match arms returning different types
     // very handy
     let buffered_reader = if !arg_matches.is_present("read_from_stdin") {
-        let (_process, bufreader) = get_buffered_reader_process();
+        let (process, bufreader) = get_buffered_reader_process();
+        // https://stackoverflow.com/questions/49210815/how-do-i-send-a-signal-to-a-child-subprocess
+
+        ShutdownHandler::register_shutdown_handler(RuntimeType::from_pid(
+            process
+                .id()
+                .try_into()
+                .expect("pid that's greater than i32::MAX"),
+        ));
+        // how to term the child process
         Either::Left(bufreader)
     } else {
+        ShutdownHandler::register_shutdown_handler(RuntimeType::Stdin);
         Either::Right(locked_stdin)
     };
 
