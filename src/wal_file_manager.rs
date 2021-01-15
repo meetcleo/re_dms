@@ -274,9 +274,10 @@ impl WalFileManager {
             Some(self.current_wal_file_number),
             None,
             &format!(
-                "swapping_wal swap_wal_elapsed:{:?} last_swapped_wal:{:?}",
+                "swapping_wal number_of_wal_bytes:{:?} swap_wal_elapsed:{:?} last_swapped_wal:{:?}",
+                self.current_wal_bytes(),
                 self.last_swapped_wal.elapsed(),
-                self.last_swapped_wal
+                self.last_swapped_wal,
             )
         );
         self.current_wal_file.flush();
