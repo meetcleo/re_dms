@@ -182,7 +182,7 @@ impl FileUploaderThreads {
                 logger_error!(
                     last_wal_number,
                     last_table_name.as_deref(),
-                    "shutting_down_database_writer_threads_messily"
+                    "shutting_down_file_uploader_threads_messily"
                 );
                 return;
             };
