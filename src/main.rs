@@ -107,6 +107,14 @@ async fn main() {
     for line in buffered_reader.lines() {
         if let Ok(ip) = line {
             let wal_file_manager_result = wal_file_manager.next_line(&ip);
+            let shutting_down = ShutdownHandler::shutting_down();
+            if shutting_down {
+                if ShutdownHandler::should_break_loop() {
+                    break;
+                } else if ShutdownHandler::shutting_down_messily() {
+                    continue;
+                }
+            }
             let parsed_line = parser.parse(&ip);
             match parsed_line {
                 parser::ParsedLine::ContinueParse => {} // Intentionally left blank, continue parsing
@@ -127,6 +135,9 @@ async fn main() {
                 parser.register_wal_number(wal_file.file_number);
             }
         }
+    }
+    if ShutdownHandler::shutting_down_messily() {
+        return;
     }
     collector.print_stats();
 
