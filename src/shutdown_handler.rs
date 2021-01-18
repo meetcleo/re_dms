@@ -1,18 +1,20 @@
 use lazy_static::lazy_static;
 use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 use std::sync::Mutex;
 
 use nix::sys::signal::{self, Signal};
 use nix::unistd::Pid;
+use signal_hook::consts::signal::*;
+use signal_hook::iterator::Signals;
 
 #[allow(unused_imports)]
 use crate::{function, logger_debug, logger_error, logger_info, logger_panic};
 
-static SHUTDOWN_CLEANLY: AtomicBool = AtomicBool::new(false);
-static SHUTDOWN_MESSILY: AtomicBool = AtomicBool::new(false);
-
 lazy_static! {
     static ref SHUTDOWN_HANDLER: Mutex<Option<ShutdownHandler>> = Mutex::new(None);
+    static ref SHUTDOWN_CLEANLY: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
+    static ref SHUTDOWN_MESSILY: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
 }
 
 pub struct ShutdownHandler {
@@ -35,6 +37,7 @@ impl RuntimeType {
         match self {
             Self::Process(pid) => {
                 // https://stackoverflow.com/questions/49210815/how-do-i-send-a-signal-to-a-child-subprocess
+                logger_info!(None, None, &format!("killing_child_process:{}", pid));
                 signal::kill(pid.clone(), Signal::SIGTERM).unwrap();
             }
             Self::Stdin => {
@@ -45,6 +48,25 @@ impl RuntimeType {
 }
 
 impl ShutdownHandler {
+    // https://docs.rs/signal-hook/0.3.4/signal_hook/iterator/struct.SignalsInfo.html#method.forever
+    pub fn register_signal_handlers() {
+        let mut signals =
+            Signals::new(&[SIGINT, SIGTERM, SIGHUP]).expect("Error registering signal handler");
+
+        std::thread::spawn(move || {
+            for sig in signals.forever() {
+                logger_error!(
+                    None,
+                    None,
+                    &format!(
+                        "registering_shutdown THIS_MAY_TAKE_5_MINUTES received_signal:{}",
+                        sig
+                    )
+                );
+                ShutdownHandler::register_clean_shutdown();
+            }
+        });
+    }
     pub fn register_shutdown_handler(runtime_type: RuntimeType) {
         let mut unwrapped = SHUTDOWN_HANDLER.lock().unwrap();
         *unwrapped = Some(ShutdownHandler {
@@ -67,7 +89,7 @@ impl ShutdownHandler {
         // _technically_ this is a race condition, but I'm just not too worried about it
         // since every thread will be getting shut down when we are "shutting down messily"
         // so it'll be pretty rare that it'll be triggered.
-        if Self::shutting_down_messily() {
+        if !Self::shutting_down_messily() {
             SHUTDOWN_CLEANLY.store(true, std::sync::atomic::Ordering::Release);
         }
     }
@@ -107,6 +129,18 @@ impl ShutdownHandler {
 
     pub fn shutting_down() -> bool {
         Self::shutting_down_cleanly() || Self::shutting_down_messily()
+    }
+
+    pub fn log_shutdown_status() {
+        logger_info!(
+            None,
+            None,
+            &format!(
+                "shut_down cleanly:{} messily:{}",
+                Self::shutting_down_cleanly(),
+                Self::shutting_down_messily()
+            )
+        );
     }
 
     pub fn should_break_main_loop() -> bool {

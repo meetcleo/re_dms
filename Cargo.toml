@@ -4,13 +4,6 @@ version = "0.1.0"
 authors = ["Michael Hauser-Raspe <michael@meetcleo.com>"]
 edition = "2018"
 
-# we want a panic in a thread to tear everything down.
-[profile.dev]
-panic = "abort"
-
-[profile.release]
-panic = "abort"
-
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
@@ -69,7 +62,9 @@ config = "0.10.1"
 # hashmap literal macro
 maplit = "1.0.2"
 
+# linux stuff
 nix = "0.19.1"
+signal-hook = "0.3.4"
 
 [dev_dependencies]
 mock_instant = { version = "0.2", features = ["sync"] }
