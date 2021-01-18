@@ -142,7 +142,7 @@ async fn main() {
     if ShutdownHandler::shutting_down_messily() {
         return;
     }
-    collector.print_stats();
+    // collector.print_stats();
 
     drain_collector_and_transmit(&mut collector, &mut file_transmitter).await;
 
@@ -161,6 +161,8 @@ async fn main() {
     collector.register_wal_file(None);
     // clean up wal file in manager it should be the last one now.
     wal_file_manager.clean_up_final_wal_file();
+
+    ShutdownHandler::log_shutdown_status();
 }
 
 async fn drain_collector_and_transmit(

@@ -493,6 +493,8 @@ impl ChangeProcessing {
             .map(|(table_name, table)| (table_name, table.get_stats().0))
             .collect()
     }
+
+    #[allow(dead_code)]
     pub fn print_stats(&self) {
         self.table_holder
             .tables

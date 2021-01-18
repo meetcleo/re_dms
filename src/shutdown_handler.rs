@@ -37,6 +37,7 @@ impl RuntimeType {
         match self {
             Self::Process(pid) => {
                 // https://stackoverflow.com/questions/49210815/how-do-i-send-a-signal-to-a-child-subprocess
+                logger_info!(None, None, &format!("killing_child_process:{}", pid));
                 signal::kill(pid.clone(), Signal::SIGTERM).unwrap();
             }
             Self::Stdin => {
@@ -121,6 +122,18 @@ impl ShutdownHandler {
 
     pub fn shutting_down() -> bool {
         Self::shutting_down_cleanly() || Self::shutting_down_messily()
+    }
+
+    pub fn log_shutdown_status() {
+        logger_info!(
+            None,
+            None,
+            &format!(
+                "shut_down cleanly:{} messily:{}",
+                Self::shutting_down_cleanly(),
+                Self::shutting_down_messily()
+            )
+        );
     }
 
     pub fn should_break_main_loop() -> bool {
