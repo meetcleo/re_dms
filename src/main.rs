@@ -112,7 +112,7 @@ async fn main() {
                 if ShutdownHandler::should_break_main_loop() {
                     break;
                 } else if ShutdownHandler::shutting_down_messily() {
-                    continue;
+                    return;
                 }
             }
             let parsed_line = parser.parse(&ip);

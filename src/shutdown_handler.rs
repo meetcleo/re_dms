@@ -64,7 +64,12 @@ impl ShutdownHandler {
         // synchronisation point!
         logger_error!(None, None, "register_clean_shutdown");
         Self::shutdown_shutdown_handler();
-        SHUTDOWN_CLEANLY.store(true, std::sync::atomic::Ordering::Release);
+        // _technically_ this is a race condition, but I'm just not too worried about it
+        // since every thread will be getting shut down when we are "shutting down messily"
+        // so it'll be pretty rare that it'll be triggered.
+        if Self::shutting_down_messily() {
+            SHUTDOWN_CLEANLY.store(true, std::sync::atomic::Ordering::Release);
+        }
     }
 
     pub fn register_messy_shutdown() {
@@ -78,7 +83,7 @@ impl ShutdownHandler {
         // need to deref the mutex guard to get the option.
         match *unwrapped {
             None => {
-                panic!("ShutdownCalled before RuntimeType has been registered")
+                panic!("Shutdown called before RuntimeType has been registered")
             }
             Some(ref mut shutdown_handler) => shutdown_handler.handle_shutdown(),
         }
