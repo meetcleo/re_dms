@@ -55,7 +55,14 @@ impl ShutdownHandler {
 
         std::thread::spawn(move || {
             for sig in signals.forever() {
-                logger_info!(None, None, &format!("received_signal:{}", sig));
+                logger_error!(
+                    None,
+                    None,
+                    &format!(
+                        "registering_shutdown THIS_MAY_TAKE_5_MINUTES received_signal:{}",
+                        sig
+                    )
+                );
                 ShutdownHandler::register_clean_shutdown();
             }
         });
