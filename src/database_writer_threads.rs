@@ -11,6 +11,7 @@ use crate::file_uploader_threads::{
     GenericTableThread, GenericTableThreadSplitter, UploaderStageResult, DEFAULT_CHANNEL_SIZE,
 };
 use crate::parser::TableName;
+use crate::shutdown_handler::ShutdownHandler;
 
 // manages the thread-per-table and the fanout
 pub type DatabaseTableThread = GenericTableThread<UploaderStageResult>;
@@ -89,6 +90,14 @@ impl DatabaseWriterThreads {
         let mut last_table_name = None;
         let mut last_wal_number = None;
         loop {
+            if ShutdownHandler::shutting_down_messily() {
+                logger_error!(
+                    last_wal_number,
+                    last_table_name.as_deref(),
+                    "shutting_down_database_writer_threads_messily"
+                );
+                return;
+            };
             // need to do things this way rather than a match for the borrow checker
             let received = receiver.recv().await;
             if let Some(ref uploader_stage_result) = received {
@@ -130,10 +139,12 @@ impl DatabaseWriterThreads {
                     }
                     Err(err) => {
                         wal_file.register_error();
-                        panic!(
-                            "Database writing and exponential backoff failed for {:?}. err: {:?}",
-                            last_table_name, err
+                        logger_error!(
+                            last_wal_number,
+                            last_table_name.as_deref(),
+                            &format!("database_writer_exponential_backoff_failed:{:?}", err)
                         );
+                        ShutdownHandler::register_messy_shutdown()
                     }
                 }
             } else {

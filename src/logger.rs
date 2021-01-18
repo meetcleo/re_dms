@@ -1,4 +1,3 @@
-// use crate::parser::String;
 use log::{debug, error, info};
 
 pub struct Logger {}
