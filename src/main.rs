@@ -41,6 +41,7 @@ lazy_static! {
 
 #[tokio::main]
 async fn main() {
+    ShutdownHandler::register_signal_handlers();
     dotenv().ok();
     env_logger::init();
 

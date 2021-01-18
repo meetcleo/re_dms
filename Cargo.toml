@@ -69,7 +69,9 @@ config = "0.10.1"
 # hashmap literal macro
 maplit = "1.0.2"
 
+# linux stuff
 nix = "0.19.1"
+signal-hook = "0.3.4"
 
 [dev_dependencies]
 mock_instant = { version = "0.2", features = ["sync"] }

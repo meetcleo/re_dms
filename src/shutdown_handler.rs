@@ -1,18 +1,20 @@
 use lazy_static::lazy_static;
 use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 use std::sync::Mutex;
 
 use nix::sys::signal::{self, Signal};
 use nix::unistd::Pid;
+use signal_hook::consts::signal::*;
+use signal_hook::iterator::Signals;
 
 #[allow(unused_imports)]
 use crate::{function, logger_debug, logger_error, logger_info, logger_panic};
 
-static SHUTDOWN_CLEANLY: AtomicBool = AtomicBool::new(false);
-static SHUTDOWN_MESSILY: AtomicBool = AtomicBool::new(false);
-
 lazy_static! {
     static ref SHUTDOWN_HANDLER: Mutex<Option<ShutdownHandler>> = Mutex::new(None);
+    static ref SHUTDOWN_CLEANLY: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
+    static ref SHUTDOWN_MESSILY: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
 }
 
 pub struct ShutdownHandler {
@@ -45,6 +47,18 @@ impl RuntimeType {
 }
 
 impl ShutdownHandler {
+    // https://docs.rs/signal-hook/0.3.4/signal_hook/iterator/struct.SignalsInfo.html#method.forever
+    pub fn register_signal_handlers() {
+        let mut signals =
+            Signals::new(&[SIGINT, SIGTERM, SIGHUP]).expect("Error registering signal handler");
+
+        std::thread::spawn(move || {
+            for sig in signals.forever() {
+                logger_info!(None, None, &format!("received_signal:{}", sig));
+                ShutdownHandler::register_clean_shutdown();
+            }
+        });
+    }
     pub fn register_shutdown_handler(runtime_type: RuntimeType) {
         let mut unwrapped = SHUTDOWN_HANDLER.lock().unwrap();
         *unwrapped = Some(ShutdownHandler {
