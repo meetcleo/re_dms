@@ -19,7 +19,5 @@ mod wal_file_manager;
 async fn main() {
     dotenv().ok();
     env_logger::init();
-
-    let manager = input_manager::InputManager::new();
-    manager.run().await
+    input_manager::run().await;
 }

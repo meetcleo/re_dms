@@ -1,9 +1,12 @@
 use clap::{App, Arg};
+use glob::{glob_with, MatchOptions};
 use lazy_static::lazy_static;
+use std::fs::File;
 use std::io::{self, BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
+use either::Either;
 use tokio::sync::mpsc;
 
 use crate::change_processing;
@@ -14,7 +17,8 @@ use crate::wal_file_manager;
 
 use file_uploader_threads::DEFAULT_CHANNEL_SIZE;
 
-use either::Either;
+#[allow(unused_imports)]
+use crate::{function, logger_debug, logger_error, logger_info, logger_panic};
 
 lazy_static! {
     static ref OUTPUT_WAL_DIRECTORY: String =
@@ -30,7 +34,7 @@ lazy_static! {
 pub enum InputType {
     Stdin,
     Wal(String),
-    PgRcvlogical(Command),
+    PgRcvlogical,
 }
 
 pub struct InputManager {
@@ -38,29 +42,13 @@ pub struct InputManager {
 }
 
 impl InputManager {
-    pub fn new() -> InputManager {
+    fn new() -> InputManager {
         InputManager {
-            input_type: InputType::Stdin,
+            input_type: input_type(),
         }
     }
 
-    pub async fn run(&self) {
-        self.process_input().await;
-    }
-
     async fn process_input(&self) {
-        let arg_matches = App::new("re_dms")
-            .version("0.1")
-            .author("MeetCleo. <team@meetcleo.com>")
-            .about("replication from postgres to redshift")
-            .arg(
-                Arg::with_name("read_from_stdin")
-                    .short("-")
-                    .long("stdin")
-                    .help("Makes the process read from stdin instead of starting a subprocess"),
-            )
-            .get_matches();
-
         let mut parser = parser::Parser::new(true);
         let mut collector = change_processing::ChangeProcessing::new();
         // initialize our channels
@@ -90,12 +78,22 @@ impl InputManager {
         let stdin = io::stdin();
         let locked_stdin = stdin.lock();
 
-        // use either for match arms returning different types
-        // very handy
-        let buffered_reader = if !arg_matches.is_present("read_from_stdin") {
-            Either::Left(get_buffered_reader_process())
+        let buffered_reader = if let InputType::PgRcvlogical = self.input_type {
+            let child_stdout = get_buffered_reader_process();
+            Either::Right(child_stdout)
         } else {
-            Either::Right(locked_stdin)
+            let reader: Box<dyn BufRead> = match &self.input_type {
+                InputType::Stdin => Box::new(locked_stdin),
+
+                InputType::Wal(wal_path) => Box::new(BufReader::new(
+                    File::open(wal_path)
+                        .expect(&format!("Unable to open existing WAL at {}", wal_path)),
+                )),
+                InputType::PgRcvlogical => {
+                    panic!("Should never have gotten here as PgRcvlogical is handled separately")
+                }
+            };
+            Either::Left(reader)
         };
 
         for line in buffered_reader.lines() {
@@ -178,5 +176,58 @@ fn get_buffered_reader_process() -> BufReader<std::process::ChildStdout> {
     let stdout = child
         .stdout
         .expect("Failed to get stdout for pg_recvlogical");
+
     BufReader::new(stdout)
+}
+
+fn input_type() -> InputType {
+    let arg_matches = App::new("re_dms")
+        .version("0.1")
+        .author("MeetCleo. <team@meetcleo.com>")
+        .about("replication from postgres to redshift")
+        .arg(
+            Arg::with_name("read_from_stdin")
+                .short("-")
+                .long("stdin")
+                .help("Makes the process read from stdin instead of starting a subprocess"),
+        )
+        .get_matches();
+
+    if arg_matches.is_present("read_from_stdin") {
+        InputType::Stdin
+    } else {
+        let options = MatchOptions {
+            case_sensitive: false,
+            ..Default::default()
+        };
+
+        let earliest_wal = glob_with(&format!("{}/*.wal", *OUTPUT_WAL_DIRECTORY), options)
+            .expect("Unable to check for existing WAL files")
+            .map(|file_path| match file_path {
+                Ok(path) => path
+                    .to_str()
+                    .expect("Invalid UTF filename for WAL file")
+                    .to_string(),
+                Err(_e) => panic!("unreadable path. What did you do?"),
+            })
+            .min();
+
+        if let Some(path) = earliest_wal {
+            InputType::Wal(path)
+        } else {
+            InputType::PgRcvlogical
+        }
+    }
+}
+
+pub async fn run() {
+    loop {
+        let input_manager = InputManager::new();
+        input_manager.process_input().await;
+        match input_manager.input_type {
+            InputType::PgRcvlogical => return,
+            InputType::Stdin => return,
+            InputType::Wal(_) => continue,
+        }
+    }
 }
