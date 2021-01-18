@@ -85,18 +85,20 @@ async fn main() {
     let stdin = io::stdin();
     let locked_stdin = stdin.lock();
 
+    let mut child_process_guard = ChildGuard(None);
+
     // use either for match arms returning different types
     // very handy
     let buffered_reader = if !arg_matches.is_present("read_from_stdin") {
         let (process, bufreader) = get_buffered_reader_process();
-        // https://stackoverflow.com/questions/49210815/how-do-i-send-a-signal-to-a-child-subprocess
 
-        ShutdownHandler::register_shutdown_handler(RuntimeType::from_pid(
-            process
-                .id()
-                .try_into()
-                .expect("pid that's greater than i32::MAX"),
-        ));
+        let process_id = process
+            .id()
+            .try_into()
+            .expect("pid that's greater than i32::MAX");
+        // register it to the childguard, so it gets shutdown in the event of a panic
+        child_process_guard.0 = Some(process);
+        ShutdownHandler::register_shutdown_handler(RuntimeType::from_pid(process_id));
         // how to term the child process
         Either::Left(bufreader)
     } else {
@@ -195,4 +197,40 @@ fn get_buffered_reader_process() -> (std::process::Child, BufReader<std::process
         .take() // take allows us to avoid partially moving the child
         .expect("Failed to get stdout for pg_recvlogical");
     (child, BufReader::new(stdout))
+}
+
+// https://stackoverflow.com/questions/30538004/how-do-i-ensure-that-a-spawned-child-process-is-killed-if-my-app-panics
+
+struct ChildGuard(Option<std::process::Child>);
+
+impl Drop for ChildGuard {
+    fn drop(&mut self) {
+        match &mut self.0 {
+            Some(process) => match process.kill() {
+                Err(e) => match e.kind() {
+                    std::io::ErrorKind::InvalidInput => {
+                        logger_info!(
+                            None,
+                            None,
+                            &format!(
+                                "Child process already killed during child guard dropping: {}",
+                                e
+                            )
+                        )
+                    }
+                    _unknown_error_kind => {
+                        logger_error!(None, None, &format!("Could not kill child process: {}", e))
+                    }
+                },
+                Ok(_) => logger_info!(None, None, "Successfully killed child process"),
+            },
+            None => {
+                logger_info!(
+                    None,
+                    None,
+                    "Child guard dropped with nothing registered to it."
+                )
+            }
+        }
+    }
 }
