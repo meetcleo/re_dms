@@ -56,6 +56,10 @@ Starts re_dms, which will start logical replication using `pg_recvlogical`:
 
 `$ ./target/release/re_dms`
 
+Or, pass your own stream into re_dms:
+
+`$ cat data/test_decoding.txt | ./target/release/re_dms --stdin`
+
 Docs on `pg_recvlogical` [here](https://www.postgresql.org/docs/10/app-pgrecvlogical.html)
 
 ### Errors
