@@ -142,7 +142,7 @@ async fn main() {
     if ShutdownHandler::shutting_down_messily() {
         return;
     }
-    // collector.print_stats();
+    logger_info!(None, None, "exitted_main_loop");
 
     drain_collector_and_transmit(&mut collector, &mut file_transmitter).await;
 
