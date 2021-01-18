@@ -203,6 +203,10 @@ fn get_buffered_reader_process() -> (std::process::Child, BufReader<std::process
 
 struct ChildGuard(Option<std::process::Child>);
 
+// I'm not sure if this is strictly needed.
+// we abort on panic, and if we panic, even without this code we get:
+// Command terminated by signal 6
+// still, this code feels correct so I'm including it.
 impl Drop for ChildGuard {
     fn drop(&mut self) {
         match &mut self.0 {
