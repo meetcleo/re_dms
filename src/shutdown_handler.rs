@@ -82,7 +82,7 @@ impl ShutdownHandler {
         // _technically_ this is a race condition, but I'm just not too worried about it
         // since every thread will be getting shut down when we are "shutting down messily"
         // so it'll be pretty rare that it'll be triggered.
-        if Self::shutting_down_messily() {
+        if !Self::shutting_down_messily() {
             SHUTDOWN_CLEANLY.store(true, std::sync::atomic::Ordering::Release);
         }
     }
