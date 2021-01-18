@@ -67,12 +67,6 @@ impl InputManager {
             database_writer_threads::DatabaseWriterThreads::spawn_database_writer_stream(
                 database_receiver,
             );
-        let mut wal_file_manager = wal_file_manager::WalFileManager::new(
-            PathBuf::from(OUTPUT_WAL_DIRECTORY.clone()).as_path(),
-        );
-        collector.register_wal_file(Some(wal_file_manager.current_wal()));
-        // for logging
-        parser.register_wal_number(wal_file_manager.current_wal().file_number);
 
         // need to define this at this level so it lives long enough
         let stdin = io::stdin();
@@ -80,21 +74,45 @@ impl InputManager {
 
         let buffered_reader = if let InputType::PgRcvlogical = self.input_type {
             let child_stdout = get_buffered_reader_process();
+            logger_info!(None, None, "Reading from pg_recvlogical");
             Either::Right(child_stdout)
         } else {
             let reader: Box<dyn BufRead> = match &self.input_type {
-                InputType::Stdin => Box::new(locked_stdin),
+                InputType::Stdin => {
+                    logger_info!(None, None, "Reading from stdin");
+                    Box::new(locked_stdin)
+                }
 
-                InputType::Wal(wal_path) => Box::new(BufReader::new(
-                    File::open(wal_path)
-                        .expect(&format!("Unable to open existing WAL at {}", wal_path)),
-                )),
+                InputType::Wal(wal_path) => {
+                    logger_info!(
+                        None,
+                        None,
+                        &format!("Reading from existing WAL: {}", wal_path)
+                    );
+                    Box::new(BufReader::new(
+                        File::open(wal_path)
+                            .expect(&format!("Unable to open existing WAL at {}", wal_path)),
+                    ))
+                }
                 InputType::PgRcvlogical => {
                     panic!("Should never have gotten here as PgRcvlogical is handled separately")
                 }
             };
             Either::Left(reader)
         };
+
+        let mut wal_file_manager = match &self.input_type {
+            InputType::Wal(file_path) => wal_file_manager::WalFileManager::reprocess(
+                PathBuf::from(OUTPUT_WAL_DIRECTORY.clone()).as_path(),
+                file_path.clone(),
+            ),
+            _ => wal_file_manager::WalFileManager::new(
+                PathBuf::from(OUTPUT_WAL_DIRECTORY.clone()).as_path(),
+            ),
+        };
+        collector.register_wal_file(Some(wal_file_manager.current_wal()));
+        // for logging
+        parser.register_wal_number(wal_file_manager.current_wal().file_number);
 
         for line in buffered_reader.lines() {
             if let Ok(ip) = line {
@@ -224,10 +242,10 @@ pub async fn run() {
     loop {
         let input_manager = InputManager::new();
         input_manager.process_input().await;
-        match input_manager.input_type {
-            InputType::PgRcvlogical => return,
-            InputType::Stdin => return,
-            InputType::Wal(_) => continue,
+        if let InputType::Wal(_) = input_manager.input_type {
+            continue;
+        } else {
+            break;
         }
     }
 }

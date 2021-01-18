@@ -118,10 +118,10 @@ impl WalFile {
             None,
             &format!("creating wal file {:?}", path)
         );
-        // use atomic file creation. Bail if a file already exists
+
         let file = OpenOptions::new()
             .write(true)
-            .create_new(true)
+            .create(true)
             .open(path.clone())
             .expect(&format!(
                 "Unable to create wal file: {}",
@@ -221,12 +221,19 @@ impl WalFile {
 }
 
 #[derive(Debug)]
+pub enum WalFileMode {
+    Processing,
+    Reprocessing(String),
+}
+
+#[derive(Debug)]
 pub struct WalFileManager {
     // the number of our wal file. starts at 1, goes to i64::maxint at which point we break
     current_wal_file_number: u64,
     current_wal_file: WalFile,
     output_wal_directory: PathBuf,
     last_swapped_wal: Instant,
+    wal_file_mode: WalFileMode,
 }
 
 impl WalFileManager {
@@ -239,6 +246,34 @@ impl WalFileManager {
             current_wal_file: first_wal_file,
             output_wal_directory: output_wal_directory.to_path_buf(),
             last_swapped_wal: Instant::now(),
+            wal_file_mode: WalFileMode::Processing,
+        }
+    }
+
+    pub fn reprocess(output_wal_directory: &Path, wal_file_path: String) -> WalFileManager {
+        let file_name = Path::new(&wal_file_path)
+            .file_stem()
+            .expect(&format!(
+                "error getting path stem of wal file: {}",
+                wal_file_path
+            ))
+            .to_str()
+            .expect(&format!(
+                "error turning wal path stem to string: {}",
+                wal_file_path
+            ));
+
+        let wal_file_number = u64::from_str_radix(file_name, 16).expect(&format!(
+            "error parsing wal file name as u64 from: {}",
+            file_name
+        ));
+        let first_wal_file = WalFile::new(wal_file_number, output_wal_directory);
+        WalFileManager {
+            current_wal_file_number: wal_file_number,
+            current_wal_file: first_wal_file,
+            output_wal_directory: output_wal_directory.to_path_buf(),
+            last_swapped_wal: Instant::now(),
+            wal_file_mode: WalFileMode::Reprocessing(wal_file_path),
         }
     }
 
@@ -292,30 +327,34 @@ impl WalFileManager {
     }
 
     fn should_swap_wal(&mut self) -> bool {
-        // 10 minutes
-        let should_swap_wal_time =
-            self.last_swapped_wal.elapsed() >= Duration::new(*SECONDS_UNTIL_WAL_SWITCH, 0);
-        if should_swap_wal_time {
-            logger_debug!(
-                Some(self.current_wal_file_number),
-                None,
-                &format!(
-                    "swap_wal_elapsed:{:?} last_swapped_wal:{:?}",
-                    self.last_swapped_wal.elapsed(),
-                    self.last_swapped_wal
+        if let WalFileMode::Reprocessing(_) = self.wal_file_mode {
+            false
+        } else {
+            // 10 minutes
+            let should_swap_wal_time =
+                self.last_swapped_wal.elapsed() >= Duration::new(*SECONDS_UNTIL_WAL_SWITCH, 0);
+            if should_swap_wal_time {
+                logger_debug!(
+                    Some(self.current_wal_file_number),
+                    None,
+                    &format!(
+                        "swap_wal_elapsed:{:?} last_swapped_wal:{:?}",
+                        self.last_swapped_wal.elapsed(),
+                        self.last_swapped_wal
+                    )
+                );
+            }
+            let current_wal_bytes = self.current_wal_bytes();
+            let should_swap_wal_bytes = current_wal_bytes >= *MAX_BYTES_UNTIL_WAL_SWITCH;
+            if should_swap_wal_bytes {
+                logger_debug!(
+                    Some(self.current_wal_file_number),
+                    None,
+                    &format!("current_wal_bytes:{:?}", current_wal_bytes)
                 )
-            );
+            }
+            should_swap_wal_time || should_swap_wal_bytes
         }
-        let current_wal_bytes = self.current_wal_bytes();
-        let should_swap_wal_bytes = current_wal_bytes >= *MAX_BYTES_UNTIL_WAL_SWITCH;
-        if should_swap_wal_bytes {
-            logger_debug!(
-                Some(self.current_wal_file_number),
-                None,
-                &format!("current_wal_bytes:{:?}", current_wal_bytes)
-            )
-        }
-        should_swap_wal_time || should_swap_wal_bytes
     }
 
     // we explictly don't implement Iterator because we need to be able to iterate
@@ -325,8 +364,12 @@ impl WalFileManager {
     // so we can't really have the iterator (which also needs a mut ref)
     // floating around. So we're doing this manually
     pub fn next_line(&mut self, next_line_string: &String) -> WalLineResult {
-        self.current_wal_file.write(next_line_string.as_str());
-        self.handle_next_line(next_line_string.clone())
+        if let WalFileMode::Reprocessing(_) = self.wal_file_mode {
+            WalLineResult::WalLine()
+        } else {
+            self.current_wal_file.write(next_line_string.as_str());
+            self.handle_next_line(next_line_string.clone())
+        }
     }
 
     fn handle_next_line(&mut self, line: String) -> WalLineResult {
