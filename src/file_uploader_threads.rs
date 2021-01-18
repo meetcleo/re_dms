@@ -8,6 +8,7 @@ use crate::{function, logger_debug, logger_error, logger_info, logger_panic};
 use crate::change_processing;
 use crate::file_uploader::{CleoS3File, FileUploader};
 use crate::parser::TableName;
+use crate::shutdown_handler::ShutdownHandler;
 use crate::wal_file_manager::WalFile;
 
 pub const DEFAULT_CHANNEL_SIZE: usize = 1000;
@@ -184,6 +185,14 @@ impl FileUploaderThreads {
         let mut last_table_name = None;
         let mut last_wal_number = None;
         loop {
+            if ShutdownHandler::shutting_down_messily() {
+                logger_error!(
+                    last_wal_number,
+                    last_table_name.as_deref(),
+                    "shutting_down_file_uploader_threads_messily"
+                );
+                return;
+            };
             // need to do things this way rather than a match for the borrow checker
             let received = receiver.recv().await;
             if let Some(change) = received {

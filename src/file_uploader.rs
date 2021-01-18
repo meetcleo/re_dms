@@ -1,4 +1,3 @@
-use crate::wal_file_manager::WalFile;
 use backoff::Error as BackoffError;
 use futures::TryStreamExt;
 use lazy_static::lazy_static;
@@ -13,7 +12,9 @@ use crate::{function, logger_debug, logger_error, logger_info, logger_panic};
 use crate::exponential_backoff::*;
 use crate::file_writer::{FileStruct, FileWriter};
 use crate::parser::{ChangeKind, ColumnInfo, TableName};
+use crate::shutdown_handler::ShutdownHandler;
 use crate::wal_file_manager;
+use crate::wal_file_manager::WalFile;
 
 pub struct FileUploader {
     s3_client: S3Client,
@@ -152,7 +153,11 @@ impl FileUploader {
         // if we don't have any cleo s3 files... first off, bit weird that we sent a file writer here
         // but secondly, we'd need to clean up the wal file
         file_writer.wal_file.maybe_remove_wal_file();
-        cleo_s3_files
+        if cleo_s3_files.iter().any(Result::is_err) {
+            vec![]
+        } else {
+            cleo_s3_files.into_iter().filter_map(Result::ok).collect()
+        }
     }
 
     pub async fn upload_to_s3_with_backoff(
@@ -160,17 +165,23 @@ impl FileUploader {
         wal_file: &mut wal_file_manager::WalFile,
         file_name: &str,
         file_struct: &FileStruct,
-    ) -> CleoS3File {
+    ) -> Result<CleoS3File, BackoffError<RusotoError<PutObjectError>>> {
         // for simplicity, this
         let result = (|| async { self.upload_to_s3(wal_file, file_name, file_struct).await })
             .retry(default_exponential_backoff())
             .await;
         match result {
-            Ok(s3_file) => s3_file,
+            Ok(s3_file) => Ok(s3_file),
             Err(err) => {
                 // belt and bracers, this won't get deleted
                 wal_file.register_error();
-                panic!("File Upload failed for {}, error: {}", file_name, err);
+                ShutdownHandler::register_messy_shutdown();
+                logger_error!(
+                    Some(wal_file.file_number),
+                    Some(&file_struct.table_name),
+                    &format!("file_upload_failed file:{} error:{}", file_name, err)
+                );
+                Err(err)?
             }
         }
     }

@@ -2,7 +2,9 @@
 #![deny(warnings)]
 
 use clap::{App, Arg};
+use either::Either;
 use lazy_static::lazy_static;
+use std::convert::TryInto;
 use std::io::{self, BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -20,11 +22,11 @@ mod file_uploader_threads;
 mod file_writer;
 mod logger;
 mod parser;
+mod shutdown_handler;
 mod wal_file_manager;
 
 use file_uploader_threads::DEFAULT_CHANNEL_SIZE;
-
-use either::Either;
+use shutdown_handler::{RuntimeType, ShutdownHandler};
 
 lazy_static! {
     static ref OUTPUT_WAL_DIRECTORY: String =
@@ -83,17 +85,38 @@ async fn main() {
     let stdin = io::stdin();
     let locked_stdin = stdin.lock();
 
+    let mut child_process_guard = ChildGuard(None);
+
     // use either for match arms returning different types
     // very handy
     let buffered_reader = if !arg_matches.is_present("read_from_stdin") {
-        Either::Left(get_buffered_reader_process())
+        let (process, bufreader) = get_buffered_reader_process();
+
+        let process_id = process
+            .id()
+            .try_into()
+            .expect("pid that's greater than i32::MAX");
+        // register it to the childguard, so it gets shutdown in the event of a panic
+        child_process_guard.0 = Some(process);
+        ShutdownHandler::register_shutdown_handler(RuntimeType::from_pid(process_id));
+        // how to term the child process
+        Either::Left(bufreader)
     } else {
+        ShutdownHandler::register_shutdown_handler(RuntimeType::Stdin);
         Either::Right(locked_stdin)
     };
 
     for line in buffered_reader.lines() {
         if let Ok(ip) = line {
             let wal_file_manager_result = wal_file_manager.next_line(&ip);
+            let shutting_down = ShutdownHandler::shutting_down();
+            if shutting_down {
+                if ShutdownHandler::should_break_main_loop() {
+                    break;
+                } else if ShutdownHandler::shutting_down_messily() {
+                    return;
+                }
+            }
             let parsed_line = parser.parse(&ip);
             match parsed_line {
                 parser::ParsedLine::ContinueParse => {} // Intentionally left blank, continue parsing
@@ -114,6 +137,9 @@ async fn main() {
                 parser.register_wal_number(wal_file.file_number);
             }
         }
+    }
+    if ShutdownHandler::shutting_down_messily() {
+        return;
     }
     collector.print_stats();
 
@@ -149,8 +175,8 @@ async fn drain_collector_and_transmit(
     }
 }
 
-fn get_buffered_reader_process() -> BufReader<std::process::ChildStdout> {
-    let child = Command::new(PG_RECVLOGICAL_PATH.clone())
+fn get_buffered_reader_process() -> (std::process::Child, BufReader<std::process::ChildStdout>) {
+    let mut child = Command::new(PG_RECVLOGICAL_PATH.clone())
         .args(&[
             "--create-slot",
             "--start",
@@ -168,6 +194,47 @@ fn get_buffered_reader_process() -> BufReader<std::process::ChildStdout> {
         .expect("Failed to execute pg_recvlogical");
     let stdout = child
         .stdout
+        .take() // take allows us to avoid partially moving the child
         .expect("Failed to get stdout for pg_recvlogical");
-    BufReader::new(stdout)
+    (child, BufReader::new(stdout))
+}
+
+// https://stackoverflow.com/questions/30538004/how-do-i-ensure-that-a-spawned-child-process-is-killed-if-my-app-panics
+
+struct ChildGuard(Option<std::process::Child>);
+
+// I'm not sure if this is strictly needed.
+// we abort on panic, and if we panic, even without this code we get:
+// Command terminated by signal 6
+// still, this code feels correct so I'm including it.
+impl Drop for ChildGuard {
+    fn drop(&mut self) {
+        match &mut self.0 {
+            Some(process) => match process.kill() {
+                Err(e) => match e.kind() {
+                    std::io::ErrorKind::InvalidInput => {
+                        logger_info!(
+                            None,
+                            None,
+                            &format!(
+                                "Child process already killed during child guard dropping: {}",
+                                e
+                            )
+                        )
+                    }
+                    _unknown_error_kind => {
+                        logger_error!(None, None, &format!("Could not kill child process: {}", e))
+                    }
+                },
+                Ok(_) => logger_info!(None, None, "Successfully killed child process"),
+            },
+            None => {
+                logger_info!(
+                    None,
+                    None,
+                    "Child guard dropped with nothing registered to it."
+                )
+            }
+        }
+    }
 }
