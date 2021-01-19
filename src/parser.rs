@@ -236,9 +236,16 @@ pub enum ParsedLine {
 impl ParsedLine {
     pub fn find_id_column(&self) -> &Column {
         match self {
-            ParsedLine::ChangedData { columns, .. } => {
+            ParsedLine::ChangedData {
+                columns,
+                table_name,
+                ..
+            } => {
                 // unwrap because this is the id column which _must_ be here
-                columns.iter().find(|&x| x.is_id_column()).unwrap()
+                columns
+                    .iter()
+                    .find(|&x| x.is_id_column())
+                    .expect(&format!("We have no id column for {}", table_name.as_ref()))
             }
             _ => panic!("tried to find id column of non changed_data"),
         }
