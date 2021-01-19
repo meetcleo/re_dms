@@ -1,0 +1,21 @@
+{
+	"agent": {
+		"metrics_collection_interval": 60,
+		"run_as_user": "cwagent",
+		"credentials_path":"/home/cwagent/.aws/credentials"
+	},
+	"logs": {
+		"logs_collected": {
+			"files": {
+				"collect_list": [
+					{
+						"file_path": "/var/log/syslog",
+						"log_group_name": "re_dms",
+						"log_stream_name": "{hostname}/syslog",
+						"timestamp_format" :"%b %d %H:%M:%S"
+					}
+                                ]
+                        }
+               }
+       }
+}
