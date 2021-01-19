@@ -3,4 +3,7 @@
   become: yes
   become_user: root
   roles:
-    - re_dms
+    - name: re_dms
+      tags: re_dms
+    - name: cloudwatch
+      tags: cloudwatch
