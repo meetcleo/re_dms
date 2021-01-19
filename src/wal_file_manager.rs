@@ -44,14 +44,6 @@ pub struct WalFile {
     file: Arc<Option<Mutex<WalFileInternal>>>,
 }
 
-// this feels like a lot to do in a destructor (fs stuff!)
-// lets keep it explicit for now
-// impl Drop for WalFile {
-//     fn drop(&mut self) {
-//         self.maybe_remove_wal_file();
-//     }
-// }
-
 #[derive(Debug)]
 struct WalFileInternal {
     file: File,
@@ -97,7 +89,11 @@ impl PartialEq for WalFile {
 
 impl WalFile {
     // creates a new wal file and associated directory and returns a struct representing it.
-    pub fn new(wal_file_number: u64, wal_file_directory: &Path) -> WalFile {
+    pub fn new(
+        wal_file_number: u64,
+        wal_file_directory: &Path,
+        wal_file_mode: WalFileMode,
+    ) -> WalFile {
         let path = Self::path_for_wal_file_class(wal_file_number, wal_file_directory);
         let directory_path =
             Self::path_for_wal_directory_class(wal_file_number, wal_file_directory);
@@ -118,15 +114,20 @@ impl WalFile {
             None,
             &format!("creating wal file {:?}", path)
         );
-        // use atomic file creation. Bail if a file already exists
-        let file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(path.clone())
-            .expect(&format!(
-                "Unable to create wal file: {}",
-                path.to_str().unwrap_or("unprintable non-utf-8 path")
-            ));
+        let mut open_options = OpenOptions::new();
+        match wal_file_mode {
+            WalFileMode::Processing => {
+                // use atomic file creation. Bail if a file already exists
+                open_options.write(true).create_new(true);
+            }
+            WalFileMode::Reprocessing(_) => {
+                open_options.read(true);
+            }
+        }
+        let file = open_options.open(path.clone()).expect(&format!(
+            "Unable to create wal file: {}",
+            path.to_str().unwrap_or("unprintable non-utf-8 path")
+        ));
         WalFile {
             file_number: wal_file_number,
             file: Arc::new(Some(Mutex::new(WalFileInternal::new(file)))),
@@ -220,6 +221,12 @@ impl WalFile {
     }
 }
 
+#[derive(Debug, Clone)]
+pub enum WalFileMode {
+    Processing,
+    Reprocessing(String),
+}
+
 #[derive(Debug)]
 pub struct WalFileManager {
     // the number of our wal file. starts at 1, goes to i64::maxint at which point we break
@@ -227,18 +234,55 @@ pub struct WalFileManager {
     current_wal_file: WalFile,
     output_wal_directory: PathBuf,
     last_swapped_wal: Instant,
+    wal_file_mode: WalFileMode,
 }
 
 impl WalFileManager {
     pub fn new(output_wal_directory: &Path) -> WalFileManager {
         let new_wal_file_number =
             Self::get_next_wal_filenumber_from_filesystem(output_wal_directory);
-        let first_wal_file = WalFile::new(new_wal_file_number, output_wal_directory);
+        let first_wal_file = WalFile::new(
+            new_wal_file_number,
+            output_wal_directory,
+            WalFileMode::Processing,
+        );
         WalFileManager {
             current_wal_file_number: new_wal_file_number,
             current_wal_file: first_wal_file,
             output_wal_directory: output_wal_directory.to_path_buf(),
             last_swapped_wal: Instant::now(),
+            wal_file_mode: WalFileMode::Processing,
+        }
+    }
+
+    pub fn reprocess(output_wal_directory: &Path, wal_file_path: String) -> WalFileManager {
+        let file_name = Path::new(&wal_file_path)
+            .file_stem()
+            .expect(&format!(
+                "error getting path stem of wal file: {}",
+                wal_file_path
+            ))
+            .to_str()
+            .expect(&format!(
+                "error turning wal path stem to string: {}",
+                wal_file_path
+            ));
+
+        let wal_file_number = u64::from_str_radix(file_name, 16).expect(&format!(
+            "error parsing wal file name as u64 from: {}",
+            wal_file_path
+        ));
+        let first_wal_file = WalFile::new(
+            wal_file_number,
+            output_wal_directory,
+            WalFileMode::Reprocessing(wal_file_path.clone()),
+        );
+        WalFileManager {
+            current_wal_file_number: wal_file_number,
+            current_wal_file: first_wal_file,
+            output_wal_directory: output_wal_directory.to_path_buf(),
+            last_swapped_wal: Instant::now(),
+            wal_file_mode: WalFileMode::Reprocessing(wal_file_path),
         }
     }
 
@@ -286,6 +330,7 @@ impl WalFileManager {
         let next_wal = WalFile::new(
             self.current_wal_file_number,
             self.output_wal_directory.as_path(),
+            self.wal_file_mode.clone(),
         );
         // this will only delete if we didn't send any changes off to the change processor
         self.current_wal_file.maybe_remove_wal_file();
@@ -293,30 +338,34 @@ impl WalFileManager {
     }
 
     fn should_swap_wal(&mut self) -> bool {
-        // 10 minutes
-        let should_swap_wal_time =
-            self.last_swapped_wal.elapsed() >= Duration::new(*SECONDS_UNTIL_WAL_SWITCH, 0);
-        if should_swap_wal_time {
-            logger_debug!(
-                Some(self.current_wal_file_number),
-                None,
-                &format!(
-                    "swap_wal_elapsed:{:?} last_swapped_wal:{:?}",
-                    self.last_swapped_wal.elapsed(),
-                    self.last_swapped_wal
+        if let WalFileMode::Reprocessing(_) = self.wal_file_mode {
+            false
+        } else {
+            // 10 minutes
+            let should_swap_wal_time =
+                self.last_swapped_wal.elapsed() >= Duration::new(*SECONDS_UNTIL_WAL_SWITCH, 0);
+            if should_swap_wal_time {
+                logger_debug!(
+                    Some(self.current_wal_file_number),
+                    None,
+                    &format!(
+                        "swap_wal_elapsed:{:?} last_swapped_wal:{:?}",
+                        self.last_swapped_wal.elapsed(),
+                        self.last_swapped_wal
+                    )
+                );
+            }
+            let current_wal_bytes = self.current_wal_bytes();
+            let should_swap_wal_bytes = current_wal_bytes >= *MAX_BYTES_UNTIL_WAL_SWITCH;
+            if should_swap_wal_bytes {
+                logger_debug!(
+                    Some(self.current_wal_file_number),
+                    None,
+                    &format!("current_wal_bytes:{:?}", current_wal_bytes)
                 )
-            );
+            }
+            should_swap_wal_time || should_swap_wal_bytes
         }
-        let current_wal_bytes = self.current_wal_bytes();
-        let should_swap_wal_bytes = current_wal_bytes >= *MAX_BYTES_UNTIL_WAL_SWITCH;
-        if should_swap_wal_bytes {
-            logger_debug!(
-                Some(self.current_wal_file_number),
-                None,
-                &format!("current_wal_bytes:{:?}", current_wal_bytes)
-            )
-        }
-        should_swap_wal_time || should_swap_wal_bytes
     }
 
     // we explictly don't implement Iterator because we need to be able to iterate
@@ -326,8 +375,12 @@ impl WalFileManager {
     // so we can't really have the iterator (which also needs a mut ref)
     // floating around. So we're doing this manually
     pub fn next_line(&mut self, next_line_string: &String) -> WalLineResult {
-        self.current_wal_file.write(next_line_string.as_str());
-        self.handle_next_line(next_line_string.clone())
+        if let WalFileMode::Reprocessing(_) = self.wal_file_mode {
+            WalLineResult::WalLine()
+        } else {
+            self.current_wal_file.write(next_line_string.as_str());
+            self.handle_next_line(next_line_string.clone())
+        }
     }
 
     fn handle_next_line(&mut self, line: String) -> WalLineResult {
@@ -360,6 +413,7 @@ pub enum WalLineResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use glob::{glob_with, MatchOptions};
     use std::io::{BufRead, BufReader};
 
     // NOTE: I think this is actually run globally before all tests. Seems fine to me though.
@@ -396,9 +450,13 @@ mod tests {
         // first create a wal file with a number
         let number = 127;
         let directory_path = PathBuf::from(TESTING_PATH);
-        WalFile::new(number, directory_path.as_path());
-        WalFile::new(1, directory_path.as_path()); // couple of other smaller numbers too
-        WalFile::new(number - 1, directory_path.as_path());
+        WalFile::new(number, directory_path.as_path(), WalFileMode::Processing);
+        WalFile::new(1, directory_path.as_path(), WalFileMode::Processing); // couple of other smaller numbers too
+        WalFile::new(
+            number - 1,
+            directory_path.as_path(),
+            WalFileMode::Processing,
+        );
         let wal_file_manager = WalFileManager::new(directory_path.as_path());
         assert_eq!(wal_file_manager.current_wal_file.file_number, number + 1)
     }
@@ -406,7 +464,7 @@ mod tests {
     #[test]
     fn wal_file_directory() {
         let directory_path = PathBuf::from(TESTING_PATH);
-        let wal_file = WalFile::new(31, directory_path.as_path());
+        let wal_file = WalFile::new(31, directory_path.as_path(), WalFileMode::Processing);
 
         assert_eq!(
             wal_file.path_for_wal_directory(),
@@ -428,7 +486,7 @@ mod tests {
     fn new_wal_file() {
         clear_testing_directory();
         let directory_path = PathBuf::from(TESTING_PATH);
-        let mut wal_file = WalFile::new(1, directory_path.as_path());
+        let mut wal_file = WalFile::new(1, directory_path.as_path(), WalFileMode::Processing);
         assert_eq!(wal_file.file_number, 1);
         assert!(Path::new("/tmp/wal_testing/0000000000000001.wal").exists());
         wal_file.maybe_remove_wal_file();
@@ -439,7 +497,7 @@ mod tests {
     fn wal_file_wont_be_deleted_if_cloned() {
         clear_testing_directory();
         let directory_path = PathBuf::from(TESTING_PATH);
-        let mut wal_file = WalFile::new(1, directory_path.as_path());
+        let mut wal_file = WalFile::new(1, directory_path.as_path(), WalFileMode::Processing);
         let _cloned_wal_file = wal_file.clone();
         assert_eq!(wal_file.file_number, 1);
         assert!(Path::new("/tmp/wal_testing/0000000000000001.wal").exists());
@@ -452,7 +510,7 @@ mod tests {
     fn wal_file_wont_be_deleted_if_there_is_an_error() {
         clear_testing_directory();
         let directory_path = PathBuf::from(TESTING_PATH);
-        let mut wal_file = WalFile::new(1, directory_path.as_path());
+        let mut wal_file = WalFile::new(1, directory_path.as_path(), WalFileMode::Processing);
         wal_file.register_error();
         assert_eq!(wal_file.file_number, 1);
         assert!(Path::new("/tmp/wal_testing/0000000000000001.wal").exists());
@@ -561,5 +619,76 @@ mod tests {
         }
 
         std::env::set_var("MAX_BYTES_UNTIL_WAL_SWITCH", "1000000000");
+    }
+
+    fn len_of_file(path: &str) -> u64 {
+        let metadata = fs::metadata(path).expect(&format!("Unable to find file: {}", path));
+        metadata.len()
+    }
+
+    fn size_of_output_dir() -> usize {
+        let options = MatchOptions {
+            case_sensitive: false,
+            ..Default::default()
+        };
+        glob_with(&format!("{}/*.wal", TESTING_PATH), options)
+            .expect("Unable to check for existing WAL files")
+            .count()
+    }
+
+    #[test]
+    fn wal_file_reprocessing_integration_test() {
+        clear_testing_directory();
+        let filename = &format!("{}/0000000000000001.wal", TESTING_PATH);
+        fs::copy("test/parser.txt", filename).expect(&format!(
+            "Unable to copy test file to output dir, here: {}",
+            filename
+        ));
+        assert_eq!(size_of_output_dir(), 1);
+        assert!(Path::new(filename).exists());
+        {
+            let directory_path = PathBuf::from(TESTING_PATH);
+            let mut wal_file_manager =
+                WalFileManager::reprocess(directory_path.as_path(), filename.to_string());
+
+            let input_file = File::open(filename).unwrap();
+            let reader = BufReader::new(input_file);
+            let mut iter = reader.lines();
+
+            let original_length = len_of_file(filename);
+            assert_ne!(0, original_length);
+            // 3 blocks of begin, table, commit
+            for _ in 0..3 {
+                let current_wal_file = wal_file_manager.current_wal();
+                let begin = wal_file_manager.next_line(&iter.next().unwrap().unwrap());
+                if let WalLineResult::WalLine() = begin {
+                    assert_eq!(size_of_output_dir(), 1);
+                    assert_eq!(len_of_file(filename), original_length);
+                } else {
+                    panic!("begin line swapped WAL when it should not have")
+                }
+
+                let table = wal_file_manager.next_line(&iter.next().unwrap().unwrap());
+                if let WalLineResult::WalLine() = table {
+                    assert_eq!(size_of_output_dir(), 1);
+                    assert_eq!(len_of_file(filename), original_length);
+                } else {
+                    panic!("table line swapped WAL when it should not have");
+                }
+                // we advance 10 minutes before the commit line
+                MockClock::advance(Duration::from_secs(600));
+
+                let commit = wal_file_manager.next_line(&iter.next().unwrap().unwrap());
+                if let WalLineResult::WalLine(..) = commit {
+                    assert_eq!(size_of_output_dir(), 1);
+                    assert_eq!(wal_file_manager.current_wal(), current_wal_file);
+                    assert_eq!(len_of_file(filename), original_length);
+                } else {
+                    panic!("commit line swapped WAL when it should not have");
+                }
+            }
+            wal_file_manager.clean_up_final_wal_file();
+        }
+        assert!(!Path::new(filename).exists());
     }
 }
