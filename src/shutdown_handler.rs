@@ -25,13 +25,14 @@ pub struct ShutdownHandler {
 pub enum RuntimeType {
     Stdin,
     Process(Pid),
+    File,
 }
 impl RuntimeType {
     pub fn from_pid(id: i32) -> RuntimeType {
         RuntimeType::Process(Pid::from_raw(id))
     }
-    pub fn is_stdin(&self) -> bool {
-        matches!(self, RuntimeType::Stdin)
+    pub fn no_child(&self) -> bool {
+        matches!(self, RuntimeType::Stdin) || matches!(self, RuntimeType::File)
     }
     pub fn run_shutdown(&self) {
         match self {
@@ -41,6 +42,9 @@ impl RuntimeType {
                 signal::kill(pid.clone(), Signal::SIGTERM).unwrap();
             }
             Self::Stdin => {
+                // No-Op
+            }
+            Self::File => {
                 // No-Op
             }
         }
@@ -153,6 +157,6 @@ impl ShutdownHandler {
                     "Should break loop called before shutdown handler has been registered. How?",
                 )
                 .runtime_type
-                .is_stdin()
+                .no_child()
     }
 }

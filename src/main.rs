@@ -3,8 +3,10 @@
 
 use clap::{App, Arg};
 use either::Either;
+use glob::{glob_with, MatchOptions};
 use lazy_static::lazy_static;
 use std::convert::TryInto;
+use std::fs::File;
 use std::io::{self, BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -39,23 +41,18 @@ lazy_static! {
         std::env::var("SOURCE_CONNECTION_STRING").expect("SOURCE_CONNECTION_STRING env is not set");
 }
 
+#[derive(Debug, Clone)]
+enum InputType {
+    Stdin,
+    Wal(String),
+    PgRcvlogical,
+}
+
 #[tokio::main]
 async fn main() {
     ShutdownHandler::register_signal_handlers();
     dotenv().ok();
     env_logger::init();
-
-    let arg_matches = App::new("re_dms")
-        .version("0.1")
-        .author("MeetCleo. <team@meetcleo.com>")
-        .about("replication from postgres to redshift")
-        .arg(
-            Arg::with_name("read_from_stdin")
-                .short("-")
-                .long("stdin")
-                .help("Makes the process read from stdin instead of starting a subprocess"),
-        )
-        .get_matches();
 
     let mut parser = parser::Parser::new(true);
     let mut collector = change_processing::ChangeProcessing::new();
@@ -75,76 +72,123 @@ async fn main() {
         database_writer_threads::DatabaseWriterThreads::spawn_database_writer_stream(
             database_receiver,
         );
-    let mut wal_file_manager = wal_file_manager::WalFileManager::new(
-        PathBuf::from(OUTPUT_WAL_DIRECTORY.clone()).as_path(),
-    );
-    collector.register_wal_file(Some(wal_file_manager.current_wal()));
-    // for logging
-    parser.register_wal_number(wal_file_manager.current_wal().file_number);
-
-    // need to define this at this level so it lives long enough
-    let stdin = io::stdin();
-    let locked_stdin = stdin.lock();
 
     let mut child_process_guard = ChildGuard(None);
+    let mut wal_file_manager;
+    let mut previous_input_type = None;
+    loop {
+        // need to define this at this level so it lives long enough
+        let stdin = io::stdin();
+        let locked_stdin = stdin.lock();
 
-    // use either for match arms returning different types
-    // very handy
-    let buffered_reader = if !arg_matches.is_present("read_from_stdin") {
-        let (process, bufreader) = get_buffered_reader_process();
+        let input_type = input_type(previous_input_type);
+        previous_input_type = Some(input_type.clone());
+        let buffered_reader = if let InputType::PgRcvlogical = input_type {
+            let (process, bufreader) = get_buffered_reader_process();
 
-        let process_id = process
-            .id()
-            .try_into()
-            .expect("pid that's greater than i32::MAX");
-        // register it to the childguard, so it gets shutdown in the event of a panic
-        child_process_guard.0 = Some(process);
-        ShutdownHandler::register_shutdown_handler(RuntimeType::from_pid(process_id));
-        // how to term the child process
-        Either::Left(bufreader)
-    } else {
-        ShutdownHandler::register_shutdown_handler(RuntimeType::Stdin);
-        Either::Right(locked_stdin)
-    };
+            let process_id = process
+                .id()
+                .try_into()
+                .expect("pid that's greater than i32::MAX");
+            // register it to the childguard, so it gets shutdown in the event of a panic
+            child_process_guard.0 = Some(process);
+            ShutdownHandler::register_shutdown_handler(RuntimeType::from_pid(process_id));
+            // how to term the child process
+            Either::Right(bufreader)
+        } else {
+            let reader: Box<dyn BufRead> = match &input_type {
+                InputType::Stdin => {
+                    logger_info!(None, None, "Reading from stdin");
+                    ShutdownHandler::register_shutdown_handler(RuntimeType::Stdin);
+                    Box::new(locked_stdin)
+                }
 
-    for line in buffered_reader.lines() {
-        if let Ok(ip) = line {
-            let wal_file_manager_result = wal_file_manager.next_line(&ip);
+                InputType::Wal(wal_path) => {
+                    logger_info!(
+                        None,
+                        None,
+                        &format!("Reading from existing WAL: {}", wal_path)
+                    );
+                    ShutdownHandler::register_shutdown_handler(RuntimeType::File);
+                    Box::new(BufReader::new(
+                        File::open(wal_path)
+                            .expect(&format!("Unable to open existing WAL at {}", wal_path)),
+                    ))
+                }
+                InputType::PgRcvlogical => {
+                    panic!("Should never have gotten here as PgRcvlogical is handled separately")
+                }
+            };
+            Either::Left(reader)
+        };
+
+        wal_file_manager = match &input_type {
+            InputType::Wal(file_path) => wal_file_manager::WalFileManager::reprocess(
+                PathBuf::from(OUTPUT_WAL_DIRECTORY.clone()).as_path(),
+                file_path.clone(),
+            ),
+            _ => wal_file_manager::WalFileManager::new(
+                PathBuf::from(OUTPUT_WAL_DIRECTORY.clone()).as_path(),
+            ),
+        };
+
+        collector.register_wal_file(Some(wal_file_manager.current_wal()));
+        // for logging
+        parser.register_wal_number(wal_file_manager.current_wal().file_number);
+
+        for line in buffered_reader.lines() {
+            if let Ok(ip) = line {
+                let wal_file_manager_result = wal_file_manager.next_line(&ip);
+                let shutting_down = ShutdownHandler::shutting_down();
+                if shutting_down {
+                    if ShutdownHandler::should_break_main_loop() {
+                        break;
+                    } else if ShutdownHandler::shutting_down_messily() {
+                        return;
+                    }
+                }
+                let parsed_line = parser.parse(&ip);
+                match parsed_line {
+                    parser::ParsedLine::ContinueParse => {} // Intentionally left blank, continue parsing
+                    _ => {
+                        if let Some(change_vec) = collector.add_change(parsed_line) {
+                            for change in change_vec {
+                                file_transmitter.send(change).await.expect(
+                                    "Error writing to file_transmitter channel. Channel dropped.",
+                                );
+                            }
+                        }
+                    }
+                }
+                if let wal_file_manager::WalLineResult::SwapWal(wal_file) = wal_file_manager_result
+                {
+                    // drain the collector of all it's tables, and send to file transmitter
+                    drain_collector_and_transmit(&mut collector, &mut file_transmitter).await;
+                    collector.register_wal_file(Some(wal_file.clone()));
+                    parser.register_wal_number(wal_file.file_number);
+                }
+            }
+        }
+        if ShutdownHandler::shutting_down_messily() {
+            return;
+        }
+        logger_info!(None, None, "exitted_main_loop");
+
+        drain_collector_and_transmit(&mut collector, &mut file_transmitter).await;
+
+        if let InputType::Wal(_) = input_type {
             let shutting_down = ShutdownHandler::shutting_down();
             if shutting_down {
                 if ShutdownHandler::should_break_main_loop() {
                     break;
-                } else if ShutdownHandler::shutting_down_messily() {
-                    return;
+                } else {
+                    continue;
                 }
             }
-            let parsed_line = parser.parse(&ip);
-            match parsed_line {
-                parser::ParsedLine::ContinueParse => {} // Intentionally left blank, continue parsing
-                _ => {
-                    if let Some(change_vec) = collector.add_change(parsed_line) {
-                        for change in change_vec {
-                            file_transmitter.send(change).await.expect(
-                                "Error writing to file_transmitter channel. Channel dropped.",
-                            );
-                        }
-                    }
-                }
-            }
-            if let wal_file_manager::WalLineResult::SwapWal(wal_file) = wal_file_manager_result {
-                // drain the collector of all it's tables, and send to file transmitter
-                drain_collector_and_transmit(&mut collector, &mut file_transmitter).await;
-                collector.register_wal_file(Some(wal_file.clone()));
-                parser.register_wal_number(wal_file.file_number);
-            }
+        } else {
+            break;
         }
     }
-    if ShutdownHandler::shutting_down_messily() {
-        return;
-    }
-    logger_info!(None, None, "exitted_main_loop");
-
-    drain_collector_and_transmit(&mut collector, &mut file_transmitter).await;
 
     // make sure we close the channel to let things propogate
     drop(file_transmitter);
@@ -238,6 +282,58 @@ impl Drop for ChildGuard {
                     "Child guard dropped with nothing registered to it."
                 )
             }
+        }
+    }
+}
+
+fn input_type(previous_input_type: Option<InputType>) -> InputType {
+    let arg_matches = App::new("re_dms")
+        .version("0.1")
+        .author("MeetCleo. <team@meetcleo.com>")
+        .about("replication from postgres to redshift")
+        .arg(
+            Arg::with_name("read_from_stdin")
+                .short("-")
+                .long("stdin")
+                .help("Makes the process read from stdin instead of starting a subprocess"),
+        )
+        .get_matches();
+
+    if arg_matches.is_present("read_from_stdin") {
+        InputType::Stdin
+    } else {
+        let options = MatchOptions {
+            case_sensitive: false,
+            ..Default::default()
+        };
+
+        let existing_wals = glob_with(&format!("{}/*.wal", *OUTPUT_WAL_DIRECTORY), options)
+            .expect("Unable to check for existing WAL files")
+            .filter_map(|file_path| match file_path {
+                Ok(path) => {
+                    let filename = path
+                        .to_str()
+                        .expect("Invalid UTF filename for WAL file")
+                        .to_string();
+                    if let Some(InputType::Wal(previous_wal_file)) = previous_input_type.clone() {
+                        if filename > previous_wal_file {
+                            Some(filename)
+                        } else {
+                            None
+                        }
+                    } else {
+                        Some(filename)
+                    }
+                }
+                Err(_e) => panic!("unreadable path. What did you do?"),
+            });
+
+        let earliest_wal = existing_wals.min();
+
+        if let Some(path) = earliest_wal {
+            InputType::Wal(path)
+        } else {
+            InputType::PgRcvlogical
         }
     }
 }
