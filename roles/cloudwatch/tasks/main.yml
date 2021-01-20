@@ -26,6 +26,14 @@
     comment: CloudWatchAgent
     group: adm
 
+- name: setup re_dms log group
+  local_action:
+    module: community.aws.cloudwatchlogs_log_group
+    log_group_name: re_dms
+    retention: 14
+  become: false
+  tags: log-group
+
 # this will install the cloudwatch agent, but not start anything.
 - name: install and configure amazon cloudwatch agent
   include_role:
@@ -34,7 +42,9 @@
     cwa_conf_json_file_content: "{{ cwa_conf_json_file_content_variable.stdout }}"
     cwa_agent_mode: "ec2"
 
+# note logs: tail /opt/aws/amazon-cloudwatch-agent/logs/amazon-cloudwatch-agent.log
+
 - name: start systemd service
   ansible.builtin.systemd:
-    state: started
+    state: restarted
     name: amazon-cloudwatch-agent
