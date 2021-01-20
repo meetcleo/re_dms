@@ -552,6 +552,7 @@ impl ChangeProcessing {
 mod tests {
     use super::*;
     use crate::parser::*;
+    use crate::wal_file_manager::WalFileMode;
     use maplit::{hashmap, hashset};
     use std::fs;
     use std::path::PathBuf;
@@ -566,7 +567,11 @@ mod tests {
     const TESTING_PATH: &str = "/tmp/wal_change_processing_testing";
 
     fn new_wal_file() -> WalFile {
-        WalFile::new(1, PathBuf::from(TESTING_PATH).as_path())
+        WalFile::new(
+            1,
+            PathBuf::from(TESTING_PATH).as_path(),
+            WalFileMode::Processing,
+        )
     }
 
     fn clear_testing_directory() {
