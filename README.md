@@ -105,3 +105,9 @@ Tailing the logs of the re_dms service:
 
 `$ sudo journalctl -f -u re_dms`
 
+
+## configuring cloudwatch (optional)
+```
+$ ansible-galaxy install christiangda.amazon_cloudwatch_agent
+$ ansible-playbook -i hosts re_dms.yml --tags cloudwatch
+```

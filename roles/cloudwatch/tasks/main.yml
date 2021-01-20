@@ -1,2 +1,40 @@
 ---
 # tasks file for cloudwatch
+
+# this entire next task is a hack to get the following
+# cwa_conf_json_file_content_variable: "{{ lookup('file', 'example_cloudwatch.json') | from_json }}"
+# this is needed because when you include_role below, variables are executed in the child roles
+# context. if something from the included role references this variable within a `vars/something.yml`
+# file it will then have an incorrect file searchpath, so lookup returns None
+# which messes the included role up.
+- name: read_config_file
+  local_action:
+    module: ansible.builtin.shell
+    _raw_params: "/bin/cat {{ role_path }}/files/example_cloudwatch.json"
+  register: cwa_conf_json_file_content_variable
+  become: false
+  run_once: true
+
+- name: debug
+  debug:
+    msg: "{{ cwa_conf_json_file_content_variable.stdout }}"
+  tags: debug
+
+- name: Add the user cwauser and add them to the group adm to allow them to read syslog
+  user:
+    name: cwagent
+    comment: CloudWatchAgent
+    group: adm
+
+# this will install the cloudwatch agent, but not start anything.
+- name: install and configure amazon cloudwatch agent
+  include_role:
+    name: christiangda.amazon_cloudwatch_agent
+  vars:
+    cwa_conf_json_file_content: "{{ cwa_conf_json_file_content_variable.stdout }}"
+    cwa_agent_mode: "ec2"
+
+- name: start systemd service
+  ansible.builtin.systemd:
+    state: started
+    name: amazon-cloudwatch-agent
