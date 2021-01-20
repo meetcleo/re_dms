@@ -397,6 +397,10 @@ impl Table {
         });
         (number_of_ids, number_of_changes)
     }
+
+    fn len(&self) -> usize {
+        self.changeset.len()
+    }
 }
 
 impl TableHolder {
@@ -415,6 +419,13 @@ impl TableHolder {
     // number of tables
     fn len(&self) -> usize {
         self.tables.len()
+    }
+
+    fn changes_len(&self) -> usize {
+        self.tables
+            .iter()
+            .map(|(_table_name, table)| table.len())
+            .sum()
     }
 }
 
@@ -443,7 +454,7 @@ impl ChangeProcessing {
             .map(|wal_file| wal_file.maybe_remove_wal_file());
 
         // it's an error to register a wal file while we have any changes left in our tables
-        if self.table_holder.len() != 0 {
+        if self.table_holder.changes_len() != 0 {
             panic!("Tried to register wal file while we have changes in our tables");
         }
         self.associated_wal_file = associated_wal_file;
@@ -519,19 +530,22 @@ impl ChangeProcessing {
         file_writer
     }
 
-    // this drains every table from the changeset,
+    // this empties every table from the changeset,
     // writes the files, and returns them
+    // This will however keep each table in the HashMap so that we
+    // keep the schema of the tables, and don't lose any
+    // schema info which we use for ddl changes
     pub fn drain_final_changes(&mut self) -> Vec<ChangeProcessingResult> {
         let maybe_associated_wal_file = self.associated_wal_file.clone();
         // error if associated_wal_file is null
         let resulting_vec = self
             .table_holder
             .tables
-            .drain()
+            .iter_mut()
             .map(|(_table_name, table)| {
                 // need to clone again because this is in a loop
                 let file_writer = Self::write_files_for_table(
-                    table,
+                    table.reset_and_return_table_data(), // this
                     maybe_associated_wal_file
                         .clone()
                         .expect("Error: trying to write tables with no wal file"),
