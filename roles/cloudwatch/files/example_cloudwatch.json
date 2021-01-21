@@ -86,13 +86,6 @@
         ]
       }
     },
-    "append_dimensions": {
-      "ImageId": "${aws:ImageId}",
-      "InstanceId": "${aws:InstanceId}",
-      "InstanceType": "${aws:InstanceType}",
-      "AutoScalingGroupName": "${aws:AutoScalingGroupName}"
-    },
-    "aggregation_dimensions" : [["ImageId"], ["InstanceId", "InstanceType"], ["d1"],[]],
     "force_flush_interval" : 30
   },
   "logs": {
