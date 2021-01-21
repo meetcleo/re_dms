@@ -1,0 +1,105 @@
+{
+	"agent": {
+		"metrics_collection_interval": 60,
+		"run_as_user": "cwagent",
+		"credentials_path":"/home/cwagent/.aws/credentials"
+	},
+  "metrics": {
+    "namespace": "re_dms",
+    "metrics_collected": {
+      "cpu": {
+        "resources": [
+          "*"
+        ],
+        "measurement": [
+          "cpu_usage_idle",
+          "cpu_usage_iowait",
+          "cpu_usage_system",
+          "cpu_usage_user",
+          "cpu_time_idle",
+          "cpu_time_iowait",
+          "cpu_time_system",
+          "cpu_time_user"
+        ],
+        "totalcpu": true,
+        "metrics_collection_interval": 10
+      },
+      "disk": {
+        "resources": [
+          "*"
+        ],
+        "measurement": [
+          "free",
+          "total",
+          "used"
+        ],
+        "ignore_file_system_types": [
+          "sysfs", "devtmpfs"
+        ],
+        "metrics_collection_interval": 60
+      },
+      "diskio": {
+        "resources": [
+          "*"
+        ],
+        "measurement": [
+          "reads",
+          "writes",
+          "read_time",
+          "write_time",
+          "io_time"
+        ],
+        "metrics_collection_interval": 60
+      },
+      "swap": {
+        "measurement": [
+          "swap_used",
+          "swap_free",
+          "swap_used_percent"
+        ]
+      },
+      "mem": {
+        "measurement": [
+          "mem_used_percent",
+          "mem_cached",
+          "mem_total"
+        ],
+        "metrics_collection_interval": 1
+      },
+      "net": {
+        "resources": [
+          "eth0"
+        ],
+        "measurement": [
+          "bytes_sent",
+          "bytes_recv",
+          "drop_in",
+          "drop_out"
+        ]
+      },
+      "processes": {
+        "measurement": [
+          "total",
+          "running",
+          "sleeping",
+          "dead"
+        ]
+      }
+    },
+    "force_flush_interval" : 30
+  },
+  "logs": {
+    "logs_collected": {
+      "files": {
+        "collect_list": [
+          {
+            "file_path": "/var/log/syslog",
+            "log_group_name": "re_dms",
+            "log_stream_name": "{hostname}/syslog",
+            "timestamp_format" :"%b %d %H:%M:%S"
+          }
+        ]
+      }
+    }
+  }
+}

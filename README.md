@@ -109,3 +109,12 @@ Tailing the logs of the re_dms service:
 
 `$ sudo journalctl -f -u re_dms`
 
+
+## configuring cloudwatch (optional)
+for details on the metrics and file format see [metrics](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/metrics-collected-by-CloudWatch-agent.html#linux-metrics-enabled-by-CloudWatch-agent) and [config file format](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-Agent-Configuration-File-Details.html)
+```
+$ ansible-galaxy install christiangda.amazon_cloudwatch_agent
+$ pip install boto # needed for creating the log group with community.aws.cloudwatchlogs_log_group
+$ ansible-galaxy collection install community.aws
+$ ansible-playbook -i hosts re_dms.yml --tags cloudwatch --extra-vars "cloudwatch_aws_access_key_id=SOME_ACCESS_KEY_ID cloudwatch_aws_access_key_secret=SOME_SECRET" # or however you want to provide these variables
+```
