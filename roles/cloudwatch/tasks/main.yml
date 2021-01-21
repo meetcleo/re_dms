@@ -61,5 +61,7 @@
 
 - name: start systemd service
   ansible.builtin.systemd:
-    state: restarted
     name: amazon-cloudwatch-agent
+    state: restarted
+    enabled: yes
+    daemon_reload: yes
