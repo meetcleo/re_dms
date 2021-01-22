@@ -90,6 +90,7 @@ Build the executable for Linux:
 `make build`
 
 _We use a Docker container to build an executable that can run on Linux to avoid cross-compiling. Rust has decent cross-compilation support, but dependencies like SSL libraries are harder to support._
+_NOTE: the rollbar feature is enabled by default in the docker build called by the makefile._
 
 Deploy using ansible:
 

@@ -18,4 +18,4 @@ RUN set -x\
 COPY src/ src/
 RUN set -x\
     && find target/release -type f -name "$(echo "${app}" | tr '-' '_')*" -exec touch -t 200001010000 {} +\
-    && cargo build --release
+    && cargo build --release --features rollbar
