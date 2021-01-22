@@ -9,7 +9,7 @@ use signal_hook::consts::signal::*;
 use signal_hook::iterator::Signals;
 
 #[allow(unused_imports)]
-use crate::{function, logger_debug, logger_error, logger_info, logger_panic};
+use crate::{function, logger_debug, logger_error, logger_info, logger_panic, logger_warning};
 
 lazy_static! {
     static ref SHUTDOWN_HANDLER: Mutex<Option<ShutdownHandler>> = Mutex::new(None);
@@ -136,7 +136,7 @@ impl ShutdownHandler {
     }
 
     pub fn log_shutdown_status() {
-        logger_info!(
+        logger_warning!(
             None,
             None,
             &format!(
