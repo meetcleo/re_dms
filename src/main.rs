@@ -11,6 +11,10 @@ use std::io::{self, BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
+#[cfg(feature = "with_rollbar")]
+#[macro_use]
+extern crate rollbar;
+
 use dotenv::dotenv;
 
 use tokio::sync::mpsc;
@@ -53,6 +57,9 @@ async fn main() {
     ShutdownHandler::register_signal_handlers();
     dotenv().ok();
     env_logger::init();
+
+    #[cfg(feature = "with_rollbar")]
+    logger::register_panic_handler();
 
     let mut parser = parser::Parser::new(true);
     let mut collector = change_processing::ChangeProcessing::new();
@@ -207,6 +214,9 @@ async fn main() {
     wal_file_manager.clean_up_final_wal_file();
 
     ShutdownHandler::log_shutdown_status();
+
+    #[cfg(feature = "with_rollbar")]
+    logger::block_on_last_rollbar_thread_handle();
 }
 
 async fn drain_collector_and_transmit(
