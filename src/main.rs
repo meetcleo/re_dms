@@ -1,5 +1,5 @@
 #![feature(str_split_once)]
-#![deny(warnings)]
+// #![deny(warnings)]
 
 use clap::{App, Arg};
 use either::Either;
@@ -10,6 +10,10 @@ use std::fs::File;
 use std::io::{self, BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+
+#[cfg(feature = "with_rollbar")]
+#[macro_use]
+extern crate rollbar;
 
 use dotenv::dotenv;
 
@@ -53,6 +57,12 @@ async fn main() {
     ShutdownHandler::register_signal_handlers();
     dotenv().ok();
     env_logger::init();
+
+    #[cfg(feature = "with_rollbar")]
+    logger::register_panic_handler();
+
+    println!("rollbar registered");
+    panic!("Mike test");
 
     let mut parser = parser::Parser::new(true);
     let mut collector = change_processing::ChangeProcessing::new();
@@ -207,6 +217,7 @@ async fn main() {
     wal_file_manager.clean_up_final_wal_file();
 
     ShutdownHandler::log_shutdown_status();
+    std::thread::sleep(std::time::Duration::from_secs(20));
 }
 
 async fn drain_collector_and_transmit(

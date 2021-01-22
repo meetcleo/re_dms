@@ -4,7 +4,18 @@ version = "0.1.0"
 authors = ["Michael Hauser-Raspe <michael@meetcleo.com>"]
 edition = "2018"
 
+
+[features]
+
+# Feature names must not conflict with other package names in the manifest. This is because they are opted into via features = [...], which only has a single namespace.
+with_rollbar = ["rollbar", "backtrace"]
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+# let's include debug info in our release builds
+# https://stackoverflow.com/questions/38803760/how-to-get-a-release-build-with-debugging-information-when-using-cargo
+[profile.release]
+debug = true
 
 [dependencies]
 # general purpose tools
@@ -65,6 +76,9 @@ maplit = "1.0.2"
 # linux stuff
 nix = "0.19.1"
 signal-hook = "0.3.4"
+
+rollbar = { version = "0.7.0", optional = true }
+backtrace = { version = "0.3.56", optional = true }
 
 [dev_dependencies]
 mock_instant = { version = "0.2", features = ["sync"] }
