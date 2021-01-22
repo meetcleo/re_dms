@@ -99,6 +99,7 @@ Clean any build artefacts:
 
 `make clean`
 
+
 ## Runbook
 
 Managing the status|start|stop|restart of the re_dms service:
@@ -109,6 +110,14 @@ Tailing the logs of the re_dms service:
 
 `$ sudo journalctl -f -u re_dms`
 
+## Monitoring
+
+### configuring rollbar (optional)
+to build with rollbar error reporting you need to build with:
+```
+cargo build --features rollbar
+```
+and when running you need to specify the `ROLLBAR_ACCESS_TOKEN` environment variable.
 
 ## configuring cloudwatch (optional)
 for details on the metrics and file format see [metrics](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/metrics-collected-by-CloudWatch-agent.html#linux-metrics-enabled-by-CloudWatch-agent) and [config file format](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-Agent-Configuration-File-Details.html)
