@@ -217,7 +217,6 @@ async fn main() {
     wal_file_manager.clean_up_final_wal_file();
 
     ShutdownHandler::log_shutdown_status();
-    std::thread::sleep(std::time::Duration::from_secs(20));
 }
 
 async fn drain_collector_and_transmit(
