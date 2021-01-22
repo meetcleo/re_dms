@@ -21,3 +21,4 @@ SOURCE_CONNECTION_STRING=
 REPLICATION_SLOT=re_dms
 # comma separated e.g. TABLE_BLACKLIST="public.schema_migrations,public.ar_internal_metadata,some_other_schema.foobars"
 TABLE_BLACKLIST=
+TARGET_SCHEMA_NAME=
