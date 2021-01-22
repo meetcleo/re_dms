@@ -1,7 +1,7 @@
 #[cfg(feature = "with_rollbar")]
 use lazy_static::lazy_static;
 
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
 
 #[cfg(feature = "with_rollbar")]
 use backtrace;
@@ -67,6 +67,13 @@ macro_rules! logger_info {
 }
 
 #[macro_export]
+macro_rules! logger_warning {
+    ($wal_number:expr, $table_name:expr, $message:expr) => {
+        crate::logger::Logger::warning($wal_number, $table_name, function!(), $message);
+    };
+}
+
+#[macro_export]
 macro_rules! logger_error {
     ($wal_number:expr, $table_name:expr, $message:expr) => {
         crate::logger::Logger::error($wal_number, $table_name, function!(), $message);
@@ -95,6 +102,14 @@ impl Logger {
         #[cfg(feature = "with_rollbar")]
         report_error_message!(ROLLBAR_CLIENT, message);
         error!("{}", message);
+    }
+
+    pub fn warning(wal_number: Option<u64>, table_name: Option<&String>, tag: &str, message: &str) {
+        let message = Self::structured_format(wal_number, table_name, tag, message);
+
+        #[cfg(feature = "with_rollbar")]
+        report_warning_message!(ROLLBAR_CLIENT, message);
+        warn!("{}", message);
     }
 
     pub fn debug(wal_number: Option<u64>, table_name: Option<&String>, tag: &str, message: &str) {
