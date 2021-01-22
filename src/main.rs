@@ -1,5 +1,5 @@
 #![feature(str_split_once)]
-// #![deny(warnings)]
+#![deny(warnings)]
 
 use clap::{App, Arg};
 use either::Either;
@@ -60,9 +60,6 @@ async fn main() {
 
     #[cfg(feature = "with_rollbar")]
     logger::register_panic_handler();
-
-    println!("rollbar registered");
-    panic!("Mike test");
 
     let mut parser = parser::Parser::new(true);
     let mut collector = change_processing::ChangeProcessing::new();
@@ -217,6 +214,9 @@ async fn main() {
     wal_file_manager.clean_up_final_wal_file();
 
     ShutdownHandler::log_shutdown_status();
+
+    #[cfg(feature = "with_rollbar")]
+    logger::block_on_last_rollbar_thread_handle();
 }
 
 async fn drain_collector_and_transmit(
