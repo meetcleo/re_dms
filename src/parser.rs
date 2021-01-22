@@ -18,6 +18,7 @@ lazy_static! {
     static ref PARSE_COLUMN_REGEX: regex::Regex = Regex::new(r"(^[^\[^\]]+)\[([^:]+)\]:").unwrap();
     static ref COLUMN_TYPE_REGEX: regex::Regex = Regex::new(r"^.+\[\]$").unwrap();
     static ref TABLE_BLACKLIST: Vec<String> = env::var("TABLE_BLACKLIST").unwrap_or("".to_owned()).split(",").map(|x| x.to_owned()).collect();
+    static ref TARGET_SCHEMA_NAME: Option<String> = std::env::var("TARGET_SCHEMA_NAME").ok();
 }
 
 // for tablename
@@ -29,8 +30,13 @@ pub trait SchemaAndTable {
 // we assume a valid table name, so unwrap
 impl SchemaAndTable for TableName {
     fn schema_and_table_name(&self) -> (&str, &str) {
-        self.split_once('.')
-            .expect("can't split schema and table name. No `.` character")
+        let result = self
+            .split_once('.')
+            .expect("can't split schema and table name. No `.` character");
+        match &*TARGET_SCHEMA_NAME {
+            None => result,
+            Some(schema_name) => (schema_name, result.1),
+        }
     }
 }
 
