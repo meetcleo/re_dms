@@ -12,7 +12,7 @@ COPY Cargo.toml Cargo.lock ./
 RUN set -x\
     && mkdir -p src\
     && echo "fn main() {println!(\"broken\")}" > src/main.rs\
-    && cargo build --release
+    && cargo build --release --features rollbar
 
 # copy source and rebuild
 COPY src/ src/
