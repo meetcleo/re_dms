@@ -116,7 +116,7 @@ Tailing the logs of the re_dms service:
 ### configuring rollbar (optional)
 to build with rollbar error reporting you need to build with:
 ```
-cargo build --features rollbar
+cargo build --features with_rollbar
 ```
 and when running you need to specify the `ROLLBAR_ACCESS_TOKEN` environment variable.
 
