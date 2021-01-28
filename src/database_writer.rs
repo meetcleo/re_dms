@@ -510,11 +510,11 @@ impl DatabaseWriter {
     }
 
     fn column_type_mapping(&self, column_type: &str) -> String {
-        // TODO: for money if we care
-        // const DEFAULT_PRECISION: i32 = 19; // 99_999_999_999_999_999.99
-        // const DEFAULT_SCALE: i32 = 2;
+        const DEFAULT_PRECISION: i32 = 19; // 99_999_999_999_999_999.99999999
+        const DEFAULT_SCALE: i32 = 8;
+        // Postgres and Redshift have different default precision and scale for numerics. This is a workaround that prevents us from losing the information to the right of the decimal point during replication.
+        let numeric_type = &format!("NUMERIC({},{})", DEFAULT_PRECISION, DEFAULT_SCALE);
         // {"boolean", "double precision", "integer", "interval", "numeric", "public.hstore", "timestamp without time zone", "text", "character varying", "json", "bigint", "public.citext", "date", "uuid", "jsonb"}
-
         let return_type = match column_type {
             "text" => "CHARACTER VARYING(65535)",
             "json" => "CHARACTER VARYING(65535)",
@@ -527,6 +527,7 @@ impl DatabaseWriter {
             "public.hstore" => "CHARACTER VARYING(65535)",
             "uuid" => "CHARACTER VARYING(36)",
             "interval" => "CHARACTER VARYING(65535)",
+            "numeric" => numeric_type,
             _ => column_type,
         };
         return_type.to_string()
