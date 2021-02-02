@@ -8,6 +8,8 @@ use std::sync::{Arc, Mutex};
 use std::io::Write;
 use std::time::Duration;
 
+use crate::shutdown_handler::ShutdownHandler;
+
 #[allow(unused_imports)]
 use crate::{function, logger_debug, logger_error, logger_info, logger_panic};
 
@@ -205,6 +207,9 @@ impl WalFile {
             let locked_internal_file = self.with_locked_internal_file();
             // we don't remove the wal file if there was an error loading it
             if locked_internal_file.has_errors() {
+                return;
+            }
+            if ShutdownHandler::shutting_down_messily() {
                 return;
             }
             // We've locked our mutex, so we're safe from races
