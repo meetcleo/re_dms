@@ -12,6 +12,9 @@ use crate::change_processing::DdlChange;
 use crate::file_uploader::CleoS3File;
 use crate::parser::{ChangeKind, ColumnInfo, SchemaAndTable, TableName};
 
+pub const DEFAULT_NUMERIC_PRECISION: i32 = 19; // 99_999_999_999.99999999
+pub const DEFAULT_NUMERIC_SCALE: i32 = 8;
+
 pub struct DatabaseWriter {
     connection_pool: Pool,
 }
@@ -220,6 +223,7 @@ impl DatabaseWriter {
                     let error_string = format!("{}", tokio_error);
                     // we bail early if we have a db error here, as something is wrong.
                     if error_string.starts_with("db error") {
+                        s3_file.wal_file.register_error();
                         logger_panic!(
                             Some(wal_file_number),
                             Some(&table_name),
@@ -510,10 +514,11 @@ impl DatabaseWriter {
     }
 
     fn column_type_mapping(&self, column_type: &str) -> String {
-        const DEFAULT_PRECISION: i32 = 19; // 99_999_999_999_999_999.99999999
-        const DEFAULT_SCALE: i32 = 8;
         // Postgres and Redshift have different default precision and scale for numerics. This is a workaround that prevents us from losing the information to the right of the decimal point during replication.
-        let numeric_type = &format!("NUMERIC({},{})", DEFAULT_PRECISION, DEFAULT_SCALE);
+        let numeric_type = &format!(
+            "NUMERIC({},{})",
+            DEFAULT_NUMERIC_PRECISION, DEFAULT_NUMERIC_SCALE
+        );
         // {"boolean", "double precision", "integer", "interval", "numeric", "public.hstore", "timestamp without time zone", "text", "character varying", "json", "bigint", "public.citext", "date", "uuid", "jsonb"}
         let return_type = match column_type {
             "text" => "CHARACTER VARYING(65535)",

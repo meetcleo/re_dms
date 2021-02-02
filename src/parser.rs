@@ -65,10 +65,12 @@ pub enum ColumnValue {
     UnchangedToast,
 }
 
+#[derive(Debug, Eq, PartialEq)]
 pub enum ColumnTypeEnum {
     Boolean,
     Integer,
     Numeric,
+    RoundingNumeric,
     Text,
     Timestamp,
 }
@@ -294,6 +296,7 @@ impl ColumnValue {
                     ColumnTypeEnum::Integer => ColumnValue::parse_integer(string),
                     ColumnTypeEnum::Boolean => ColumnValue::parse_boolean(string),
                     ColumnTypeEnum::Numeric => ColumnValue::parse_numeric(string),
+                    ColumnTypeEnum::RoundingNumeric => ColumnValue::parse_rounding_numeric(string),
                     ColumnTypeEnum::Text => ColumnValue::parse_text(string, continue_parse),
                     ColumnTypeEnum::Timestamp => ColumnValue::parse_text(string, continue_parse),
                 };
@@ -306,8 +309,8 @@ impl ColumnValue {
             "bigint" => ColumnTypeEnum::Integer,
             "smallint" => ColumnTypeEnum::Integer,
             "integer" => ColumnTypeEnum::Integer,
-            "numeric" => ColumnTypeEnum::Numeric,
-            "decimal" => ColumnTypeEnum::Numeric,
+            "numeric" => ColumnTypeEnum::RoundingNumeric,
+            "decimal" => ColumnTypeEnum::RoundingNumeric,
             "double precision" => ColumnTypeEnum::Numeric,
             "boolean" => ColumnTypeEnum::Boolean,
             "character varying" => ColumnTypeEnum::Text,
@@ -404,6 +407,12 @@ impl ColumnValue {
         let (start, rest) = ColumnValue::split_until_char_or_end(string, ' ');
         (ColumnValue::Numeric(start.to_owned()), rest)
     }
+
+    fn parse_rounding_numeric<'a>(string: &'a str) -> (ColumnValue, &'a str) {
+        let (start, rest) = ColumnValue::split_until_char_or_end(string, ' ');
+        (ColumnValue::Numeric(start.to_owned()), rest)
+    }
+
     fn parse_boolean<'a>(string: &'a str) -> (ColumnValue, &'a str) {
         let (start, rest) = ColumnValue::split_until_char_or_end(string, ' ');
         let bool_value = match start {
@@ -825,6 +834,30 @@ mod tests {
                 kind: ChangeKind::Update
             }
         );
+    }
+
+    #[test]
+    fn parse_numeric_type_as_rounded() {
+        let mut parser = Parser::new(true);
+        let line = "table public.users: UPDATE: id[bigint]:123 foobar[numeric]:'1.11' baz[double precision]:'3.141'";
+        let mut result = parser.parse(&line.to_string());
+        assert!(matches!(result, ParsedLine::ChangedData{..}));
+        println!("{:?}", result);
+        if let ParsedLine::ChangedData {
+            ref mut columns, ..
+        } = result
+        {
+            let last = columns.pop();
+            assert_eq!(
+                last.unwrap().column_info().column_type_enum(),
+                ColumnTypeEnum::Numeric
+            );
+            let second = columns.pop();
+            assert_eq!(
+                second.unwrap().column_info().column_type_enum(),
+                ColumnTypeEnum::RoundingNumeric
+            );
+        }
     }
 
     use std::{collections::HashMap, hash::Hash};
