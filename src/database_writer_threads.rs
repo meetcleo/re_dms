@@ -44,10 +44,18 @@ impl DatabaseWriterThreads {
                 let current_table_name = table_name.clone();
                 let sender = database_uploader_stream.get_sender(table_name);
                 if let Some(ref mut inner_sender) = sender.sender {
-                    inner_sender.send(s3_file).await.expect(&format!(
-                        "Sending to database_uploader_streame {:?} failed, channel already closed.",
-                        current_table_name
-                    ));
+                    let send_result = inner_sender.send(s3_file).await;
+                    match send_result {
+                        Ok(()) => {}
+                        Err(err) => {
+                            ShutdownHandler::register_messy_shutdown();
+                            panic!(
+                                "Sending to database_uploader_stream {:?} failed, channel already closed. err: {:?}",
+                                current_table_name,
+                                err
+                            );
+                        }
+                    }
                 }
             } else {
                 logger_info!(None, None, "main_channel_hung_up");

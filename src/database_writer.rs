@@ -11,6 +11,7 @@ use crate::{function, logger_debug, logger_error, logger_info, logger_panic};
 use crate::change_processing::DdlChange;
 use crate::file_uploader::CleoS3File;
 use crate::parser::{ChangeKind, ColumnInfo, SchemaAndTable, TableName};
+use crate::shutdown_handler::ShutdownHandler;
 
 pub const DEFAULT_NUMERIC_PRECISION: i32 = 19; // 99_999_999_999.99999999
 pub const DEFAULT_NUMERIC_SCALE: i32 = 8;
@@ -223,7 +224,7 @@ impl DatabaseWriter {
                     let error_string = format!("{}", tokio_error);
                     // we bail early if we have a db error here, as something is wrong.
                     if error_string.starts_with("db error") {
-                        s3_file.wal_file.register_error();
+                        ShutdownHandler::register_messy_shutdown();
                         logger_panic!(
                             Some(wal_file_number),
                             Some(&table_name),
