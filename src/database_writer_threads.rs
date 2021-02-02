@@ -42,17 +42,13 @@ impl DatabaseWriterThreads {
             if let Some(s3_file) = received {
                 let table_name = s3_file.table_name();
                 let current_table_name = table_name.clone();
-                let mut wal_file = s3_file.wal_file();
                 let sender = database_uploader_stream.get_sender(table_name);
                 if let Some(ref mut inner_sender) = sender.sender {
                     let send_result = inner_sender.send(s3_file).await;
                     match send_result {
-                        Ok(()) => {
-                            wal_file.maybe_remove_wal_file();
-                            drop(wal_file);
-                        }
+                        Ok(()) => {}
                         Err(err) => {
-                            wal_file.register_error();
+                            ShutdownHandler::register_messy_shutdown();
                             panic!(
                                 "Sending to database_uploader_stream {:?} failed, channel already closed. err: {:?}",
                                 current_table_name,
