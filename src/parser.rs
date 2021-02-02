@@ -65,6 +65,7 @@ pub enum ColumnValue {
     UnchangedToast,
 }
 
+#[derive(Debug, Eq, PartialEq)]
 pub enum ColumnTypeEnum {
     Boolean,
     Integer,
@@ -833,6 +834,30 @@ mod tests {
                 kind: ChangeKind::Update
             }
         );
+    }
+
+    #[test]
+    fn parse_numeric_type_as_rounded() {
+        let mut parser = Parser::new(true);
+        let line = "table public.users: UPDATE: id[bigint]:123 foobar[numeric]:'1.11' baz[double precision]:'3.141'";
+        let mut result = parser.parse(&line.to_string());
+        assert!(matches!(result, ParsedLine::ChangedData{..}));
+        println!("{:?}", result);
+        if let ParsedLine::ChangedData {
+            ref mut columns, ..
+        } = result
+        {
+            let last = columns.pop();
+            assert_eq!(
+                last.unwrap().column_info().column_type_enum(),
+                ColumnTypeEnum::Numeric
+            );
+            let second = columns.pop();
+            assert_eq!(
+                second.unwrap().column_info().column_type_enum(),
+                ColumnTypeEnum::RoundingNumeric
+            );
+        }
     }
 
     use std::{collections::HashMap, hash::Hash};
