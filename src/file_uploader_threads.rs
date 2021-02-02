@@ -130,12 +130,21 @@ impl FileUploaderThreads {
             if let Some(file_writer) = received {
                 let table_name = file_writer.table_name();
                 let sender = file_uploader_stream.get_sender(table_name.clone(), &result_sender);
-                // TODO: handle error
                 if let Some(ref mut inner_sender) = sender.sender {
-                    inner_sender.send(file_writer).await.expect(&format!(
-                        "Unable to send from file_uploader_stream main to {}",
-                        table_name
-                    ));
+                    let mut wal_file = file_writer.wal_file();
+                    let send_result = inner_sender.send(file_writer).await;
+                    match send_result {
+                        Ok(()) => {
+                            wal_file.maybe_remove_wal_file();
+                        }
+                        Err(err) => {
+                            wal_file.register_error();
+                            panic!(
+                                "Unable to send from file_uploader_stream main to {}. err: {:?}",
+                                table_name, err
+                            );
+                        }
+                    }
                 }
                 sender
                     .sender
