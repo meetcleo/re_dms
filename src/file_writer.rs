@@ -1,5 +1,6 @@
 use bigdecimal::BigDecimal;
 use glob::glob;
+use lazy_static::lazy_static;
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
@@ -19,6 +20,15 @@ use std::str::FromStr;
 
 #[allow(unused_imports)]
 use crate::{function, logger_debug, logger_error, logger_info, logger_panic};
+
+lazy_static! {
+    // 99_999_999_999.99999999
+    static ref MAX_NUMERIC_VALUE: String = "9".repeat(
+        (DEFAULT_NUMERIC_PRECISION - DEFAULT_NUMERIC_SCALE)
+            as usize,
+    ) + "."
+        + "9".repeat(DEFAULT_NUMERIC_SCALE as usize).as_str();
+}
 
 // we have one of these per table,
 // it will hold the files to write to and handle the writing
@@ -187,12 +197,7 @@ impl FileStruct {
                                 if big_decimal.round(0).digits() as i32
                                     > DEFAULT_NUMERIC_PRECISION - DEFAULT_NUMERIC_SCALE
                                 {
-                                    let number: String = "9".repeat(
-                                        (DEFAULT_NUMERIC_PRECISION - DEFAULT_NUMERIC_SCALE)
-                                            as usize,
-                                    ) + "."
-                                        + "9".repeat(DEFAULT_NUMERIC_SCALE as usize).as_str();
-                                    number
+                                    MAX_NUMERIC_VALUE.clone()
                                 } else {
                                     // we need to round our internal stuff
                                     big_decimal
