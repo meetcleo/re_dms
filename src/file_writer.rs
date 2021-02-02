@@ -178,15 +178,28 @@ impl FileStruct {
                     .filter(|x| x.is_changed_data_column())
                     .map(|x| {
                         if let Some(value) = x.column_value_for_changed_column() {
-                            if let ColumnTypeEnum::Numeric = x.column_info().column_type_enum() {
+                            if let ColumnTypeEnum::RoundingNumeric =
+                                x.column_info().column_type_enum()
+                            {
                                 let big_decimal: BigDecimal =
                                     BigDecimal::from_str(&value.to_string())
                                         .expect("BigDecimal unable to be parsed");
-                                // we need to round our internal stuff
-                                big_decimal
-                                    .with_scale(DEFAULT_NUMERIC_SCALE as i64)
-                                    .with_prec(DEFAULT_NUMERIC_PRECISION as u64)
-                                    .to_string()
+                                if big_decimal.round(0).digits() as i32
+                                    > DEFAULT_NUMERIC_PRECISION - DEFAULT_NUMERIC_SCALE
+                                {
+                                    let number: String = "9".repeat(
+                                        (DEFAULT_NUMERIC_PRECISION - DEFAULT_NUMERIC_SCALE)
+                                            as usize,
+                                    ) + "."
+                                        + "9".repeat(DEFAULT_NUMERIC_SCALE as usize).as_str();
+                                    number
+                                } else {
+                                    // we need to round our internal stuff
+                                    big_decimal
+                                        .with_prec(DEFAULT_NUMERIC_PRECISION as u64) // precision doesn't round
+                                        .with_scale(DEFAULT_NUMERIC_SCALE as i64)
+                                        .to_string()
+                                }
                             } else {
                                 value.to_string()
                             }
