@@ -1,4 +1,6 @@
+use bigdecimal::BigDecimal;
 use glob::glob;
+use lazy_static::lazy_static;
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
@@ -12,8 +14,21 @@ use itertools::Itertools;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 
+use crate::database_writer::{DEFAULT_NUMERIC_PRECISION, DEFAULT_NUMERIC_SCALE};
+
+use std::str::FromStr;
+
 #[allow(unused_imports)]
 use crate::{function, logger_debug, logger_error, logger_info, logger_panic};
+
+lazy_static! {
+    // 99_999_999_999.99999999
+    static ref MAX_NUMERIC_VALUE: String = "9".repeat(
+        (DEFAULT_NUMERIC_PRECISION - DEFAULT_NUMERIC_SCALE)
+            as usize,
+    ) + "."
+        + "9".repeat(DEFAULT_NUMERIC_SCALE as usize).as_str();
+}
 
 // we have one of these per table,
 // it will hold the files to write to and handle the writing
@@ -173,7 +188,26 @@ impl FileStruct {
                     .filter(|x| x.is_changed_data_column())
                     .map(|x| {
                         if let Some(value) = x.column_value_for_changed_column() {
-                            value.to_string()
+                            if let ColumnTypeEnum::RoundingNumeric =
+                                x.column_info().column_type_enum()
+                            {
+                                let big_decimal: BigDecimal =
+                                    BigDecimal::from_str(&value.to_string())
+                                        .expect("BigDecimal unable to be parsed");
+                                if big_decimal.round(0).digits() as i32
+                                    > DEFAULT_NUMERIC_PRECISION - DEFAULT_NUMERIC_SCALE
+                                {
+                                    MAX_NUMERIC_VALUE.clone()
+                                } else {
+                                    // we need to round our internal stuff
+                                    big_decimal
+                                        .with_prec(DEFAULT_NUMERIC_PRECISION as u64) // precision doesn't round
+                                        .with_scale(DEFAULT_NUMERIC_SCALE as i64)
+                                        .to_string()
+                                }
+                            } else {
+                                value.to_string()
+                            }
                         } else {
                             match x.column_info().column_type_enum() {
                                 ColumnTypeEnum::Text => "\0".to_owned(),
