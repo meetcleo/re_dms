@@ -224,7 +224,6 @@ impl DatabaseWriter {
                     let error_string = format!("{}", tokio_error);
                     // we bail early if we have a db error here, as something is wrong.
                     if error_string.starts_with("db error") {
-                        s3_file.wal_file.register_error();
                         ShutdownHandler::register_messy_shutdown();
                         logger_panic!(
                             Some(wal_file_number),
