@@ -522,6 +522,7 @@ impl DatabaseWriter {
             "bytea" => "CHARACTER VARYING(65535)",
             "oid" => "CHARACTER VARYING(65535)",
             "ARRAY" => "CHARACTER VARYING(65535)",
+            "array" => "CHARACTER VARYING(65535)",
             "USER-DEFINED" => "CHARACTER VARYING(65535)",
             "public.citext" => "CHARACTER VARYING(65535)",
             "public.hstore" => "CHARACTER VARYING(65535)",
