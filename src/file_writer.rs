@@ -1,3 +1,4 @@
+use bigdecimal::BigDecimal;
 use glob::glob;
 use std::fs;
 use std::path::Path;
@@ -11,6 +12,10 @@ use itertools::Itertools;
 
 use flate2::write::GzEncoder;
 use flate2::Compression;
+
+use crate::database_writer::{DEFAULT_NUMERIC_PRECISION, DEFAULT_NUMERIC_SCALE};
+
+use std::str::FromStr;
 
 #[allow(unused_imports)]
 use crate::{function, logger_debug, logger_error, logger_info, logger_panic};
@@ -173,7 +178,18 @@ impl FileStruct {
                     .filter(|x| x.is_changed_data_column())
                     .map(|x| {
                         if let Some(value) = x.column_value_for_changed_column() {
-                            value.to_string()
+                            if let ColumnTypeEnum::Numeric = x.column_info().column_type_enum() {
+                                let big_decimal: BigDecimal =
+                                    BigDecimal::from_str(&value.to_string())
+                                        .expect("BigDecimal unable to be parsed");
+                                // we need to round our internal stuff
+                                big_decimal
+                                    .with_scale(DEFAULT_NUMERIC_SCALE as i64)
+                                    .with_prec(DEFAULT_NUMERIC_PRECISION as u64)
+                                    .to_string()
+                            } else {
+                                value.to_string()
+                            }
                         } else {
                             match x.column_info().column_type_enum() {
                                 ColumnTypeEnum::Text => "\0".to_owned(),
