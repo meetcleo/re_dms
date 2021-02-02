@@ -50,13 +50,6 @@ impl ChangeProcessingResult {
             Self::DdlChange(_, wal_file) => wal_file.file_number,
         }
     }
-
-    pub fn wal_file(&self) -> WalFile {
-        match self {
-            Self::TableChanges(file_writer) => file_writer.wal_file.clone(),
-            Self::DdlChange(_, wal_file) => wal_file.clone(),
-        }
-    }
 }
 
 impl ChangeSet {
