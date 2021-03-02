@@ -29,6 +29,7 @@ mod file_writer;
 mod logger;
 mod parser;
 mod shutdown_handler;
+mod targets_tables_column_names;
 mod wal_file_manager;
 
 use file_uploader_threads::DEFAULT_CHANNEL_SIZE;
@@ -61,8 +62,26 @@ async fn main() {
     #[cfg(feature = "with_rollbar")]
     logger::register_panic_handler();
 
+    let mut targets_tables_column_names =
+        targets_tables_column_names::TargetsTablesColumnNames::new();
+    let result = targets_tables_column_names.refresh().await;
+    match result {
+        Ok(_) => logger_info!(
+            None,
+            None,
+            &format!(
+                "Fetched column names for {} tables from target DB",
+                targets_tables_column_names.len()
+            )
+        ),
+        Err(msg) => logger_panic!(
+            None,
+            None,
+            &format!("Failed to fetch column names from target DB: {:?}", msg)
+        ),
+    };
     let mut parser = parser::Parser::new(true);
-    let mut collector = change_processing::ChangeProcessing::new();
+    let mut collector = change_processing::ChangeProcessing::new(targets_tables_column_names);
     // initialize our channels
     let (mut file_transmitter, file_receiver) =
         mpsc::channel::<change_processing::ChangeProcessingResult>(DEFAULT_CHANNEL_SIZE);
