@@ -1,4 +1,7 @@
-use crate::parser::{ChangeKind, Column, ColumnInfo, ColumnValue, ParsedLine, TableName};
+use crate::parser::{
+    ChangeKind, Column, ColumnInfo, ColumnName, ColumnType, ColumnValue, ParsedLine, TableName,
+};
+use crate::targets_tables_column_names::{Table as TableFromTarget, TargetsTablesColumnNames};
 use crate::wal_file_manager::WalFile;
 use itertools::Itertools;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -249,6 +252,7 @@ struct Table {
     changeset: ChangeSetWithColumnType,
     column_info: Option<HashSet<ColumnInfo>>,
     table_name: TableName,
+    column_info_from_target: Option<TableFromTarget>,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -257,16 +261,22 @@ struct TableHolder {
 }
 
 impl Table {
-    fn new(parsed_line: &ParsedLine) -> Table {
+    fn new(
+        parsed_line: &ParsedLine,
+        targets_tables_column_names: &TargetsTablesColumnNames,
+    ) -> Table {
         if let ParsedLine::ChangedData { table_name, .. } = parsed_line {
             let id_column = parsed_line.find_id_column().column_value_unwrap();
             let changeset = ChangeSetWithColumnType::new(id_column);
-            let column_info = parsed_line.column_info_set();
+            let column_info = None; // Don't trust the column info from the first parsed line as there might have been schema changes already
             let table_name = table_name.clone();
+            let column_info_from_target =
+                targets_tables_column_names.get_by_name(&table_name.clone());
             Table {
                 changeset,
                 column_info,
                 table_name,
+                column_info_from_target,
             }
         } else {
             panic!(
@@ -300,10 +310,12 @@ impl Table {
         let column_info = self.column_info.clone();
         let table_name = self.table_name.clone();
         let changeset = self.changeset.empty_and_return();
+        let column_info_from_target = None::<TableFromTarget>;
         Table {
             changeset,
             column_info,
             table_name,
+            column_info_from_target,
         }
     }
 
@@ -349,17 +361,64 @@ impl Table {
     }
 
     fn has_ddl_changes(&self, parsed_line: &ParsedLine) -> bool {
-        let incoming_column_info = parsed_line.column_info_set();
-        incoming_column_info.is_some()
-            && self.column_info.is_some()
-            && incoming_column_info != self.column_info
+        let column_info_set = parsed_line.column_info_set();
+        match column_info_set {
+            Some(incoming_column_info) => match &self.column_info {
+                Some(previous_column_info) => incoming_column_info != previous_column_info.clone(),
+                None => match &self.column_info_from_target {
+                    Some(cached_column_info) => cached_column_info_has_ddl_changes(
+                        &incoming_column_info,
+                        &cached_column_info,
+                    ),
+                    None => false,
+                },
+            },
+            None => false,
+        }
+    }
+
+    fn convert_target_column_info(
+        &self,
+        new_column_info: &HashSet<ColumnInfo>,
+    ) -> HashSet<ColumnInfo> {
+        // Make a lookup so that we can easily grab the column type info
+        let new_column_info_name_map: HashMap<ColumnName, ColumnType> = new_column_info
+            .iter()
+            .map(|column_info| (column_info.name.clone(), column_info.column_type.clone()))
+            .collect();
+        // Grab column types where possible (missing column type doesn't matter as it only occurs when a column is removed)
+        self.column_info_from_target
+            .as_ref()
+            .unwrap()
+            .column_info
+            .clone()
+            .iter()
+            .map(|cached_column_info| ColumnInfo {
+                name: cached_column_info.name.clone(),
+                column_type: new_column_info_name_map
+                    .get(&cached_column_info.name)
+                    .unwrap_or(&ColumnType::new("n/a".to_string()))
+                    .clone(),
+            })
+            .collect()
     }
 
     fn ddl_changes(&self, parsed_line: &ParsedLine) -> Vec<DdlChange> {
-        // these unwraps are safe, because we only call this if has_ddl_changes
-        // so the Option can't be None
         let new_column_info = &parsed_line.column_info_set().unwrap();
-        let old_column_info = &self.column_info.clone().unwrap();
+        let old_column_info = match self.column_info.clone() {
+            Some(column_info) => column_info,
+            None => {
+                logger_info!(
+                    None,
+                    None, // all tables
+                    &format!(
+                        "processing_ddl_change_on_first_parsed_line_for_table: {}",
+                        self.column_info_from_target.as_ref().unwrap().name
+                    )
+                );
+                self.convert_target_column_info(new_column_info)
+            }
+        };
         if !self.has_ddl_changes(parsed_line) {
             vec![]
         } else if new_column_info
@@ -378,7 +437,7 @@ impl Table {
             )
         } else {
             let mut added_ddl = new_column_info
-                .difference(old_column_info)
+                .difference(&old_column_info)
                 .map(|info| DdlChange::AddColumn(info.clone(), self.table_name.clone()))
                 .collect::<Vec<_>>();
             let removed_ddl = old_column_info
@@ -404,12 +463,16 @@ impl Table {
 }
 
 impl TableHolder {
-    fn add_change(&mut self, parsed_line: ParsedLine) -> Option<(Table, Option<Vec<DdlChange>>)> {
+    fn add_change(
+        &mut self,
+        parsed_line: ParsedLine,
+        targets_tables_column_names: &TargetsTablesColumnNames,
+    ) -> Option<(Table, Option<Vec<DdlChange>>)> {
         if let ParsedLine::ChangedData { ref table_name, .. } = parsed_line {
             // these are cheap since this is an interned string
             self.tables
                 .entry(table_name.clone())
-                .or_insert_with(|| Table::new(&parsed_line))
+                .or_insert_with(|| Table::new(&parsed_line, targets_tables_column_names))
                 .add_change(parsed_line)
         } else {
             None
@@ -433,14 +496,16 @@ impl TableHolder {
 pub struct ChangeProcessing {
     table_holder: TableHolder,
     associated_wal_file: Option<WalFile>,
+    targets_tables_column_names: TargetsTablesColumnNames,
 }
 
 impl ChangeProcessing {
-    pub fn new() -> ChangeProcessing {
+    pub fn new(targets_tables_column_names: TargetsTablesColumnNames) -> ChangeProcessing {
         let hash_map = HashMap::new();
         ChangeProcessing {
             table_holder: TableHolder { tables: hash_map },
             associated_wal_file: None,
+            targets_tables_column_names: targets_tables_column_names,
         }
     }
 
@@ -469,7 +534,7 @@ impl ChangeProcessing {
             ParsedLine::ChangedData { .. } => {
                 // map here maps over the option
                 // NOTE: this means that we must return a table if we want to return a ddl result
-                self.table_holder.add_change(parsed_line).map(
+                self.table_holder.add_change(parsed_line, &self.targets_tables_column_names).map(
                     |(returned_table, maybe_ddl_changes)| {
                         let mut start_vec = vec![ChangeProcessingResult::TableChanges(
                             Self::write_files_for_table(
@@ -562,6 +627,23 @@ impl ChangeProcessing {
     }
 }
 
+fn cached_column_info_has_ddl_changes(
+    incoming: &HashSet<ColumnInfo>,
+    other: &TableFromTarget,
+) -> bool {
+    let column_names: HashSet<ColumnName> = incoming
+        .into_iter()
+        .map(|column| column.name.clone())
+        .collect();
+    let cached_column_names: HashSet<ColumnName> = other
+        .column_info
+        .clone()
+        .into_iter()
+        .map(|column| column.name.clone())
+        .collect();
+    column_names != cached_column_names
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -597,7 +679,164 @@ mod tests {
         fs::create_dir_all(directory_path.clone()).unwrap();
     }
 
-    // this is basically an integration test, but that's fine
+    #[test]
+    fn ddl_change_add_column_detect_from_cache() {
+        clear_testing_directory();
+        let table_name = TableName::new("foobar".to_string());
+        let id_column_info = ColumnInfo::new("id", "bigint");
+        let new_column_info = ColumnInfo::new("foobar", "bigint");
+        let first_changed_columns = vec![
+            Column::ChangedColumn {
+                column_info: id_column_info.clone(),
+                value: Some(ColumnValue::Integer(1)),
+            }, // id column
+            Column::ChangedColumn {
+                column_info: new_column_info.clone(),
+                value: Some(ColumnValue::Integer(1)),
+            }, // new column
+        ];
+        let second_changed_columns = vec![
+            Column::ChangedColumn {
+                column_info: id_column_info.clone(),
+                value: Some(ColumnValue::Integer(2)),
+            }, // id column
+            Column::ChangedColumn {
+                column_info: new_column_info.clone(),
+                value: Some(ColumnValue::Integer(1)),
+            }, // new column
+        ];
+        let first_change = ParsedLine::ChangedData {
+            kind: ChangeKind::Insert,
+            table_name: table_name.clone(),
+            columns: first_changed_columns,
+        };
+        // check we have the new schema and can keep adding changes
+        let second_change = ParsedLine::ChangedData {
+            kind: ChangeKind::Update,
+            table_name: table_name.clone(),
+            columns: second_changed_columns,
+        };
+        let mut tables_columns_names_map = HashMap::new();
+        tables_columns_names_map.insert(
+            table_name.clone(),
+            vec![id_column_info.clone().name].iter().cloned().collect(),
+        );
+        let mut change_processing =
+            ChangeProcessing::new(TargetsTablesColumnNames::from_map(tables_columns_names_map));
+        change_processing.register_wal_file(Some(new_wal_file()));
+        let blank_stats_hash = hashmap!();
+        assert_eq!(change_processing.get_stats(), blank_stats_hash);
+        let mut first_result = change_processing.add_change(first_change);
+        let single_entry_stats_hash = hashmap!(&table_name => 1);
+        assert_eq!(change_processing.get_stats(), single_entry_stats_hash);
+        let second_result = change_processing.add_change(second_change);
+        let double_entry_stats_hash = hashmap!(&table_name => 2);
+        assert_eq!(change_processing.get_stats(), double_entry_stats_hash);
+        assert!(first_result.is_some());
+        assert!(second_result.is_none());
+        // now lets assert stuff our first result is as we expect it to be
+        if let Some(ref mut change_vec) = first_result {
+            // table change and ddl change
+            assert_eq!(change_vec.len(), 2);
+
+            let table_change = change_vec.remove(0);
+            assert!(matches!(
+                table_change,
+                ChangeProcessingResult::TableChanges(..)
+            ));
+            let ddl_change = change_vec.remove(0);
+            if let ChangeProcessingResult::DdlChange(
+                DdlChange::AddColumn(column_info, _table_name),
+                _,
+            ) = ddl_change
+            {
+                assert_eq!(column_info, new_column_info);
+            } else {
+                panic!("doesn't match add_column");
+            };
+        } else {
+            panic!("first_result does not contain a table");
+        }
+    }
+
+    #[test]
+    fn ddl_change_remove_column_detect_from_cache() {
+        clear_testing_directory();
+        let table_name = TableName::new("foobar".to_string());
+        let id_column_info = ColumnInfo::new("id", "bigint");
+        let removed_column_info = ColumnInfo::new("foobar", "bigint");
+        let first_changed_columns = vec![
+            Column::ChangedColumn {
+                column_info: id_column_info.clone(),
+                value: Some(ColumnValue::Integer(1)),
+            }, // id column
+        ];
+        let second_changed_columns = vec![
+            Column::ChangedColumn {
+                column_info: id_column_info.clone(),
+                value: Some(ColumnValue::Integer(2)),
+            }, // id column
+        ];
+        let first_change = ParsedLine::ChangedData {
+            kind: ChangeKind::Insert,
+            table_name: table_name.clone(),
+            columns: first_changed_columns,
+        };
+        // check we have the new schema and can keep adding changes
+        let second_change = ParsedLine::ChangedData {
+            kind: ChangeKind::Update,
+            table_name: table_name.clone(),
+            columns: second_changed_columns,
+        };
+        let mut tables_columns_names_map = HashMap::new();
+        tables_columns_names_map.insert(
+            table_name.clone(),
+            vec![
+                id_column_info.clone().name,
+                removed_column_info.clone().name,
+            ]
+            .iter()
+            .cloned()
+            .collect(),
+        );
+        let mut change_processing =
+            ChangeProcessing::new(TargetsTablesColumnNames::from_map(tables_columns_names_map));
+        change_processing.register_wal_file(Some(new_wal_file()));
+        let blank_stats_hash = hashmap!();
+        assert_eq!(change_processing.get_stats(), blank_stats_hash);
+        let mut first_result = change_processing.add_change(first_change);
+        let single_entry_stats_hash = hashmap!(&table_name => 1);
+        assert_eq!(change_processing.get_stats(), single_entry_stats_hash);
+        let second_result = change_processing.add_change(second_change);
+        let double_entry_stats_hash = hashmap!(&table_name => 2);
+        assert_eq!(change_processing.get_stats(), double_entry_stats_hash);
+        assert!(first_result.is_some());
+        assert!(second_result.is_none());
+        // now lets assert stuff our first result is as we expect it to be
+        if let Some(ref mut change_vec) = first_result {
+            // table change and ddl change
+            assert_eq!(change_vec.len(), 2);
+
+            let table_change = change_vec.remove(0);
+            assert!(matches!(
+                table_change,
+                ChangeProcessingResult::TableChanges(..)
+            ));
+            let ddl_change = change_vec.remove(0);
+            if let ChangeProcessingResult::DdlChange(
+                DdlChange::RemoveColumn(column_info, _table_name),
+                _,
+            ) = ddl_change
+            {
+                assert_eq!(column_info.name, removed_column_info.name);
+            } else {
+                panic!("doesn't match add_column");
+            };
+        } else {
+            panic!("first_result does not contain a table");
+        }
+    }
+
     #[test]
     fn ddl_change_add_column() {
         clear_testing_directory();
@@ -620,7 +859,7 @@ mod tests {
         ];
         let third_changed_columns = vec![
             Column::ChangedColumn {
-                column_info: id_column_info,
+                column_info: id_column_info.clone(),
                 value: Some(ColumnValue::Integer(2)),
             }, // id column
             Column::ChangedColumn {
@@ -644,7 +883,13 @@ mod tests {
             table_name: table_name.clone(),
             columns: third_changed_columns,
         };
-        let mut change_processing = ChangeProcessing::new();
+        let mut tables_columns_names_map = HashMap::new();
+        tables_columns_names_map.insert(
+            table_name.clone(),
+            vec![id_column_info.clone().name].iter().cloned().collect(),
+        );
+        let mut change_processing =
+            ChangeProcessing::new(TargetsTablesColumnNames::from_map(tables_columns_names_map));
         change_processing.register_wal_file(Some(new_wal_file()));
         let blank_stats_hash = hashmap!();
         assert_eq!(change_processing.get_stats(), blank_stats_hash);
@@ -729,7 +974,8 @@ mod tests {
             table_name: table_name.clone(),
             columns: third_changed_columns,
         };
-        let mut change_processing = ChangeProcessing::new();
+        let mut change_processing =
+            ChangeProcessing::new(TargetsTablesColumnNames::from_map(HashMap::new()));
         change_processing.register_wal_file(Some(new_wal_file()));
         let blank_stats_hash = hashmap!();
         assert_eq!(change_processing.get_stats(), blank_stats_hash);
@@ -836,7 +1082,8 @@ mod tests {
             table_name: table_name.clone(),
             columns: third_changed_columns,
         };
-        let mut change_processing = ChangeProcessing::new();
+        let mut change_processing =
+            ChangeProcessing::new(TargetsTablesColumnNames::from_map(HashMap::new()));
         change_processing.register_wal_file(Some(new_wal_file()));
         let blank_stats_hash = hashmap!();
         assert_eq!(change_processing.get_stats(), blank_stats_hash);
@@ -906,7 +1153,8 @@ mod tests {
             table_name: table_name.clone(),
             columns: changed_columns_1,
         };
-        let mut change_processing = ChangeProcessing::new();
+        let mut change_processing =
+            ChangeProcessing::new(TargetsTablesColumnNames::from_map(HashMap::new()));
         let result_1 = change_processing.add_change(change_1);
         let mut expected_changes_1 = BTreeMap::<i64, ChangeSet>::new();
         expected_changes_1.insert(
@@ -933,7 +1181,8 @@ mod tests {
             tables: hashmap!(table_name.clone() => Table {
                 table_name: table_name.clone(),
                 column_info: Some(hashset!(id_column_info.clone(), text_column_info.clone())),
-                changeset: expected_change_set_1 }),
+                changeset: expected_change_set_1,
+                column_info_from_target: None::<TableFromTarget>}),
         };
         assert_eq!(change_processing.table_holder, expected_table_holder_1);
         assert!(result_1.is_none());
@@ -980,7 +1229,8 @@ mod tests {
             tables: hashmap!(table_name.clone() => Table {
                 table_name: table_name.clone(),
                 column_info: Some(hashset!(id_column_info.clone(), text_column_info.clone())),
-                changeset: expected_change_set_2 }),
+                changeset: expected_change_set_2,
+                column_info_from_target: None::<TableFromTarget> }),
         };
         assert_eq!(change_processing.table_holder, expected_table_holder_2);
         assert!(result_2.is_none());
@@ -1003,7 +1253,8 @@ mod tests {
             tables: hashmap!(table_name.clone() => Table {
                 table_name: table_name.clone(),
                 column_info: Some(hashset!(id_column_info.clone(), text_column_info.clone())),
-                changeset: expected_change_set_3 }),
+                changeset: expected_change_set_3,
+                column_info_from_target: None::<TableFromTarget> }),
         };
         assert_eq!(change_processing.table_holder, expected_table_holder_3);
         assert!(result_3.is_none());
@@ -1031,7 +1282,8 @@ mod tests {
             table_name: table_name.clone(),
             columns: changed_columns_1,
         };
-        let mut change_processing = ChangeProcessing::new();
+        let mut change_processing =
+            ChangeProcessing::new(TargetsTablesColumnNames::from_map(HashMap::new()));
         change_processing.add_change(change_1.clone());
         change_processing.add_change(change_1.clone());
     }
@@ -1063,7 +1315,8 @@ mod tests {
             table_name: table_name.clone(),
             columns: changed_columns_1.clone(),
         };
-        let mut change_processing = ChangeProcessing::new();
+        let mut change_processing =
+            ChangeProcessing::new(TargetsTablesColumnNames::from_map(HashMap::new()));
         change_processing.add_change(change_1.clone());
         change_processing.add_change(change_2.clone());
     }
@@ -1095,7 +1348,8 @@ mod tests {
             table_name: table_name.clone(),
             columns: changed_columns_1.clone(),
         };
-        let mut change_processing = ChangeProcessing::new();
+        let mut change_processing =
+            ChangeProcessing::new(TargetsTablesColumnNames::from_map(HashMap::new()));
         change_processing.add_change(change_1.clone());
         change_processing.add_change(change_2.clone());
     }
@@ -1126,7 +1380,8 @@ mod tests {
             table_name: table_name.clone(),
             columns: changed_columns_1.clone(),
         };
-        let mut change_processing = ChangeProcessing::new();
+        let mut change_processing =
+            ChangeProcessing::new(TargetsTablesColumnNames::from_map(HashMap::new()));
         change_processing.add_change(change_1.clone());
         change_processing.add_change(change_2.clone());
 
@@ -1155,7 +1410,8 @@ mod tests {
             tables: hashmap!(table_name.clone() => Table {
                 table_name: table_name.clone(),
                 column_info: Some(hashset!(id_column_info.clone(), text_column_info.clone())),
-                changeset: expected_change_set_1 }),
+                changeset: expected_change_set_1,
+                column_info_from_target: None::<TableFromTarget> }),
         };
         assert_eq!(change_processing.table_holder, expected_table_holder_1);
     }
@@ -1182,7 +1438,8 @@ mod tests {
             table_name: table_name.clone(),
             columns: changed_columns_1,
         };
-        let mut change_processing = ChangeProcessing::new();
+        let mut change_processing =
+            ChangeProcessing::new(TargetsTablesColumnNames::from_map(HashMap::new()));
         let result_1 = change_processing.add_change(change_1);
         let mut expected_changes_1 = BTreeMap::<i64, ChangeSet>::new();
         expected_changes_1.insert(
@@ -1209,7 +1466,8 @@ mod tests {
             tables: hashmap!(table_name.clone() => Table {
                 table_name: table_name.clone(),
                 column_info: Some(hashset!(id_column_info.clone(), text_column_info.clone())),
-                changeset: expected_change_set_1 }),
+                changeset: expected_change_set_1,
+                column_info_from_target: None::<TableFromTarget> }),
         };
         assert_eq!(change_processing.table_holder, expected_table_holder_1);
         assert!(result_1.is_none());
@@ -1256,7 +1514,8 @@ mod tests {
             tables: hashmap!(table_name.clone() => Table {
                 table_name: table_name.clone(),
                 column_info: Some(hashset!(id_column_info.clone(), text_column_info.clone())),
-                changeset: expected_change_set_2 }),
+                changeset: expected_change_set_2,
+                column_info_from_target: None::<TableFromTarget> }),
         };
         assert_eq!(change_processing.table_holder, expected_table_holder_2);
         assert!(result_2.is_none());
@@ -1291,7 +1550,8 @@ mod tests {
             tables: hashmap!(table_name.clone() => Table {
                 table_name: table_name.clone(),
                 column_info: Some(hashset!(id_column_info.clone(), text_column_info.clone())),
-                changeset: expected_change_set_3 }),
+                changeset: expected_change_set_3,
+                column_info_from_target: None::<TableFromTarget> }),
         };
         assert_eq!(change_processing.table_holder, expected_table_holder_3);
         assert!(result_3.is_none());
@@ -1312,7 +1572,8 @@ mod tests {
             table_name: table_name.clone(),
             columns: changed_columns,
         };
-        let mut change_processing = ChangeProcessing::new();
+        let mut change_processing =
+            ChangeProcessing::new(TargetsTablesColumnNames::from_map(HashMap::new()));
         change_processing.add_change(change.clone());
         change_processing.add_change(change.clone());
     }
@@ -1339,7 +1600,8 @@ mod tests {
             table_name: table_name.clone(),
             columns: changed_columns_1,
         };
-        let mut change_processing = ChangeProcessing::new();
+        let mut change_processing =
+            ChangeProcessing::new(TargetsTablesColumnNames::from_map(HashMap::new()));
         let result_1 = change_processing.add_change(change_1);
         let mut expected_changes_1 = BTreeMap::<i64, ChangeSet>::new();
         expected_changes_1.insert(
@@ -1366,7 +1628,8 @@ mod tests {
             tables: hashmap!(table_name.clone() => Table {
                 table_name: table_name.clone(),
                 column_info: Some(hashset!(id_column_info.clone(), text_column_info.clone())),
-                changeset: expected_change_set_1 }),
+                changeset: expected_change_set_1,
+                column_info_from_target: None::<TableFromTarget> }),
         };
         assert_eq!(change_processing.table_holder, expected_table_holder_1);
         assert!(result_1.is_none());
@@ -1412,7 +1675,8 @@ mod tests {
             tables: hashmap!(table_name.clone() => Table {
                 table_name: table_name.clone(),
                 column_info: Some(hashset!(id_column_info.clone(), text_column_info.clone())),
-                changeset: expected_change_set_2 }),
+                changeset: expected_change_set_2,
+                column_info_from_target: None::<TableFromTarget> }),
         };
         assert_eq!(change_processing.table_holder, expected_table_holder_2);
         assert!(result_2.is_none());
@@ -1440,7 +1704,8 @@ mod tests {
             table_name: table_name.clone(),
             columns: changed_columns_1,
         };
-        let mut change_processing = ChangeProcessing::new();
+        let mut change_processing =
+            ChangeProcessing::new(TargetsTablesColumnNames::from_map(HashMap::new()));
         let result_1 = change_processing.add_change(change_1);
         let mut expected_changes_1 = BTreeMap::<i64, ChangeSet>::new();
         expected_changes_1.insert(
@@ -1467,7 +1732,8 @@ mod tests {
             tables: hashmap!(table_name.clone() => Table {
                 table_name: table_name.clone(),
                 column_info: Some(hashset!(id_column_info.clone(), text_column_info.clone())),
-                changeset: expected_change_set_1 }),
+                changeset: expected_change_set_1,
+                column_info_from_target: None::<TableFromTarget> }),
         };
         assert_eq!(change_processing.table_holder, expected_table_holder_1);
         assert!(result_1.is_none());
@@ -1513,7 +1779,8 @@ mod tests {
             tables: hashmap!(table_name.clone() => Table {
                 table_name: table_name.clone(),
                 column_info: Some(hashset!(id_column_info.clone(), text_column_info.clone())),
-                changeset: expected_change_set_2 }),
+                changeset: expected_change_set_2,
+                column_info_from_target: None::<TableFromTarget> }),
         };
         assert_eq!(change_processing.table_holder, expected_table_holder_2);
         assert!(result_2.is_none());
@@ -1540,7 +1807,8 @@ mod tests {
             table_name: table_name.clone(),
             columns: changed_columns_1,
         };
-        let mut change_processing = ChangeProcessing::new();
+        let mut change_processing =
+            ChangeProcessing::new(TargetsTablesColumnNames::from_map(HashMap::new()));
         let result_1 = change_processing.add_change(change_1);
         let mut expected_changes_1 = BTreeMap::<i64, ChangeSet>::new();
         expected_changes_1.insert(
@@ -1566,7 +1834,8 @@ mod tests {
             tables: hashmap!(table_name.clone() => Table {
                 table_name: table_name.clone(),
                 column_info: Some(hashset!(id_column_info.clone(), text_column_info.clone())),
-                changeset: expected_change_set_1 }),
+                changeset: expected_change_set_1,
+                column_info_from_target: None::<TableFromTarget> }),
         };
         assert_eq!(change_processing.table_holder, expected_table_holder_1);
         assert!(result_1.is_none());
@@ -1611,7 +1880,8 @@ mod tests {
             tables: hashmap!(table_name.clone() => Table {
                 table_name: table_name.clone(),
                 column_info: Some(hashset!(id_column_info.clone(), text_column_info.clone())),
-                changeset: expected_change_set_2 }),
+                changeset: expected_change_set_2,
+                column_info_from_target: None::<TableFromTarget> }),
         };
         assert_eq!(change_processing.table_holder, expected_table_holder_2);
         assert!(result_2.is_none());
