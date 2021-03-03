@@ -310,7 +310,7 @@ impl Table {
         let column_info = self.column_info.clone();
         let table_name = self.table_name.clone();
         let changeset = self.changeset.empty_and_return();
-        let column_info_from_target = None::<TableFromTarget>;
+        let column_info_from_target = None;
         Table {
             changeset,
             column_info,
@@ -365,18 +365,23 @@ impl Table {
         match column_info_set {
             Some(incoming_column_info) => match &self.column_info {
                 Some(previous_column_info) => incoming_column_info != previous_column_info.clone(),
+                // We do not have column info from previously parsed changes, but see if we can compare with column info from the target
                 None => match &self.column_info_from_target {
-                    Some(cached_column_info) => cached_column_info_has_ddl_changes(
+                    Some(target_column_info) => column_info_has_ddl_changes_compared_to_target(
                         &incoming_column_info,
-                        &cached_column_info,
+                        &target_column_info,
                     ),
+                    // No column info from the target DB
                     None => false,
                 },
             },
+            // No column info from the parsed line
             None => false,
         }
     }
 
+    // Column info we grab from the target system will not have column type info as column type mappings between source and target will not be 1 to 1
+    // This will populate the column info with column types from the parsed changes where possible
     fn convert_target_column_info(
         &self,
         new_column_info: &HashSet<ColumnInfo>,
@@ -393,10 +398,10 @@ impl Table {
             .column_info
             .clone()
             .iter()
-            .map(|cached_column_info| ColumnInfo {
-                name: cached_column_info.name.clone(),
+            .map(|target_column_info| ColumnInfo {
+                name: target_column_info.name.clone(),
                 column_type: new_column_info_name_map
-                    .get(&cached_column_info.name)
+                    .get(&target_column_info.name)
                     .unwrap_or(&ColumnType::new("n/a".to_string()))
                     .clone(),
             })
@@ -627,21 +632,22 @@ impl ChangeProcessing {
     }
 }
 
-fn cached_column_info_has_ddl_changes(
+// No column types from target DB as there's not a 1 to 1 mapping of types between source and target, so just compare names
+fn column_info_has_ddl_changes_compared_to_target(
     incoming: &HashSet<ColumnInfo>,
-    other: &TableFromTarget,
+    target: &TableFromTarget,
 ) -> bool {
     let column_names: HashSet<ColumnName> = incoming
         .into_iter()
         .map(|column| column.name.clone())
         .collect();
-    let cached_column_names: HashSet<ColumnName> = other
+    let column_names_from_target: HashSet<ColumnName> = target
         .column_info
         .clone()
         .into_iter()
         .map(|column| column.name.clone())
         .collect();
-    column_names != cached_column_names
+    column_names != column_names_from_target
 }
 
 #[cfg(test)]
