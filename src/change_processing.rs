@@ -639,13 +639,13 @@ fn column_info_has_ddl_changes_compared_to_target(
 ) -> bool {
     let column_names: HashSet<ColumnName> = incoming
         .into_iter()
-        .map(|column| column.name.clone())
+        .map(|column| ColumnName::new(column.name.replace("\"", "").to_string()))
         .collect();
     let column_names_from_target: HashSet<ColumnName> = target
         .column_info
         .clone()
         .into_iter()
-        .map(|column| column.name.clone())
+        .map(|column| ColumnName::new(column.name.replace("\"", "").to_string()))
         .collect();
     column_names != column_names_from_target
 }
@@ -841,6 +841,49 @@ mod tests {
         } else {
             panic!("first_result does not contain a table");
         }
+    }
+
+    #[test]
+    fn ddl_no_change_reserved_word_column_no_detect_from_cache() {
+        clear_testing_directory();
+        let table_name = TableName::new("public.foobar".to_string());
+        let id_column_info = ColumnInfo::new("id", "bigint");
+        let other_column_info = ColumnInfo::new("\"position\"", "bigint");
+        let first_changed_columns = vec![
+            Column::ChangedColumn {
+                column_info: id_column_info.clone(),
+                value: Some(ColumnValue::Integer(1)),
+            }, // id column
+            Column::ChangedColumn {
+                column_info: other_column_info.clone(),
+                value: Some(ColumnValue::Integer(2)),
+            }, // other column
+        ];
+        let first_change = ParsedLine::ChangedData {
+            kind: ChangeKind::Insert,
+            table_name: table_name.clone(),
+            columns: first_changed_columns,
+        };
+        let mut tables_columns_names_map = HashMap::new();
+        tables_columns_names_map.insert(
+            TableName::new("foobar".to_string()),
+            vec![
+                id_column_info.clone().name,
+                ColumnInfo::new("position", "bigint").name,
+            ]
+            .iter()
+            .cloned()
+            .collect(),
+        );
+        let mut change_processing =
+            ChangeProcessing::new(TargetsTablesColumnNames::from_map(tables_columns_names_map));
+        change_processing.register_wal_file(Some(new_wal_file()));
+        let blank_stats_hash = hashmap!();
+        assert_eq!(change_processing.get_stats(), blank_stats_hash);
+        let first_result = change_processing.add_change(first_change);
+        let single_entry_stats_hash = hashmap!(&table_name => 1);
+        assert_eq!(change_processing.get_stats(), single_entry_stats_hash);
+        assert!(first_result.is_none());
     }
 
     #[test]
