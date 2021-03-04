@@ -10,7 +10,7 @@ use itertools::Itertools;
 #[allow(unused_imports)]
 use crate::{function, logger_debug, logger_error, logger_info, logger_panic};
 
-use crate::parser::{ColumnName, TableName};
+use crate::parser::{ColumnName, SchemaAndTable, TableName};
 
 lazy_static! {
     static ref TARGET_SCHEMA_NAME: Option<String> = std::env::var("TARGET_SCHEMA_NAME").ok();
@@ -90,8 +90,14 @@ impl TargetsTablesColumnNames {
         }
     }
 
-    pub fn get_by_name(&self, table_name: &TableName) -> Option<Table> {
-        match self.table_holder.tables.get(table_name) {
+    pub fn get_by_name(&self, table_name_with_schema: &TableName) -> Option<Table> {
+        // Strip the schema name in order to match, as it's possible schemas will differ between source and target
+        let (_, table_name) = table_name_with_schema.schema_and_table_name();
+        match self
+            .table_holder
+            .tables
+            .get(&TableName::new(table_name.to_string()))
+        {
             None => None,
             Some(table) => Some(table.clone()),
         }
