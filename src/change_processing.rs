@@ -688,7 +688,7 @@ mod tests {
     #[test]
     fn ddl_change_add_column_detect_from_cache() {
         clear_testing_directory();
-        let table_name = TableName::new("foobar".to_string());
+        let table_name = TableName::new("public.foobar".to_string());
         let id_column_info = ColumnInfo::new("id", "bigint");
         let new_column_info = ColumnInfo::new("foobar", "bigint");
         let first_changed_columns = vec![
@@ -724,7 +724,7 @@ mod tests {
         };
         let mut tables_columns_names_map = HashMap::new();
         tables_columns_names_map.insert(
-            table_name.clone(),
+            TableName::new("foobar".to_string()),
             vec![id_column_info.clone().name].iter().cloned().collect(),
         );
         let mut change_processing =
@@ -768,7 +768,7 @@ mod tests {
     #[test]
     fn ddl_change_remove_column_detect_from_cache() {
         clear_testing_directory();
-        let table_name = TableName::new("foobar".to_string());
+        let table_name = TableName::new("public.foobar".to_string());
         let id_column_info = ColumnInfo::new("id", "bigint");
         let removed_column_info = ColumnInfo::new("foobar", "bigint");
         let first_changed_columns = vec![
@@ -796,7 +796,7 @@ mod tests {
         };
         let mut tables_columns_names_map = HashMap::new();
         tables_columns_names_map.insert(
-            table_name.clone(),
+            TableName::new("foobar".to_string()),
             vec![
                 id_column_info.clone().name,
                 removed_column_info.clone().name,
@@ -846,7 +846,7 @@ mod tests {
     #[test]
     fn ddl_change_add_column() {
         clear_testing_directory();
-        let table_name = TableName::new("foobar".to_string());
+        let table_name = TableName::new("public.foobar".to_string());
         let id_column_info = ColumnInfo::new("id", "bigint");
         let new_column_info = ColumnInfo::new("foobar", "bigint");
         let first_changed_columns = vec![Column::ChangedColumn {
@@ -939,7 +939,7 @@ mod tests {
     #[test]
     fn ddl_change_remove_column() {
         clear_testing_directory();
-        let table_name = TableName::new("foobar".to_string());
+        let table_name = TableName::new("public.foobar".to_string());
         let id_column_info = ColumnInfo::new("id", "bigint");
         let removed_column_info = ColumnInfo::new("foobar", "bigint");
         let first_changed_columns = vec![
@@ -1024,7 +1024,7 @@ mod tests {
     #[test]
     fn ddl_changes_add_and_remove_multiple_columns() {
         clear_testing_directory();
-        let table_name = TableName::new("foobar".to_string());
+        let table_name = TableName::new("public.foobar".to_string());
         let id_column_info = ColumnInfo::new("id", "bigint");
         let new_column_info = ColumnInfo::new("foobar", "bigint");
         let new_column_2_info = ColumnInfo::new("baz", "bigint");
@@ -1139,7 +1139,7 @@ mod tests {
 
     #[test]
     fn dml_change_insert_update_delete() {
-        let table_name = TableName::new("foobar".to_string());
+        let table_name = TableName::new("public.foobar".to_string());
         let id_column_info = ColumnInfo::new("id", "bigint");
         let text_column_info = ColumnInfo::new("foobar", "text");
 
@@ -1269,7 +1269,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn dml_change_insert_insert_panics() {
-        let table_name = TableName::new("foobar".to_string());
+        let table_name = TableName::new("public.foobar".to_string());
         let id_column_info = ColumnInfo::new("id", "bigint");
         let text_column_info = ColumnInfo::new("foobar", "text");
 
@@ -1297,7 +1297,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn dml_change_update_insert_panics() {
-        let table_name = TableName::new("foobar".to_string());
+        let table_name = TableName::new("public.foobar".to_string());
         let id_column_info = ColumnInfo::new("id", "bigint");
         let text_column_info = ColumnInfo::new("foobar", "text");
 
@@ -1330,7 +1330,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn dml_change_delete_update_panics() {
-        let table_name = TableName::new("foobar".to_string());
+        let table_name = TableName::new("public.foobar".to_string());
         let id_column_info = ColumnInfo::new("id", "bigint");
         let text_column_info = ColumnInfo::new("foobar", "text");
 
@@ -1362,7 +1362,7 @@ mod tests {
 
     #[test]
     fn dml_change_delete_insert_updates() {
-        let table_name = TableName::new("foobar".to_string());
+        let table_name = TableName::new("public.foobar".to_string());
         let id_column_info = ColumnInfo::new("id", "bigint");
         let text_column_info = ColumnInfo::new("foobar", "text");
 
@@ -1424,7 +1424,7 @@ mod tests {
 
     #[test]
     fn dml_change_update_update_delete() {
-        let table_name = TableName::new("foobar".to_string());
+        let table_name = TableName::new("public.foobar".to_string());
         let id_column_info = ColumnInfo::new("id", "bigint");
         let text_column_info = ColumnInfo::new("foobar", "text");
 
@@ -1566,7 +1566,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn dml_change_delete_delete_panics() {
-        let table_name = TableName::new("foobar".to_string());
+        let table_name = TableName::new("public.foobar".to_string());
         let id_column_info = ColumnInfo::new("id", "bigint");
 
         let changed_columns = vec![Column::ChangedColumn {
@@ -1586,7 +1586,7 @@ mod tests {
 
     #[test]
     fn dml_change_unchanged_toast_insert_update() {
-        let table_name = TableName::new("foobar".to_string());
+        let table_name = TableName::new("public.foobar".to_string());
         let id_column_info = ColumnInfo::new("id", "bigint");
         let text_column_info = ColumnInfo::new("foobar", "text");
 
@@ -1690,7 +1690,7 @@ mod tests {
 
     #[test]
     fn dml_change_unchanged_toast_update_update() {
-        let table_name = TableName::new("foobar".to_string());
+        let table_name = TableName::new("public.foobar".to_string());
         let id_column_info = ColumnInfo::new("id", "bigint");
         let text_column_info = ColumnInfo::new("foobar", "text");
 
@@ -1794,7 +1794,7 @@ mod tests {
 
     #[test]
     fn dml_change_unchanged_toast_update_unchanged_toast_update() {
-        let table_name = TableName::new("foobar".to_string());
+        let table_name = TableName::new("public.foobar".to_string());
         let id_column_info = ColumnInfo::new("id", "bigint");
         let text_column_info = ColumnInfo::new("foobar", "text");
 
