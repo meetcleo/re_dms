@@ -1705,6 +1705,7 @@ dependencies = [
  "maplit",
  "mock_instant",
  "nix",
+ "num-bigint",
  "openssl",
  "postgres-openssl",
  "regex",
