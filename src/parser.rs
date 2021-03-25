@@ -130,8 +130,6 @@ impl fmt::Display for ColumnValue {
                         BigDecimal::from_str(&MAX_NUMERIC_VALUE)
                             .expect("MAX_NUMERIC_VALUE bigdecimal unable to be parsed.")
                     }
-                    // BigDecimal::from_str(&MAX_NUMERIC_VALUE)
-                    //     .expect("MAX_NUMERIC_VALUE bigdecimal unable to be parsed.")
                 } else {
                     // we need to round our internal stuff
                     big_decimal
@@ -162,7 +160,6 @@ impl fmt::Display for ColumnValue {
                 } else {
                     rounded_bigdecimal.to_string()
                 };
-                // let string = rounded_bigdecimal.to_string();
 
                 write!(f, "{}", string)
             }

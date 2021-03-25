@@ -174,12 +174,6 @@ impl FileStruct {
                     .map(|x| {
                         if let Some(value) = x.column_value_for_changed_column() {
                             value.to_string()
-                            // if let ColumnTypeEnum::RoundingNumeric =
-                            //     x.column_info().column_type_enum()
-                            // {
-                            // } else {
-                            //     value.to_string()
-                            // }
                         } else {
                             match x.column_info().column_type_enum() {
                                 ColumnTypeEnum::Text => "\0".to_owned(),
