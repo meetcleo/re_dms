@@ -1,3 +1,4 @@
+use bigdecimal::BigDecimal;
 use internment::ArcIntern;
 use lazy_static::lazy_static;
 use regex::Regex;
@@ -5,6 +6,10 @@ use std::collections::HashSet;
 use std::fmt;
 
 use std::env;
+
+use crate::database_writer::{DEFAULT_NUMERIC_PRECISION, DEFAULT_NUMERIC_SCALE};
+
+use std::str::FromStr;
 
 #[allow(unused_imports)]
 use crate::{function, logger_debug, logger_error, logger_info, logger_panic};
@@ -19,6 +24,13 @@ lazy_static! {
     static ref COLUMN_TYPE_REGEX: regex::Regex = Regex::new(r"^.+\[\]$").unwrap();
     static ref TABLE_BLACKLIST: Vec<String> = env::var("TABLE_BLACKLIST").unwrap_or("".to_owned()).split(",").map(|x| x.to_owned()).collect();
     static ref TARGET_SCHEMA_NAME: Option<String> = std::env::var("TARGET_SCHEMA_NAME").ok();
+
+    // 99_999_999_999.99999999
+    static ref MAX_NUMERIC_VALUE: String = "9".repeat(
+        (DEFAULT_NUMERIC_PRECISION - DEFAULT_NUMERIC_SCALE)
+            as usize,
+    ) + "."
+        + "9".repeat(DEFAULT_NUMERIC_SCALE as usize).as_str();
 }
 
 // for tablename
@@ -60,6 +72,7 @@ pub enum ColumnValue {
     Boolean(bool),
     Integer(i64),
     Numeric(String),
+    RoundingNumeric(String),
     Text(String),
     IncompleteText(String),
     UnchangedToast,
@@ -95,6 +108,27 @@ impl fmt::Display for ColumnValue {
             }
             ColumnValue::IncompleteText(x) => {
                 write!(f, "{}", x)
+            }
+
+            ColumnValue::RoundingNumeric(x) => {
+                let big_decimal: BigDecimal =
+                    BigDecimal::from_str(&x.to_string()).expect("BigDecimal unable to be parsed");
+                // here we round to our precision and scale
+                let rounded_bigdecimal = if big_decimal.round(0).digits() as i32
+                    > DEFAULT_NUMERIC_PRECISION - DEFAULT_NUMERIC_SCALE
+                {
+                    BigDecimal::from_str(&MAX_NUMERIC_VALUE)
+                        .expect("MAX_NUMERIC_VALUE bigdecimal unable to be parsed.")
+                } else {
+                    // we need to round our internal stuff
+                    big_decimal
+                        .with_prec(DEFAULT_NUMERIC_PRECISION as u64) // precision doesn't round
+                        .with_scale(DEFAULT_NUMERIC_SCALE as i64)
+                };
+
+                let string = rounded_bigdecimal.to_string();
+
+                write!(f, "{}", string)
             }
         }
     }
@@ -410,7 +444,7 @@ impl ColumnValue {
 
     fn parse_rounding_numeric<'a>(string: &'a str) -> (ColumnValue, &'a str) {
         let (start, rest) = ColumnValue::split_until_char_or_end(string, ' ');
-        (ColumnValue::Numeric(start.to_owned()), rest)
+        (ColumnValue::RoundingNumeric(start.to_owned()), rest)
     }
 
     fn parse_boolean<'a>(string: &'a str) -> (ColumnValue, &'a str) {
@@ -881,6 +915,12 @@ mod tests {
     }
 
     #[test]
+    fn rounding_numeric_works() {
+        let big_number = ColumnValue::RoundingNumeric("10000000000000000000000000".to_string());
+        assert_eq!("99999999999.99999999", big_number.to_string());
+    }
+
+    #[test]
     fn parsing_works() {
         use std::fs::File;
         use std::io::{self, BufRead};
@@ -908,7 +948,7 @@ mod tests {
                 Column::ChangedColumn { column_info: ColumnInfo::new("account_id".to_string(), "integer" .to_string()), value: Some(ColumnValue::Integer(1)) },
                 Column::ChangedColumn { column_info: ColumnInfo::new("category".to_string(), "character varying".to_string()), value: None },
                 Column::ChangedColumn { column_info: ColumnInfo::new("currency_code".to_string(), "character varying".to_string()), value: Some(ColumnValue::Text("USD".to_string())) },
-                Column::ChangedColumn { column_info: ColumnInfo::new("amount".to_string(), "numeric".to_string()), value: Some(ColumnValue::Numeric("4.0".to_string())) },
+                Column::ChangedColumn { column_info: ColumnInfo::new("amount".to_string(), "numeric".to_string()), value: Some(ColumnValue::RoundingNumeric("4.0".to_string())) },
                 Column::ChangedColumn { column_info: ColumnInfo::new("description".to_string(), "character varying".to_string()), value: Some(ColumnValue::Text("Salary".to_string())) },
                 Column::ChangedColumn { column_info: ColumnInfo::new("made_on".to_string(), "date".to_string()), value: Some(ColumnValue::Text("2020-09-17".to_string())) },
                 Column::ChangedColumn { column_info: ColumnInfo::new("duplicated".to_string(), "boolean".to_string()), value: None },
