@@ -117,8 +117,8 @@ impl fmt::Display for ColumnValue {
             }
 
             ColumnValue::RoundingNumeric(x) => {
-                let big_decimal: BigDecimal =
-                    BigDecimal::from_str(&x.to_string()).expect("BigDecimal unable to be parsed");
+                let big_decimal: BigDecimal = BigDecimal::from_str(&x.to_string())
+                    .expect(&format!("BigDecimal unable to be parsed: {}", x));
                 // here we round to our precision and scale
                 let rounded_bigdecimal = if big_decimal.round(0).digits() as i32
                     > DEFAULT_NUMERIC_PRECISION - DEFAULT_NUMERIC_SCALE
