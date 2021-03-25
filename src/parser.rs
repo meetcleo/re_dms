@@ -1,11 +1,15 @@
 use bigdecimal::BigDecimal;
 use internment::ArcIntern;
 use lazy_static::lazy_static;
+use num_bigint::BigInt;
+use num_bigint::Sign;
 use regex::Regex;
 use std::collections::HashSet;
 use std::fmt;
 
 use std::env;
+
+use bigdecimal::Signed;
 
 use crate::database_writer::{DEFAULT_NUMERIC_PRECISION, DEFAULT_NUMERIC_SCALE};
 
@@ -31,6 +35,8 @@ lazy_static! {
             as usize,
     ) + "."
         + "9".repeat(DEFAULT_NUMERIC_SCALE as usize).as_str();
+    // https://docs.aws.amazon.com/redshift/latest/dg/r_Numeric_types201.html#r_Numeric_types201-decimal-or-numeric-type
+    static ref REDSHIFT_19_PRECISION_MAX_PRECISION_VALUE: BigInt = BigInt::from(9223372036854775807i64);
 }
 
 // for tablename
@@ -117,8 +123,15 @@ impl fmt::Display for ColumnValue {
                 let rounded_bigdecimal = if big_decimal.round(0).digits() as i32
                     > DEFAULT_NUMERIC_PRECISION - DEFAULT_NUMERIC_SCALE
                 {
-                    BigDecimal::from_str(&MAX_NUMERIC_VALUE)
-                        .expect("MAX_NUMERIC_VALUE bigdecimal unable to be parsed.")
+                    if big_decimal.sign() == Sign::Minus {
+                        -BigDecimal::from_str(&MAX_NUMERIC_VALUE)
+                            .expect("MAX_NUMERIC_VALUE bigdecimal unable to be parsed.")
+                    } else {
+                        BigDecimal::from_str(&MAX_NUMERIC_VALUE)
+                            .expect("MAX_NUMERIC_VALUE bigdecimal unable to be parsed.")
+                    }
+                    // BigDecimal::from_str(&MAX_NUMERIC_VALUE)
+                    //     .expect("MAX_NUMERIC_VALUE bigdecimal unable to be parsed.")
                 } else {
                     // we need to round our internal stuff
                     big_decimal
@@ -126,7 +139,30 @@ impl fmt::Display for ColumnValue {
                         .with_scale(DEFAULT_NUMERIC_SCALE as i64)
                 };
 
-                let string = rounded_bigdecimal.to_string();
+                // redshift is completely stupid, and stores precision 19 bigdecimals with a 64 bit int for the precision value
+                // https://docs.aws.amazon.com/redshift/latest/dg/r_Numeric_types201.html
+                // so we need to sort that out.
+                let (bigint_precision, _) = rounded_bigdecimal.as_bigint_and_exponent();
+                let string = if DEFAULT_NUMERIC_PRECISION == 19
+                    && bigint_precision.abs() > *REDSHIFT_19_PRECISION_MAX_PRECISION_VALUE
+                {
+                    if bigint_precision.sign() == Sign::Minus {
+                        BigDecimal::new(
+                            -REDSHIFT_19_PRECISION_MAX_PRECISION_VALUE.clone(),
+                            DEFAULT_NUMERIC_SCALE as i64,
+                        )
+                        .to_string()
+                    } else {
+                        BigDecimal::new(
+                            REDSHIFT_19_PRECISION_MAX_PRECISION_VALUE.clone(),
+                            DEFAULT_NUMERIC_SCALE as i64,
+                        )
+                        .to_string()
+                    }
+                } else {
+                    rounded_bigdecimal.to_string()
+                };
+                // let string = rounded_bigdecimal.to_string();
 
                 write!(f, "{}", string)
             }
@@ -916,8 +952,20 @@ mod tests {
 
     #[test]
     fn rounding_numeric_works() {
+        let big_number = ColumnValue::RoundingNumeric("-10000000000000000000000000".to_string());
+        assert_eq!("-92233720368.54775807", big_number.to_string());
         let big_number = ColumnValue::RoundingNumeric("10000000000000000000000000".to_string());
-        assert_eq!("99999999999.99999999", big_number.to_string());
+        assert_eq!("92233720368.54775807", big_number.to_string());
+        let big_number = ColumnValue::RoundingNumeric("99999999999.99999999".to_string());
+        assert_eq!("92233720368.54775807", big_number.to_string());
+        let big_number = ColumnValue::RoundingNumeric("91999999999.99999999".to_string());
+        assert_eq!("91999999999.99999999", big_number.to_string());
+        let big_number = ColumnValue::RoundingNumeric("99999999999.99".to_string());
+        assert_eq!("92233720368.54775807", big_number.to_string());
+        let big_number = ColumnValue::RoundingNumeric("-99999999999.99".to_string());
+        assert_eq!("-92233720368.54775807", big_number.to_string());
+        let big_number = ColumnValue::RoundingNumeric("-91999999999.99".to_string());
+        assert_eq!("-91999999999.99000000", big_number.to_string());
     }
 
     #[test]
