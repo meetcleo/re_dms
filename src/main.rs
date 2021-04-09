@@ -1,4 +1,3 @@
-#![feature(str_split_once)]
 #![deny(warnings)]
 
 use clap::{App, Arg};
