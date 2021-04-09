@@ -303,7 +303,6 @@ pub enum ParsedLine {
         table_name: TableName,
         kind: ChangeKind,
     },
-    TruncateTable, // TODO
     ContinueParse, // this is to signify that we're halfway through parsing a change
     PgRcvlogicalMsg(String),
 }
