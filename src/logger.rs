@@ -165,7 +165,7 @@ impl Logger {
         tag: &str,
         message: &str,
     ) {
-        panic!(Self::structured_format(
+        panic!("{}", Self::structured_format(
             wal_number, table_name, tag, message
         ));
     }
