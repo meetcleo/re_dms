@@ -24,7 +24,7 @@ pub type ColumnType = ArcIntern<String>;
 
 lazy_static! {
     // leave these as unwrap
-    static ref PARSE_COLUMN_REGEX: regex::Regex = Regex::new(r"(^[^\[^\]]+)\[([^:]+)\]:").unwrap();
+    static ref PARSE_COLUMN_REGEX: regex::Regex = Regex::new(r#"^"?([^\[^\]]+?)"?\[([^:]+)\]:"#).unwrap();
     static ref COLUMN_TYPE_REGEX: regex::Regex = Regex::new(r"^.+\[\]$").unwrap();
     static ref TABLE_BLACKLIST: Vec<String> = env::var("TABLE_BLACKLIST").unwrap_or("".to_owned()).split(",").map(|x| x.to_owned()).collect();
     static ref TARGET_SCHEMA_NAME: Option<String> = std::env::var("TARGET_SCHEMA_NAME").ok();
@@ -963,6 +963,21 @@ mod tests {
         assert_eq!("-92233720368.54775807", big_number.to_string());
         let big_number = ColumnValue::RoundingNumeric("-91999999999.99".to_string());
         assert_eq!("-91999999999.99000000", big_number.to_string());
+    }
+
+    #[test]
+    fn parse_column_regex_works() {
+        let string = "\"offset\"[integer]:0";
+        let re = &PARSE_COLUMN_REGEX;
+        let captures = re
+            .captures(string)
+            .expect("Unable to match PARSE_COLUMN_REGEX to line");
+
+        let column_name = captures
+            .get(1)
+            .expect("couldn't match column_name")
+            .as_str();
+        assert_eq!(column_name, "offset"); // no quotes
     }
 
     #[test]
