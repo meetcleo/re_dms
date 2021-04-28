@@ -24,7 +24,16 @@ pub type ColumnType = ArcIntern<String>;
 
 lazy_static! {
     // leave these as unwrap
+    // this regex matches things like `"offset"[integer]:1` giving ("offset", "integer") capture groups
+    // and `id[uuid]:"i-am-a-uuid"`, giving ("id", "uuid") capture groups
+    // note the first capture group is surrounded by optional quotes to handle the first case above,
+    // and the + inside it is made non-greedy to not eat the subsequent optional quote.
+    // this is fine as we have a literal `[` to terminate the
+    // repetition so it can't end too soon
     static ref PARSE_COLUMN_REGEX: regex::Regex = Regex::new(r#"^"?([^\[^\]]+?)"?\[([^:]+)\]:"#).unwrap();
+    // for array types we  actually looks like `my_array[array[string]]:"[\"foobar\"]"`
+    // this means the type regex match will be `array[string]`
+    // we use this regex to strip off the `[string]` part as all arrays get mapped to a text type in redshift
     static ref COLUMN_TYPE_REGEX: regex::Regex = Regex::new(r"^.+\[\]$").unwrap();
     static ref TABLE_BLACKLIST: Vec<String> = env::var("TABLE_BLACKLIST").unwrap_or("".to_owned()).split(",").map(|x| x.to_owned()).collect();
     static ref TARGET_SCHEMA_NAME: Option<String> = std::env::var("TARGET_SCHEMA_NAME").ok();
