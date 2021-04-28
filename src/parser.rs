@@ -24,7 +24,16 @@ pub type ColumnType = ArcIntern<String>;
 
 lazy_static! {
     // leave these as unwrap
-    static ref PARSE_COLUMN_REGEX: regex::Regex = Regex::new(r"(^[^\[^\]]+)\[([^:]+)\]:").unwrap();
+    // this regex matches things like `"offset"[integer]:1` giving ("offset", "integer") capture groups
+    // and `id[uuid]:"i-am-a-uuid"`, giving ("id", "uuid") capture groups
+    // note the first capture group is surrounded by optional quotes to handle the first case above,
+    // and the + inside it is made non-greedy to not eat the subsequent optional quote.
+    // this is fine as we have a literal `[` to terminate the
+    // repetition so it can't end too soon
+    static ref PARSE_COLUMN_REGEX: regex::Regex = Regex::new(r#"^"?([^\[^\]]+?)"?\[([^:]+)\]:"#).unwrap();
+    // for array types we  actually looks like `my_array[array[string]]:"[\"foobar\"]"`
+    // this means the type regex match will be `array[string]`
+    // we use this regex to strip off the `[string]` part as all arrays get mapped to a text type in redshift
     static ref COLUMN_TYPE_REGEX: regex::Regex = Regex::new(r"^.+\[\]$").unwrap();
     static ref TABLE_BLACKLIST: Vec<String> = env::var("TABLE_BLACKLIST").unwrap_or("".to_owned()).split(",").map(|x| x.to_owned()).collect();
     static ref TARGET_SCHEMA_NAME: Option<String> = std::env::var("TARGET_SCHEMA_NAME").ok();
@@ -963,6 +972,21 @@ mod tests {
         assert_eq!("-92233720368.54775807", big_number.to_string());
         let big_number = ColumnValue::RoundingNumeric("-91999999999.99".to_string());
         assert_eq!("-91999999999.99000000", big_number.to_string());
+    }
+
+    #[test]
+    fn parse_column_regex_works() {
+        let string = "\"offset\"[integer]:0";
+        let re = &PARSE_COLUMN_REGEX;
+        let captures = re
+            .captures(string)
+            .expect("Unable to match PARSE_COLUMN_REGEX to line");
+
+        let column_name = captures
+            .get(1)
+            .expect("couldn't match column_name")
+            .as_str();
+        assert_eq!(column_name, "offset"); // no quotes
     }
 
     #[test]
