@@ -32,7 +32,7 @@ Install Rust:
 
 `$ brew install rustup-init`
 
-`$ rustup install nightly`
+`$ rustup-init` (selecting the `nightly` build) or else `$ rustup install nightly`
 
 `$ source "$HOME/.cargo/env"`
 

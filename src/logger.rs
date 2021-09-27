@@ -82,35 +82,35 @@ macro_rules! function {
 #[macro_export]
 macro_rules! logger_debug {
     ($wal_number:expr, $table_name:expr, $message:expr) => {
-        crate::logger::Logger::debug($wal_number, $table_name, function!(), $message);
+        crate::logger::Logger::debug($wal_number, $table_name, function!(), $message)
     };
 }
 
 #[macro_export]
 macro_rules! logger_info {
     ($wal_number:expr, $table_name:expr, $message:expr) => {
-        crate::logger::Logger::info($wal_number, $table_name, function!(), $message);
+        crate::logger::Logger::info($wal_number, $table_name, function!(), $message)
     };
 }
 
 #[macro_export]
 macro_rules! logger_warning {
     ($wal_number:expr, $table_name:expr, $message:expr) => {
-        crate::logger::Logger::warning($wal_number, $table_name, function!(), $message);
+        crate::logger::Logger::warning($wal_number, $table_name, function!(), $message)
     };
 }
 
 #[macro_export]
 macro_rules! logger_error {
     ($wal_number:expr, $table_name:expr, $message:expr) => {
-        crate::logger::Logger::error($wal_number, $table_name, function!(), $message);
+        crate::logger::Logger::error($wal_number, $table_name, function!(), $message)
     };
 }
 
 #[macro_export]
 macro_rules! logger_panic {
     ($wal_number:expr, $table_name:expr, $message:expr) => {
-        crate::logger::Logger::structured_panic($wal_number, $table_name, function!(), $message);
+        crate::logger::Logger::structured_panic($wal_number, $table_name, function!(), $message)
     };
 }
 
@@ -165,7 +165,7 @@ impl Logger {
         tag: &str,
         message: &str,
     ) {
-        panic!(Self::structured_format(
+        panic!("{}", Self::structured_format(
             wal_number, table_name, tag, message
         ));
     }

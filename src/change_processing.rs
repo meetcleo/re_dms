@@ -533,7 +533,6 @@ impl ChangeProcessing {
         match parsed_line {
             ParsedLine::Begin(_)
             | ParsedLine::Commit(_)
-            | ParsedLine::TruncateTable // TODO
             | ParsedLine::PgRcvlogicalMsg(_) => None,
             ParsedLine::ContinueParse => None, // need to be exhaustive
             ParsedLine::ChangedData { .. } => {
