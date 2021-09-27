@@ -52,6 +52,12 @@ enum InputType {
     PgRcvlogical,
 }
 
+fn panic_if_messy_shutdown() ->() {
+    if ShutdownHandler::shutting_down_messily() {
+        panic!("re_dms had a messy shut down. If running as a service, will attempt to restart automatically a limited number of times.");
+    }
+}
+
 #[tokio::main]
 async fn main() {
     ShutdownHandler::register_signal_handlers();
@@ -168,9 +174,9 @@ async fn main() {
                 if shutting_down {
                     if ShutdownHandler::should_break_main_loop() {
                         break;
-                    } else if ShutdownHandler::shutting_down_messily() {
-                        return;
                     }
+
+                    panic_if_messy_shutdown();
                 }
                 let parsed_line = parser.parse(&ip);
                 match parsed_line {
@@ -194,9 +200,8 @@ async fn main() {
                 }
             }
         }
-        if ShutdownHandler::shutting_down_messily() {
-            return;
-        }
+
+        panic_if_messy_shutdown();
         logger_info!(None, None, "exitted_main_loop");
 
         drain_collector_and_transmit(&mut collector, &mut file_transmitter).await;
@@ -235,6 +240,8 @@ async fn main() {
 
     #[cfg(feature = "with_rollbar")]
     logger::block_on_last_rollbar_thread_handle();
+
+    panic_if_messy_shutdown();
 }
 
 async fn drain_collector_and_transmit(
