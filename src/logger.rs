@@ -12,8 +12,6 @@ use rollbar::{self, ResponseStatus};
 lazy_static! {
     static ref ROLLBAR_ACCESS_TOKEN: String =
         std::env::var("ROLLBAR_ACCESS_TOKEN").expect("ROLLBAR_ACCESS_TOKEN env is not set");
-    static ref ROLLBAR_CLIENT: rollbar::Client =
-        rollbar::Client::new((*ROLLBAR_ACCESS_TOKEN).clone(), "development".to_owned());
     static ref LAST_ROLLBAR_THREAD_HANDLE: std::sync::Mutex<Option<std::thread::JoinHandle<Option<ResponseStatus>>>> =
         std::sync::Mutex::new(None);
 }
@@ -25,7 +23,7 @@ pub fn register_panic_handler() {
         // bare print for backtraces
         println!("{:?}", backtrace);
         // send to rollbar
-        let result = ROLLBAR_CLIENT
+        let result = rollbar::Client::new((*ROLLBAR_ACCESS_TOKEN).clone(), "development".to_owned())
             .build_report()
             .from_panic(panic_info)
             .with_backtrace(&backtrace)
