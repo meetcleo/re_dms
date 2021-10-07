@@ -17,13 +17,18 @@ lazy_static! {
 }
 
 #[cfg(feature = "with_rollbar")]
+pub fn get_rollbar_client() -> rollbar::Client {
+    rollbar::Client::new((*ROLLBAR_ACCESS_TOKEN).clone(), "development".to_owned())
+}
+
+#[cfg(feature = "with_rollbar")]
 pub fn register_panic_handler() {
     std::panic::set_hook(Box::new(move |panic_info| {
         let backtrace = backtrace::Backtrace::new();
         // bare print for backtraces
         println!("{:?}", backtrace);
         // send to rollbar
-        let result = rollbar::Client::new((*ROLLBAR_ACCESS_TOKEN).clone(), "development".to_owned())
+        let result = get_rollbar_client()
             .build_report()
             .from_panic(panic_info)
             .with_backtrace(&backtrace)
@@ -126,7 +131,8 @@ impl Logger {
 
         #[cfg(feature = "with_rollbar")]
         {
-            let thread_handle = report_error_message!(ROLLBAR_CLIENT, message);
+            let rollbar_client = get_rollbar_client();
+            let thread_handle = report_error_message!(rollbar_client, message);
             set_rollbar_thread_handle(thread_handle);
         }
         error!("{}", message);
@@ -135,11 +141,11 @@ impl Logger {
     pub fn warning(wal_number: Option<u64>, table_name: Option<&String>, tag: &str, message: &str) {
         let message = Self::structured_format(wal_number, table_name, tag, message);
 
-        // report_warning_message!(ROLLBAR_CLIENT, message);
+        // report_warning_message!(get_rollbar_client(), message);
         // this macro doesn't exist so be explicit
         #[cfg(feature = "with_rollbar")]
         {
-            let thread_handle = ROLLBAR_CLIENT
+            let thread_handle = get_rollbar_client()
                 .build_report()
                 .from_message(&message)
                 .with_level(::rollbar::Level::INFO)
