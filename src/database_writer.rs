@@ -1,12 +1,16 @@
 use deadpool_postgres::{Client, ManagerConfig, Pool, RecyclingMethod};
 use openssl::ssl::{SslConnector, SslMethod};
 use postgres_openssl::MakeTlsConnector;
+use tokio_postgres::CancelToken;
+use tokio_postgres::error::Error as TokioPostgresError;
+use tokio::time::timeout;
+use std::time::Duration;
 use serde::Deserialize;
 // use config;
 use std::env;
 
 #[allow(unused_imports)]
-use crate::{function, logger_debug, logger_error, logger_info, logger_panic};
+use crate::{function, logger_debug, logger_error, logger_info, logger_panic, logger_warning};
 
 use crate::change_processing::DdlChange;
 use crate::file_uploader::CleoS3File;
@@ -15,6 +19,17 @@ use crate::shutdown_handler::ShutdownHandler;
 
 pub const DEFAULT_NUMERIC_PRECISION: i32 = 19; // 99_999_999_999.99999999
 pub const DEFAULT_NUMERIC_SCALE: i32 = 8;
+
+use lazy_static::lazy_static;
+lazy_static! {
+    static ref CLIENT_SIDE_DB_QUERY_TIMEOUT_IN_SECONDS: Duration =
+        Duration::from_secs(
+            std::env::var("CLIENT_SIDE_DB_QUERY_TIMEOUT_IN_SECONDS")
+                .expect("CLIENT_SIDE_DB_QUERY_TIMEOUT_IN_SECONDS env is not set")
+                .parse::<u64>()
+                .expect("CLIENT_SIDE_DB_QUERY_TIMEOUT_IN_SECONDS is not a valid integer")
+        );
+}
 
 pub struct DatabaseWriter {
     connection_pool: Pool,
@@ -25,10 +40,16 @@ struct Config {
     pg: deadpool_postgres::Config,
 }
 
+pub struct QueryExecution {
+    cancel_token: CancelToken,
+    query: String
+}
+
 #[derive(Debug)]
 pub enum DatabaseWriterError {
     PoolError(deadpool_postgres::PoolError),
     TokioError(tokio_postgres::Error),
+    TimeoutError(tokio::time::Elapsed),
 }
 
 impl Config {
@@ -36,6 +57,66 @@ impl Config {
         let mut cfg = ::config::Config::new();
         cfg.merge(::config::Environment::new().separator("__"))?;
         cfg.try_into()
+    }
+}
+
+impl QueryExecution {
+    pub fn new(client: &Client, query: String) -> QueryExecution {
+        QueryExecution {
+            // the cancel token is related to the connection owned by this client (it will cancel any query running on this connection when `cancel_query` is invoked)
+            cancel_token: client.cancel_token(),
+            query: query
+        }
+    }
+
+    pub async fn cancel(&self) -> Result<(), TokioPostgresError> {
+        logger_info!(
+            None,
+            None,
+            &format!("Cancelling query:{}", self.query)
+        );
+        let builder = SslConnector::builder(SslMethod::tls())
+            .expect("Unable to build ssl connector. Are ssl libraries configured correctly?");
+        let connector = MakeTlsConnector::new(builder.build());
+        self.cancel_token.cancel_query(connector).await
+    }
+
+    pub async fn execute_with_timeout(&self, client: &Client) -> Result<(), DatabaseWriterError> {
+        let query_execution = client.execute(self.query.as_str(), &[]);
+        let timeout_result = timeout(*CLIENT_SIDE_DB_QUERY_TIMEOUT_IN_SECONDS, query_execution).await;
+        match timeout_result {
+            Ok(query_result) => {
+                match query_result {
+                    Ok(_) => Ok(()),
+                    Err(err) => Err(err).map_err(DatabaseWriterError::TokioError)
+                }
+            },
+            Err(err) => {
+                logger_error!(
+                    None,
+                    None,
+                    &format!("Query execution timed out:{}, query: {}", err, self.query)
+                );
+                let cancel_result = self.cancel().await;
+                match cancel_result {
+                    Ok(_) => {
+                        logger_info!(
+                            None,
+                            None,
+                            &format!("Cancelled query:{}", self.query)
+                        );
+                    },
+                    Err(cancel_err) => {
+                        logger_warning!(
+                            None,
+                            None,
+                            &format!("Failed to cancel query:{}, query: {}", cancel_err, self.query)
+                        );
+                    }
+                }
+                Err(err).map_err(DatabaseWriterError::TimeoutError)
+            }
+        }
     }
 }
 
@@ -300,7 +381,9 @@ impl DatabaseWriter {
                 log_tag, query_to_execute
             )
         );
-        let result = client.execute(query_to_execute, &[]).await;
+
+        let query_execution = QueryExecution::new(client, query_to_execute.to_string());
+        let result = query_execution.execute_with_timeout(client).await;
         match result {
             Ok(..) => {
                 logger_info!(
@@ -316,7 +399,7 @@ impl DatabaseWriter {
                     Some(&table_name),
                     &format!("error_executing:{} err:{:?}", log_tag, err)
                 );
-                Err(err).map_err(DatabaseWriterError::TokioError)
+                Err(err)
             }
         }
     }
