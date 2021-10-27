@@ -1,7 +1,7 @@
 use deadpool_postgres::{Client, ManagerConfig, Pool, RecyclingMethod};
 use openssl::ssl::{SslConnector, SslMethod};
 use postgres_openssl::MakeTlsConnector;
-use tokio_postgres::CancelToken;
+use tokio_postgres::{CancelToken, Row};
 use tokio_postgres::error::Error as TokioPostgresError;
 use tokio::time::timeout;
 use std::time::Duration;
@@ -96,6 +96,44 @@ impl QueryExecution {
                     None,
                     None,
                     &format!("Query execution timed out:{}, query: {}", err, self.query)
+                );
+                let cancel_result = self.cancel().await;
+                match cancel_result {
+                    Ok(_) => {
+                        logger_info!(
+                            None,
+                            None,
+                            &format!("Cancelled query:{}", self.query)
+                        );
+                    },
+                    Err(cancel_err) => {
+                        logger_warning!(
+                            None,
+                            None,
+                            &format!("Failed to cancel query:{}, query: {}", cancel_err, self.query)
+                        );
+                    }
+                }
+                Err(err).map_err(DatabaseWriterError::TimeoutError)
+            }
+        }
+    }
+
+    pub async fn query_one_with_timeout(&self, client: &Client, params: &[&(dyn tokio_postgres::types::ToSql + std::marker::Sync)]) -> Result<Row, DatabaseWriterError> {
+        let query_one = client.query_one(self.query.as_str(), params);
+        let timeout_result = timeout(*CLIENT_SIDE_DB_QUERY_TIMEOUT_IN_SECONDS, query_one).await;
+        match timeout_result {
+            Ok(query_result) => {
+                match query_result {
+                    Ok(row) => Ok(row),
+                    Err(err) => Err(err).map_err(DatabaseWriterError::TokioError)
+                }
+            },
+            Err(err) => {
+                logger_error!(
+                    None,
+                    None,
+                    &format!("Query timed out:{}, query: {}", err, self.query)
                 );
                 let cancel_result = self.cancel().await;
                 match cancel_result {
@@ -414,18 +452,23 @@ impl DatabaseWriter {
         let (schema_name, just_table_name) = s3_file.table_name.schema_and_table_name();
         let table_name = s3_file.table_name.clone();
         let wal_file_number = s3_file.wal_file.file_number;
-        let query = "
+        let query_to_execute = "
             SELECT EXISTS (
                 SELECT 1 FROM information_schema.tables
                 WHERE  table_schema = $1
                     AND    table_name   = $2
             );";
-        let row = database_client
-            .query_one(query, &[&schema_name, &just_table_name])
-            .await
-            .map_err(DatabaseWriterError::TokioError)?;
-        let result: bool = row.get(0);
-        if !result {
+
+        logger_info!(
+            Some(wal_file_number),
+            Some(&table_name),
+            "about_to_execute_existence_check_for_table"
+        );
+
+        let query_execution = QueryExecution::new(database_client, query_to_execute.to_string());
+        let result = query_execution.query_one_with_timeout(database_client, &[&schema_name, &just_table_name]).await?;
+        let table_exists: bool = result.get(0);
+        if !table_exists {
             // check this isn't a delete command, because if it is,
             // we've got no table so job done (good thing because there's no schema)
             if s3_file.kind == ChangeKind::Delete {
