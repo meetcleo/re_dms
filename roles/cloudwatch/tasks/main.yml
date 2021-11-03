@@ -65,3 +65,19 @@
     state: restarted
     enabled: yes
     daemon_reload: yes
+
+- name: set custom cron metric reporting to statsd
+  ansible.builtin.cron:
+    name: 'check number of wal files.'
+    minute: '*' # these are defaults but explicitly every minute
+    hour: '*'
+    weekday: '*'
+    user: 're_dms'
+    # calculate number of wal files
+    # pipefail to exit early
+    # echo as a guage to netcat, and send to default statsd collection agent.
+    job: >-
+      set -euo pipefail
+      number_of_wal_files=$(ls /re_dms/output_wal/*.wal | wc -l)
+      echo "number_of_wal_files:$number_of_wal_files|g" | nc -u -w0 127.0.0.1 8125
+
