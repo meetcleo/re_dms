@@ -65,3 +65,32 @@
     state: restarted
     enabled: yes
     daemon_reload: yes
+
+- name: Copy systemd service file to server
+  ansible.builtin.copy:
+    src: '{{ item }}'
+    dest: /usr/local/bin
+    owner: re_dms
+    mode: 0755
+  loop:
+    - measure_number_of_wal_files.sh
+    - measure_age_of_oldest_wal_file.sh
+    - measure_age_of_youngest_wal_file.sh
+    - measure_number_of_re_dms_processes.sh
+    - measure_number_of_processes_owned_by_re_dms.sh
+  tags: statsd-metrics
+
+- name: set custom cron metric reporting to statsd
+  ansible.builtin.cron:
+    name: 'check number of wal files.'
+    minute: '*' # these are defaults but explicitly every minute
+    hour: '*'
+    weekday: '*'
+    user: 're_dms'
+    # calculate number of wal files
+    # pipefail to exit early
+    # echo as a guage to netcat, and send to default statsd collection agent.
+    job: "(/usr/local/bin/measure_number_of_wal_files.sh ; /usr/local/bin/measure_age_of_oldest_wal_file.sh ; /usr/local/bin/measure_age_of_youngest_wal_file.sh ; /usr/local/bin/measure_number_of_re_dms_processes.sh ; /usr/local/bin/measure_number_of_processes_owned_by_re_dms.sh) 2>&1 | logger -t bash_metrics"
+  tags: statsd-metrics
+      
+
