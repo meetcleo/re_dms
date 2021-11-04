@@ -80,4 +80,21 @@
       set -euo pipefail
       number_of_wal_files=$(ls /re_dms/output_wal/*.wal | wc -l)
       echo "number_of_wal_files:$number_of_wal_files|g" | nc -u -w0 127.0.0.1 8125
+      number_of_processes_owned_by_re_dms=$(ps -u re_dms --no-headers | wc -l)
+      echo "number_of_processes_owned_by_re_dms:$number_of_processes_owned_by_re_dms|g" | nc -u -w0 127.0.0.1 8125
+      number_of_re_dms_processes_running=$(ps -C re_dms --no-headers | wc -l)
+      echo "number_of_re_dms_processes_running:$number_of_re_dms_processes_running|g" | nc -u -w0 127.0.0.1 8125
+      # date at which the oldest wal file was last modified in epoch seconds
+      then_old=$(ls /re_dms/output_wal/*.wal -tr | head -n 1 | xargs stat -c '%Y')
+      # date at which the most recent wal file was last modified in epoch seconds
+      then_new=$(ls /re_dms/output_wal/*.wal -tr | head -n 1 | xargs stat -c '%Y')
+      # now epoch seconds
+      now=$(date +%s)
+      # oldest file created seconds ago
+      old_seconds_ago=$(($then_old-$now))
+      # oldest file created seconds ago
+      newest_seconds_ago=$(($then_new-$now))
+      echo "seconds_since_oldest_wal_file_modified:$old_seconds_ago|g" | nc -u -w0 127.0.0.1 8125
+      echo "seconds_since_newest_wal_file_modified:$newest_seconds_ago|g" | nc -u -w0 127.0.0.1 8125
+      
 
