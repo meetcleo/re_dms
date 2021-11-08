@@ -454,9 +454,10 @@ impl DatabaseWriter {
         let wal_file_number = s3_file.wal_file.file_number;
         let query_to_execute = "
             SELECT EXISTS (
-                SELECT 1 FROM information_schema.tables
-                WHERE  table_schema = $1
-                    AND    table_name   = $2
+                SELECT 1 FROM pg_catalog.pg_class c
+                JOIN   pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+                WHERE  n.nspname = $1
+                AND    c.relname = $2
             );";
 
         logger_info!(
