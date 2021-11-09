@@ -20,8 +20,8 @@ pub type DatabaseTableThread = GenericTableThread<UploaderStageResult>;
 pub type DatabaseWriterThreads = GenericTableThreadSplitter<DatabaseWriter, UploaderStageResult>;
 
 impl DatabaseWriterThreads {
-    pub fn new() -> DatabaseWriterThreads {
-        let shared_resource = Arc::new(DatabaseWriter::new());
+    pub async fn new() -> DatabaseWriterThreads {
+        let shared_resource = Arc::new(DatabaseWriter::new().await);
         let table_streams = HashMap::new();
         DatabaseWriterThreads {
             shared_resource,
@@ -36,7 +36,7 @@ impl DatabaseWriterThreads {
     }
 
     pub async fn database_uploader_stream(mut receiver: mpsc::Receiver<UploaderStageResult>) {
-        let mut database_uploader_stream = DatabaseWriterThreads::new();
+        let mut database_uploader_stream = DatabaseWriterThreads::new().await;
         loop {
             let received = receiver.recv().await;
             if let Some(s3_file) = received {

@@ -16,6 +16,7 @@ use crate::change_processing::DdlChange;
 use crate::file_uploader::CleoS3File;
 use crate::parser::{ChangeKind, ColumnInfo, SchemaAndTable, TableName};
 use crate::shutdown_handler::ShutdownHandler;
+use crate::targets_tables_column_names::TargetsTablesColumnNames;
 
 pub const DEFAULT_NUMERIC_PRECISION: i32 = 19; // 99_999_999_999.99999999
 pub const DEFAULT_NUMERIC_SCALE: i32 = 8;
@@ -33,6 +34,7 @@ lazy_static! {
 
 pub struct DatabaseWriter {
     connection_pool: Pool,
+    targets_tables_column_names: TargetsTablesColumnNames,
 }
 
 #[derive(Debug, Deserialize)]
@@ -159,9 +161,28 @@ impl QueryExecution {
 }
 
 impl DatabaseWriter {
-    pub fn new() -> DatabaseWriter {
+    pub async fn new() -> DatabaseWriter {
+        let mut targets_tables_column_names = TargetsTablesColumnNames::new();
+        let result = targets_tables_column_names.refresh().await;
+        match result {
+            Ok(_) => logger_info!(
+                None,
+                None,
+                &format!(
+                    "Fetched column names for {} tables from target DB",
+                    targets_tables_column_names.len()
+                )
+            ),
+            Err(msg) => logger_panic!(
+                None,
+                None,
+                &format!("Failed to fetch column names from target DB: {:?}", msg)
+            ),
+        }
+
         DatabaseWriter {
             connection_pool: DatabaseWriter::create_connection_pool(),
+            targets_tables_column_names: targets_tables_column_names,
         }
     }
 
@@ -442,6 +463,13 @@ impl DatabaseWriter {
         }
     }
 
+    fn table_exists_in_cache(&self, table_name_with_schema: &TableName) -> bool {
+        match self.targets_tables_column_names.get_by_name(table_name_with_schema) {
+            Some(..) => true,
+            None => false
+        }
+    }
+
     // bool is whether we return early. Only necessary for delete where the table
     // does not exist
     async fn create_table_if_not_exists(
@@ -452,6 +480,17 @@ impl DatabaseWriter {
         let (schema_name, just_table_name) = s3_file.table_name.schema_and_table_name();
         let table_name = s3_file.table_name.clone();
         let wal_file_number = s3_file.wal_file.file_number;
+
+        if self.table_exists_in_cache(&s3_file.table_name) {
+            logger_info!(
+                Some(wal_file_number),
+                Some(&table_name),
+                "skipped_existence_check_for_table"
+            );
+
+            return Ok(false);
+        }
+
         let query_to_execute = "
             SELECT EXISTS (
                 SELECT 1 FROM pg_catalog.pg_class c
