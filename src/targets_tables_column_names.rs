@@ -60,7 +60,7 @@ impl TargetsTablesColumnNames {
     pub fn new() -> TargetsTablesColumnNames {
         let hash_map = HashMap::new();
         TargetsTablesColumnNames {
-            connection_pool: Some(TargetsTablesColumnNames::create_connection_pool()),
+            connection_pool: None,
             table_holder: TableHolder { tables: hash_map },
         }
     }
@@ -113,6 +113,11 @@ impl TargetsTablesColumnNames {
         cfg.pg.manager = Some(ManagerConfig {
             recycling_method: RecyclingMethod::Fast,
         });
+        // only needs 1 connection to do its business
+        let mut pool_cfg = cfg.pg.get_pool_config();
+        pool_cfg.max_size = 1;
+        cfg.pg.pool = Some(pool_cfg);
+
         let builder = SslConnector::builder(SslMethod::tls())
             .expect("Unable to build ssl connector. Are ssl libraries configured correctly?");
         let connector = MakeTlsConnector::new(builder.build());
@@ -140,6 +145,7 @@ impl TargetsTablesColumnNames {
     pub async fn refresh(
         &mut self,
     ) -> Result<&mut TargetsTablesColumnNames, TargetsTablesColumnNamesError> {
+        self.connection_pool = Some(TargetsTablesColumnNames::create_connection_pool());
         let client = self.get_connection_from_pool().await?;
 
         let schema_filter = match &*TARGET_SCHEMA_NAME {
@@ -192,6 +198,7 @@ impl TargetsTablesColumnNames {
         }
 
         self.table_holder = TableHolder { tables };
+        self.connection_pool = None;
 
         Ok(self)
     }
