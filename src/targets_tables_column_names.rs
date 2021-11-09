@@ -113,6 +113,11 @@ impl TargetsTablesColumnNames {
         cfg.pg.manager = Some(ManagerConfig {
             recycling_method: RecyclingMethod::Fast,
         });
+        // only needs 1 connection to do its business
+        let mut pool_cfg = cfg.pg.get_pool_config();
+        pool_cfg.max_size = 1;
+        cfg.pg.pool = Some(pool_cfg);
+
         let builder = SslConnector::builder(SslMethod::tls())
             .expect("Unable to build ssl connector. Are ssl libraries configured correctly?");
         let connector = MakeTlsConnector::new(builder.build());
