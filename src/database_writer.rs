@@ -534,7 +534,7 @@ impl DatabaseWriter {
 
             // TODO: distkey
             let create_table_query = format!(
-                "create table \"{schema_name}\".\"{just_table_name}\" ({columns}) SORTKEY(id)",
+                "create table \"{schema_name}\".\"{just_table_name}\" ({columns})",
                 schema_name = schema_name,
                 just_table_name = just_table_name,
                 columns = self.values_description_for_table(&s3_file.columns)
@@ -615,9 +615,10 @@ impl DatabaseWriter {
     // NOTE: you also need to remove quotes from the column name
     fn column_and_type_for_column(&self, column_info: &ColumnInfo) -> String {
         format!(
-            "\"{column_name}\" {column_type}",
+            "\"{column_name}\" {column_type}{constraints}",
             column_name = column_info.column_name().replace("\"", ""),
-            column_type = self.column_type_mapping(column_info.column_type()).as_str()
+            column_type = self.column_type_mapping(column_info.column_type()).as_str(),
+            constraints = if column_info.is_id_column() { " sortkey primary key not null" } else { "" }
         )
     }
 
