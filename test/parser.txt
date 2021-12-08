@@ -16,3 +16,6 @@ COMMIT 4220773508
 BEGIN 4220773511
 table public.notification_sending_logs: UPDATE: id[uuid]:'5fe0cb5c-d92b-46ef-84bf-c02018ff19ca' user_id[bigint]:3871635 flow_root_id[bigint]:12741 channel[character varying]:'app_notifications_enabled' did_not_send_reason[character varying]:null kicked_off_at[timestamp without time zone]:'2020-11-27 14:10:44' notification_sent_at[timestamp without time zone]:'2020-11-27 15:35:28.550426' notification_date[date]:'2020-11-27' active_user[boolean]:true disconnected_user[boolean]:false created_at[timestamp without time zone]:'2020-11-27 15:33:03.202097' updated_at[timestamp without time zone]:'2020-11-27 15:35:28.55719'
 COMMIT 4220773511
+BEGIN 4220773599
+table public.smart_insight_admin_conditions: DELETE: (no-tuple-data)
+COMMIT 4220773599
