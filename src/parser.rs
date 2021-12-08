@@ -634,9 +634,21 @@ impl Parser {
         let mut column_vector = Vec::new();
         let mut remaining_string = string;
         while remaining_string.len() > 0 {
-            let (column, rest_of_string) = self.parse_column(remaining_string, table_name.clone());
-            remaining_string = rest_of_string;
-            column_vector.push(column);
+            // we get that any time there is a delete if there's no pkey
+            // postgres code here: https://github.com/postgres/postgres/blob/master/contrib/test_decoding/test_decoding.c#L663
+            if remaining_string == "(no-tuple-data)" {
+                remaining_string = "";
+                logger_info!(
+                    self.parse_state.wal_file_number,
+                    None,
+                    &format!("Dropping no-tuple-data column:{}", string)
+                );
+            } else {
+                let (column, rest_of_string) = self.parse_column(remaining_string, table_name.clone());
+                remaining_string = rest_of_string;
+                column_vector.push(column);
+            }
+
         }
         column_vector
     }
@@ -1159,6 +1171,11 @@ mod tests {
                 table_name: ArcIntern::new("public.notification_sending_logs".to_string()),
                 kind: ChangeKind::Update },
             ParsedLine::Commit(4220773511),
+            ParsedLine::Begin(4220773599),
+            ParsedLine::ChangedData { columns: vec![],
+                table_name: ArcIntern::new("public.smart_insight_admin_conditions".to_string()),
+                kind: ChangeKind::Delete },
+            ParsedLine::Commit(4220773599),
             ]));
     }
 }
