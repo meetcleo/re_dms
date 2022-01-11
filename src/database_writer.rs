@@ -233,7 +233,8 @@ impl DatabaseWriter {
             &client,
             alter_table_statement.as_str(),
             "alter_table_statement",
-            &format!("{:?}", ddl_change),
+            &ddl_change.to_string(),
+            "none",
             table_name.clone(),
             wal_file_number,
         )
@@ -353,6 +354,7 @@ impl DatabaseWriter {
             &transaction,
             create_staging_table.as_str(),
             "create_staging_table",
+            &kind.to_string(),
             &remote_filepath,
             table_name.clone(),
             wal_file_number,
@@ -364,6 +366,7 @@ impl DatabaseWriter {
                 &transaction,
                 copy_to_staging_table.as_str(),
                 "copy_to_staging_table",
+                &kind.to_string(),
                 &remote_filepath,
                 table_name.clone(),
                 wal_file_number,
@@ -403,6 +406,7 @@ impl DatabaseWriter {
             &transaction,
             data_migration_query_string.as_str(),
             "apply_changes_to_real_table",
+            &kind.to_string(),
             &remote_filepath,
             table_name.clone(),
             wal_file_number,
@@ -413,6 +417,7 @@ impl DatabaseWriter {
             &transaction,
             drop_staging_table.as_str(),
             "drop_staging_table",
+            &kind.to_string(),
             &remote_filepath,
             table_name.clone(),
             wal_file_number,
@@ -440,6 +445,7 @@ impl DatabaseWriter {
         client: &Client,
         query_to_execute: &str,
         action_name: &str,
+        change_kind: &str,
         remote_filepath: &str,
         table_name: TableName,
         wal_file_number: u64,
@@ -460,7 +466,7 @@ impl DatabaseWriter {
         );
 
         let query_execution = QueryExecution::new(client, query_to_execute.to_string());
-        let result = query_execution.execute_with_timeout(client, &format!("{}.{}", action_name, table_name)).await;
+        let result = query_execution.execute_with_timeout(client, &format!("{}.{}.{}", action_name, change_kind, table_name)).await;
         match result {
             Ok(..) => {
                 logger_info!(
@@ -562,6 +568,7 @@ impl DatabaseWriter {
                 &database_client,
                 create_table_query.as_str(),
                 "create_table_statement",
+                "create_table",
                 &s3_file.remote_path(),
                 table_name.clone(),
                 wal_file_number,

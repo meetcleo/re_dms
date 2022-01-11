@@ -27,6 +27,15 @@ impl DdlChange {
     }
 }
 
+impl std::string::ToString for DdlChange {
+    fn to_string(&self) -> String {
+        match self {
+            Self::AddColumn(_, _) => "add_column".to_string(),
+            Self::RemoveColumn(_, _) => "remove_column".to_string(),
+        }
+    }
+}
+
 #[derive(Debug, Eq, PartialEq)]
 struct ChangeSet {
     changes: Option<ParsedLine>,
