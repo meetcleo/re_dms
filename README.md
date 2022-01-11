@@ -1,5 +1,5 @@
 # ReDms (Postgres to redshift streaming replication)
-ReDms is a project that provides a client that will use [postgresql's logical replication](https://www.postgresql.org/docs/current/logical-replication.html) to stream data to [amazon redshift](https://aws.amazon.com/redshift/).
+ReDms (DMS stands for database migration system) is a project that provides a client that will use [postgresql's logical replication](https://www.postgresql.org/docs/current/logical-replication.html) to stream data to [amazon redshift](https://aws.amazon.com/redshift/).
 
 This project provides
 * The client itself.
