@@ -22,6 +22,7 @@ This project provides
 * The client assumes, and requires that all tables that are being replicated have a unique column called `id` as the primary key. This column can either be a UUID or integer type.
 * The default `NUMERIC` type is hardcoded to `NUMERIC(19,8)` (this could easily be changed).
 * Column types that are not specified in the mapping linked above, and are not common to both postgres and redshift will not work.
+* Truncates values (e.g. text fields) so that they will fit into the destination column size.
 
 ## Running locally
 
