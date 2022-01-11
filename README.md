@@ -131,11 +131,11 @@ $ ansible-playbook -i hosts re_dms.yml --tags cloudwatch --extra-vars "cloudwatc
 ## How it works
 * reads input data from a `test_decoding` logical replication slot.
 * It saves this data as soon as it comes in into a "WAL" file. (this allows picking up and restarting).
-* will process these changes and batches any changes together (There will only be 1 change per row, so a create followed by an update gets aggregated into a single change e.t.c.)
+* will process these changes and batches any changes together (There will only be 1 change per row, so a `create` followed by an `update` gets aggregated into a single change e.t.c.)
 * then will create a bunch of gzipped csv files containing the inserts/updates/deletes for each table.
 * concurrently for all tables it will:
-* upload all of this csv files to s3.
-* process them loading them into redshift.
+  * upload all of this csv files to s3.
+  * process them loading them into redshift.
 * NOTE: any text based columns that have a single null byte as the value of the text will come through as null values (we could fix this, but _come on!_).
 
 
