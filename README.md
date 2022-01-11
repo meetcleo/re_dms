@@ -1,28 +1,13 @@
-# Postgres to Redshift v2
-* aims to provide a client to stream replication from postgres to redshift.
+# ReDms (Postgres to redshift streaming replication)
+ReDms is a project that provides a client that will use [postgresql's logical replication](https://www.postgresql.org/docs/current/logical-replication.html) to stream data to [amazon redshift](https://aws.amazon.com/redshift/).
 
-## Outline
-* reads input data from a `test_decoding` replication slot
-* will process these changes batch applies them
-* then create a bunch of csv files to upload to s3
-* it will then upload all of this data to s3
-* process them loading them into redshift.
-* NOTE: any text based columns that have a single null byte as the value of the text will come through as null values (we could fix this, but _come on!_).
-
-## Structure
-* files are parsed into structures by `parser.rs`
-* files are then collected into data structures in `change_processing.rs`
-* files are written via `file_writer.rs`
-* structs representing these files are passed on to the `file_uploader_threads`.
-* This reads from a single channel, and starts a new task for each distinct table (unless the task has already been started otherwise it uses the existing channel) giving it a channel. The new task will receive tables passed to the channel and sequentially upload files to s3 (via `file_uploader`), then posting the resulting CleoS3File to an output channel.
-* this output channel leads to a `database_writer_threads`.
-* similar to the `file_uploader_threads` this will read from the channel, and start a new task for each distinct table name (unless a task has already been started, otherwise it will reuse the channel). It will then send the `CleoS3File` to this task, which will process each `CleoS3File` and import it into the database via the `database_writer`.
-* `main.rs` does exactly what it says on the tin and runs the input loop, sending the results onwards through the pipeline. Initial files are written synchronously (`file_writer`).
-
-NOTE: this isn't actually threading, it's only based on async tasks and a few event loops. I use the term thread throughout since it's conceptually simpler.
-
-## Architecture diagram
-https://drive.google.com/file/d/1L2Hd8hW8nhLKLGqcS1TkBWd1czcEc49x/view?usp=sharing
+This project provides
+* The client itself.
+* a systemd service to handle running the client
+* a Makefile and docker based build system (targetting ubuntu)
+* (Optional) integration with an error reporting service ([Rollbar](https://rollbar.com))
+* an ansible script to allow you to deploy this service.
+* cloudwatch configuration and metrics integration for the service.
 
 ## Running locally
 
@@ -128,3 +113,35 @@ $ pip install boto # needed for creating the log group with community.aws.cloudw
 $ ansible-galaxy collection install community.aws
 $ ansible-playbook -i hosts re_dms.yml --tags cloudwatch --extra-vars "cloudwatch_aws_access_key_id=SOME_ACCESS_KEY_ID cloudwatch_aws_access_key_secret=SOME_SECRET" # or however you want to provide these variables
 ```
+
+## How it works
+* reads input data from a `test_decoding` logical replication slot.
+* It saves this data as soon as it comes in into a "WAL" file. (this allows picking up and restarting).
+* will process these changes and batches any changes together (There will only be 1 change per row, so a create followed by an update gets aggregated into a single change e.t.c.)
+* then will create a bunch of gzipped csv files containing the inserts/updates/deletes for each table.
+* concurrently for all tables it will:
+* upload all of this csv files to s3.
+* process them loading them into redshift.
+* NOTE: any text based columns that have a single null byte as the value of the text will come through as null values (we could fix this, but _come on!_).
+
+## Code structure
+* the `wal_file_manager.rs` handles writing the wal file, and then splitting it into multiple sections. (when the wal file splits, either by a configurable timeperiod elapsing, or the wal file reaching a configurable byte limit, the batched changes will be written to redshift)
+* files are parsed into structures by `parser.rs`
+* files are then collected into data structures in `change_processing.rs`
+* files are written via `file_writer.rs`
+* structs representing these files are passed on to the `file_uploader_threads`.
+* This reads from a single channel, and starts a new task for each distinct table (unless the task has already been started otherwise it uses the existing channel) giving it a channel. The new task will receive tables passed to the channel and sequentially upload files to s3 (via `file_uploader`), then posting the resulting CleoS3File to an output channel.
+* this output channel leads to a `database_writer_threads`.
+* similar to the `file_uploader_threads` this will read from the channel, and start a new task for each distinct table name (unless a task has already been started, otherwise it will reuse the channel). It will then send the `CleoS3File` to this task, which will process each `CleoS3File` and import it into the database via the `database_writer`.
+* `main.rs` does exactly what it says on the tin and runs the input loop, sending the results onwards through the pipeline. Initial files are written synchronously (`file_writer`).
+
+NOTE: this isn't actually threading, it's only based on async tasks and a few event loops. I use the term thread throughout since it's conceptually simpler.
+
+## Architecture diagram
+https://drive.google.com/file/d/1L2Hd8hW8nhLKLGqcS1TkBWd1czcEc49x/view?usp=sharing
+
+## Contributing
+* feel free to open an issue or PR with any problems you run into, or suggestions for improvements.
+
+## License
+MIT license.
