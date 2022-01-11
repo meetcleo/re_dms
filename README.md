@@ -23,6 +23,7 @@ This project provides
 * The default `NUMERIC` type is hardcoded to `NUMERIC(19,8)` (this could easily be changed).
 * Column types that are not specified in the mapping linked above, and are not common to both postgres and redshift will not work.
 * Truncates values (e.g. text fields) so that they will fit into the destination column size.
+* Will not apply changes to redshift until the next data is received after the configured timelimit (or bytelimit) for the wal file switchover (or when it is shutdown).
 
 ## Running locally
 
