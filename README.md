@@ -99,7 +99,6 @@ Clean any build artefacts:
 
 `make clean`
 
-
 ## Runbook
 
 Managing the status|start|stop|restart of the re_dms service:
@@ -138,6 +137,7 @@ $ ansible-playbook -i hosts re_dms.yml --tags cloudwatch --extra-vars "cloudwatc
 * process them loading them into redshift.
 * NOTE: any text based columns that have a single null byte as the value of the text will come through as null values (we could fix this, but _come on!_).
 
+
 ## Code structure
 * the `wal_file_manager.rs` handles writing the wal file, and then splitting it into multiple sections. (when the wal file splits, either by a configurable timeperiod elapsing, or the wal file reaching a configurable byte limit, the batched changes will be written to redshift)
 * files are parsed into structures by `parser.rs`
@@ -150,6 +150,15 @@ $ ansible-playbook -i hosts re_dms.yml --tags cloudwatch --extra-vars "cloudwatc
 * `main.rs` does exactly what it says on the tin and runs the input loop, sending the results onwards through the pipeline. Initial files are written synchronously (`file_writer`).
 
 NOTE: this isn't actually threading, it's only based on async tasks and a few event loops. I use the term thread throughout since it's conceptually simpler.
+
+### Implementation note about TOAST-ed columns.
+* The design of re_dms has been influenced by how postgres treats [TOAST](https://www.postgresql.org/docs/current/storage-toast.html)-ed columns, and how they show up (or rather don't) through logical replication.
+* As a reminder, TOAST stands for "The Oversized attribute storage technique". When a single column has a value that is greater than a certain number of bytes, postgres moves this data to a separate area and stores this data there.
+* When an update is made to a row that has a TOASTed column, if the column itself is updated to have new data, then there is no problem, and the new data appears in the logical replication stream.
+* However, if an update is mode to a row that has a TOASTed column, that does not update the data within the TOASTed column, then the value of the data in the toasted column is _not_ provided in the logical replication stream.
+* This means for every table that has toasted columns, we may need to be able to update the rows both where the column has changed, and where it hasn't changed. This means for a single toasted column, we need to be able to generate 2 different update files, and in the general case, we need to be able to handle updates for any subset of columns.
+* For this tool, we also need to be able to distinguish this case from the case where a column has been dropped (since we keep the schema of the postgresql source, and the redshift target in sync.)
+* For this reason, we use the `test_decoding` plugin for postgres, as this exposes the data of whether the absense of data is due to an unchanged toast column, or because a column doesn't exist.
 
 ## Architecture diagram
 https://drive.google.com/file/d/1L2Hd8hW8nhLKLGqcS1TkBWd1czcEc49x/view?usp=sharing
