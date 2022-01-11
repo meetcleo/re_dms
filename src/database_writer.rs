@@ -6,7 +6,7 @@ use tokio_postgres::error::Error as TokioPostgresError;
 use tokio::time::timeout;
 use std::time::{Duration, Instant};
 use serde::Deserialize;
-use statsd::Client as StatsdClient;
+use dogstatsd::{Client as StatsdClient, Options as StatsdOptions};
 // use config;
 use std::env;
 
@@ -72,7 +72,7 @@ impl QueryExecution {
             // the cancel token is related to the connection owned by this client (it will cancel any query running on this connection when `cancel_query` is invoked)
             cancel_token: client.cancel_token(),
             query: query,
-            statsd: StatsdClient::new(STATSD_IP_AND_PORT.to_owned(), "re_dms").unwrap()
+            statsd: StatsdClient::new(StatsdOptions::new("127.0.0.1:0", &STATSD_IP_AND_PORT.to_owned(), "re_dms")).unwrap()
         }
     }
 
@@ -88,12 +88,12 @@ impl QueryExecution {
         self.cancel_token.cancel_query(connector).await
     }
 
-    pub async fn execute_with_timeout(&self, client: &Client, metric_name: &str) -> Result<(), DatabaseWriterError> {
+    pub async fn execute_with_timeout(&self, client: &Client, metric_name: &str, metric_tags: &[String]) -> Result<(), DatabaseWriterError> {
         let query_execution = client.execute(self.query.as_str(), &[]);
         let start = Instant::now();
         let timeout_result = timeout(*CLIENT_SIDE_DB_QUERY_TIMEOUT_IN_SECONDS, query_execution).await;
         let duration = start.elapsed();
-        self.statsd.timer(metric_name, duration.as_millis() as f64);
+        self.statsd.timing(metric_name, duration.as_millis() as i64, metric_tags).unwrap();
         match timeout_result {
             Ok(query_result) => {
                 match query_result {
@@ -129,12 +129,12 @@ impl QueryExecution {
         }
     }
 
-    pub async fn query_one_with_timeout(&self, client: &Client, metric_name: &str, params: &[&(dyn tokio_postgres::types::ToSql + std::marker::Sync)]) -> Result<Row, DatabaseWriterError> {
+    pub async fn query_one_with_timeout(&self, client: &Client, metric_name: &str, metric_tags: &[String], params: &[&(dyn tokio_postgres::types::ToSql + std::marker::Sync)]) -> Result<Row, DatabaseWriterError> {
         let query_one = client.query_one(self.query.as_str(), params);
         let start = Instant::now();
         let timeout_result = timeout(*CLIENT_SIDE_DB_QUERY_TIMEOUT_IN_SECONDS, query_one).await;
         let duration = start.elapsed();
-        self.statsd.timer(metric_name, duration.as_millis() as f64);
+        self.statsd.timing(metric_name, duration.as_millis() as i64, metric_tags).unwrap();
         match timeout_result {
             Ok(query_result) => {
                 match query_result {
@@ -466,7 +466,8 @@ impl DatabaseWriter {
         );
 
         let query_execution = QueryExecution::new(client, query_to_execute.to_string());
-        let result = query_execution.execute_with_timeout(client, &format!("{}.{}.{}", action_name, change_kind, table_name)).await;
+        let metric_tags = &[format!("change_kind:{}", change_kind), format!("table_name:{}", table_name)];
+        let result = query_execution.execute_with_timeout(client, action_name, metric_tags).await;
         match result {
             Ok(..) => {
                 logger_info!(
@@ -530,7 +531,8 @@ impl DatabaseWriter {
         );
 
         let query_execution = QueryExecution::new(database_client, query_to_execute.to_string());
-        let result = query_execution.query_one_with_timeout(database_client, &format!("{}.{}", "existence_check_for_table", table_name), &[&schema_name, &just_table_name]).await?;
+        let metric_tags = &[format!("table_name:{}", table_name)];
+        let result = query_execution.query_one_with_timeout(database_client, "existence_check_for_table", metric_tags, &[&schema_name, &just_table_name]).await?;
         let table_exists: bool = result.get(0);
         if !table_exists {
             // check this isn't a delete command, because if it is,
