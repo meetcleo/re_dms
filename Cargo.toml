@@ -80,7 +80,7 @@ nix = "0.19.1"
 signal-hook = "0.3.4"
 
 # recording query durations
-statsd = "0.14.1"
+dogstatsd = "0.6.2"
 
 rollbar = { version = "0.7.0", optional = true }
 backtrace = { version = "0.3.56", optional = true }
