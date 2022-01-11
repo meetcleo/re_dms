@@ -1,6 +1,10 @@
 # re_dms (Postgres to redshift streaming replication)
 re_dms (DMS stands for database migration system) is a project that provides a client that will use [postgresql's logical replication](https://www.postgresql.org/docs/current/logical-replication.html) to stream data to [amazon redshift](https://aws.amazon.com/redshift/).
 
+At [Cleo](https://web.meetcleo.com/) we use redshift for our analytics database, and postgres for our production database. In order to run our business analytics we replicate a lot of our production data to our analytics database.
+We used to use [postgres_to_redshift](https://github.com/toothrot/postgres_to_redshift) to do this replication until the data needed to replicate became too large for this. We changed this to [perform incrementally](https://github.com/meetcleo/postgres_to_redshift) for a while but the volume of data still grew to be too large.
+We started evulauting other tools like [Amazon's DMS](https://aws.amazon.com/dms/) and some others. Ultimately, the way DMS fails to batch changes meant it wasn't performant enough to handle our throughput, so we built this tool to solve our problem.
+
 This project provides
 * The client itself.
 * a systemd service to handle running the client
