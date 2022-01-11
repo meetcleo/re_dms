@@ -1,5 +1,5 @@
-# ReDms (Postgres to redshift streaming replication)
-ReDms (DMS stands for database migration system) is a project that provides a client that will use [postgresql's logical replication](https://www.postgresql.org/docs/current/logical-replication.html) to stream data to [amazon redshift](https://aws.amazon.com/redshift/).
+# re_dms (Postgres to redshift streaming replication)
+re_dms (DMS stands for database migration system) is a project that provides a client that will use [postgresql's logical replication](https://www.postgresql.org/docs/current/logical-replication.html) to stream data to [amazon redshift](https://aws.amazon.com/redshift/).
 
 This project provides
 * The client itself.
@@ -8,6 +8,20 @@ This project provides
 * (Optional) integration with an error reporting service ([Rollbar](https://rollbar.com))
 * an ansible script to allow you to deploy this service.
 * cloudwatch configuration and metrics integration for the service.
+
+## Client features
+* Will use logical replication to stream postgres data to redshift (duh)
+* Will create new tables on the target redshift database when new tables are created (as soon as data is written into them).
+* Will add new columns to the target redshift database when new columns are added to a table on the source database.
+* Will also drop columns on the target redshift database when columns are removed from a table in the source database.
+* Handles [some idiosynchrasies](https://docs.aws.amazon.com/redshift/latest/dg/r_Numeric_types201.html) to do with the redshift numeric type by saturating it to the maximum value allowed by the type. (redshift happens to store values with 19 precision as a 64 bit int.)
+* Handles some type conversions. [see here](https://github.com/meetcleo/re_dms/blob/master/src/database_writer.rs#L712-L735).
+* Truncates values (e.g. text fields) so that they will fit into the destination column size.
+
+## Limitations
+* The client assumes, and requires that all tables that are being replicated have a unique column called `id` as the primary key. This column can either be a UUID or integer type.
+* The default `NUMERIC` type is hardcoded to `NUMERIC(19,8)` (this could easily be changed).
+* Column types that are not specified in the mapping linked above, and are not common to both postgres and redshift will not work.
 
 ## Running locally
 
