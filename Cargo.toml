@@ -48,7 +48,7 @@ flate2 = "1.0.19"
 
 # async
 # highest tokio version that rusoto supports
-# TODO: think about tokio_compat / or switch to 
+# TODO: think about tokio_compat / or switch to
 tokio = { version = "0.2.9", features = ["full"] }
 # gotta stream those files to s3
 # let's get async up in here
@@ -78,6 +78,9 @@ maplit = "1.0.2"
 # linux stuff
 nix = "0.19.1"
 signal-hook = "0.3.4"
+
+# recording query durations
+statsd = "0.14.1"
 
 rollbar = { version = "0.7.0", optional = true }
 backtrace = { version = "0.3.56", optional = true }
