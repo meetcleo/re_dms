@@ -4,8 +4,9 @@ use postgres_openssl::MakeTlsConnector;
 use tokio_postgres::{CancelToken, Row};
 use tokio_postgres::error::Error as TokioPostgresError;
 use tokio::time::timeout;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use serde::Deserialize;
+use statsd::Client as StatsdClient;
 // use config;
 use std::env;
 
@@ -30,6 +31,8 @@ lazy_static! {
                 .parse::<u64>()
                 .expect("CLIENT_SIDE_DB_QUERY_TIMEOUT_IN_SECONDS is not a valid integer")
         );
+    static ref STATSD_IP_AND_PORT: String =
+        std::env::var("STATSD_IP_AND_PORT").unwrap_or("127.0.0.1:8125".to_string());
 }
 
 pub struct DatabaseWriter {
@@ -44,7 +47,8 @@ struct Config {
 
 pub struct QueryExecution {
     cancel_token: CancelToken,
-    query: String
+    query: String,
+    statsd : StatsdClient
 }
 
 #[derive(Debug)]
@@ -67,7 +71,8 @@ impl QueryExecution {
         QueryExecution {
             // the cancel token is related to the connection owned by this client (it will cancel any query running on this connection when `cancel_query` is invoked)
             cancel_token: client.cancel_token(),
-            query: query
+            query: query,
+            statsd: StatsdClient::new(STATSD_IP_AND_PORT.to_owned(), "re_dms").unwrap()
         }
     }
 
@@ -83,9 +88,12 @@ impl QueryExecution {
         self.cancel_token.cancel_query(connector).await
     }
 
-    pub async fn execute_with_timeout(&self, client: &Client) -> Result<(), DatabaseWriterError> {
+    pub async fn execute_with_timeout(&self, client: &Client, metric_name: &str) -> Result<(), DatabaseWriterError> {
         let query_execution = client.execute(self.query.as_str(), &[]);
+        let start = Instant::now();
         let timeout_result = timeout(*CLIENT_SIDE_DB_QUERY_TIMEOUT_IN_SECONDS, query_execution).await;
+        let duration = start.elapsed();
+        self.statsd.timer(metric_name, duration.as_millis() as f64);
         match timeout_result {
             Ok(query_result) => {
                 match query_result {
@@ -121,9 +129,12 @@ impl QueryExecution {
         }
     }
 
-    pub async fn query_one_with_timeout(&self, client: &Client, params: &[&(dyn tokio_postgres::types::ToSql + std::marker::Sync)]) -> Result<Row, DatabaseWriterError> {
+    pub async fn query_one_with_timeout(&self, client: &Client, metric_name: &str, params: &[&(dyn tokio_postgres::types::ToSql + std::marker::Sync)]) -> Result<Row, DatabaseWriterError> {
         let query_one = client.query_one(self.query.as_str(), params);
+        let start = Instant::now();
         let timeout_result = timeout(*CLIENT_SIDE_DB_QUERY_TIMEOUT_IN_SECONDS, query_one).await;
+        let duration = start.elapsed();
+        self.statsd.timer(metric_name, duration.as_millis() as f64);
         match timeout_result {
             Ok(query_result) => {
                 match query_result {
@@ -221,7 +232,8 @@ impl DatabaseWriter {
         self.execute_single_query(
             &client,
             alter_table_statement.as_str(),
-            &format!("alter_table_statement:{:?}", ddl_change),
+            "alter_table_statement",
+            &format!("{:?}", ddl_change),
             table_name.clone(),
             wal_file_number,
         )
@@ -340,7 +352,8 @@ impl DatabaseWriter {
         self.execute_single_query(
             &transaction,
             create_staging_table.as_str(),
-            &format!("create_staging_table:{}", &remote_filepath),
+            "create_staging_table",
+            &remote_filepath,
             table_name.clone(),
             wal_file_number,
         )
@@ -350,7 +363,8 @@ impl DatabaseWriter {
             .execute_single_query(
                 &transaction,
                 copy_to_staging_table.as_str(),
-                &format!("copy_to_staging_table:{}", &remote_filepath),
+                "copy_to_staging_table",
+                &remote_filepath,
                 table_name.clone(),
                 wal_file_number,
             )
@@ -388,7 +402,8 @@ impl DatabaseWriter {
         self.execute_single_query(
             &transaction,
             data_migration_query_string.as_str(),
-            &format!("apply_changes_to_real_table:{}", &remote_filepath),
+            "apply_changes_to_real_table",
+            &remote_filepath,
             table_name.clone(),
             wal_file_number,
         )
@@ -397,7 +412,8 @@ impl DatabaseWriter {
         self.execute_single_query(
             &transaction,
             drop_staging_table.as_str(),
-            &format!("drop_staging_table:{}", &remote_filepath),
+            "drop_staging_table",
+            &remote_filepath,
             table_name.clone(),
             wal_file_number,
         )
@@ -423,10 +439,12 @@ impl DatabaseWriter {
         &self,
         client: &Client,
         query_to_execute: &str,
-        log_tag: &str,
+        action_name: &str,
+        remote_filepath: &str,
         table_name: TableName,
         wal_file_number: u64,
     ) -> Result<(), DatabaseWriterError> {
+        let log_tag = &format!("{}:{}", action_name, remote_filepath);
         logger_info!(
             Some(wal_file_number),
             Some(&table_name),
@@ -442,7 +460,7 @@ impl DatabaseWriter {
         );
 
         let query_execution = QueryExecution::new(client, query_to_execute.to_string());
-        let result = query_execution.execute_with_timeout(client).await;
+        let result = query_execution.execute_with_timeout(client, &format!("{}.{}", action_name, table_name)).await;
         match result {
             Ok(..) => {
                 logger_info!(
@@ -506,7 +524,7 @@ impl DatabaseWriter {
         );
 
         let query_execution = QueryExecution::new(database_client, query_to_execute.to_string());
-        let result = query_execution.query_one_with_timeout(database_client, &[&schema_name, &just_table_name]).await?;
+        let result = query_execution.query_one_with_timeout(database_client, &format!("{}.{}", "existence_check_for_table", table_name), &[&schema_name, &just_table_name]).await?;
         let table_exists: bool = result.get(0);
         if !table_exists {
             // check this isn't a delete command, because if it is,
@@ -544,6 +562,7 @@ impl DatabaseWriter {
                 &database_client,
                 create_table_query.as_str(),
                 "create_table_statement",
+                &s3_file.remote_path(),
                 table_name.clone(),
                 wal_file_number,
             )
