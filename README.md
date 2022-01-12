@@ -1,28 +1,33 @@
-# Postgres to Redshift v2
-* aims to provide a client to stream replication from postgres to redshift.
+# re_dms (Postgres to redshift streaming replication)
+re_dms (DMS stands for database migration system) is a project that provides a client that will use [postgresql's logical replication](https://www.postgresql.org/docs/current/logical-replication.html) to stream data to [amazon redshift](https://aws.amazon.com/redshift/).
 
-## Outline
-* reads input data from a `test_decoding` replication slot
-* will process these changes batch applies them
-* then create a bunch of csv files to upload to s3
-* it will then upload all of this data to s3
-* process them loading them into redshift.
-* NOTE: any text based columns that have a single null byte as the value of the text will come through as null values (we could fix this, but _come on!_).
+At [Cleo](https://web.meetcleo.com/) we use redshift for our analytics database, and postgres for our production database. In order to run our business analytics we replicate a lot of our production data to our analytics database.
+We used to use [postgres_to_redshift](https://github.com/toothrot/postgres_to_redshift) to do this replication until the data needed to replicate became too large for this. We changed this to [perform incrementally](https://github.com/meetcleo/postgres_to_redshift) for a while but the volume of data still grew to be too large.
+We started evulauting other tools like [Amazon's DMS](https://aws.amazon.com/dms/) and some others. Ultimately, the way DMS fails to batch changes meant it wasn't performant enough to handle our throughput, so we built this tool to solve our problem.
 
-## Structure
-* files are parsed into structures by `parser.rs`
-* files are then collected into data structures in `change_processing.rs`
-* files are written via `file_writer.rs`
-* structs representing these files are passed on to the `file_uploader_threads`.
-* This reads from a single channel, and starts a new task for each distinct table (unless the task has already been started otherwise it uses the existing channel) giving it a channel. The new task will receive tables passed to the channel and sequentially upload files to s3 (via `file_uploader`), then posting the resulting CleoS3File to an output channel.
-* this output channel leads to a `database_writer_threads`.
-* similar to the `file_uploader_threads` this will read from the channel, and start a new task for each distinct table name (unless a task has already been started, otherwise it will reuse the channel). It will then send the `CleoS3File` to this task, which will process each `CleoS3File` and import it into the database via the `database_writer`.
-* `main.rs` does exactly what it says on the tin and runs the input loop, sending the results onwards through the pipeline. Initial files are written synchronously (`file_writer`).
+This project provides
+* The client itself.
+* a systemd service to handle running the client
+* a Makefile and docker based build system (targetting ubuntu)
+* (Optional) integration with an error reporting service ([Rollbar](https://rollbar.com))
+* an ansible script to allow you to deploy this service.
+* cloudwatch configuration and metrics integration for the service.
 
-NOTE: this isn't actually threading, it's only based on async tasks and a few event loops. I use the term thread throughout since it's conceptually simpler.
+## Client features
+* Will use logical replication to stream postgres data to redshift (duh)
+* Will create new tables on the target redshift database when new tables are created (as soon as data is written into them).
+* Will add new columns to the target redshift database when new columns are added to a table on the source database.
+* Will also drop columns on the target redshift database when columns are removed from a table in the source database.
+* Handles [some idiosynchrasies](https://docs.aws.amazon.com/redshift/latest/dg/r_Numeric_types201.html) to do with the redshift numeric type by saturating it to the maximum value allowed by the type. (redshift happens to store values with 19 precision as a 64 bit int.)
+* Handles some type conversions. [see here](https://github.com/meetcleo/re_dms/blob/master/src/database_writer.rs#L712-L735).
+* Truncates values (e.g. text fields) so that they will fit into the destination column size.
 
-## Architecture diagram
-https://drive.google.com/file/d/1L2Hd8hW8nhLKLGqcS1TkBWd1czcEc49x/view?usp=sharing
+## Limitations
+* The client assumes, and requires that all tables that are being replicated have a unique column called `id` as the primary key. This column can either be a UUID or integer type.
+* The default `NUMERIC` type is hardcoded to `NUMERIC(19,8)` (this could easily be changed).
+* Column types that are not specified in the mapping linked above, and are not common to both postgres and redshift will not work.
+* Truncates values (e.g. text fields) so that they will fit into the destination column size.
+* Will not apply changes to redshift until the next data is received after the configured timelimit (or bytelimit) for the wal file switchover (or when it is shutdown).
 
 ## Running locally
 
@@ -100,7 +105,6 @@ Clean any build artefacts:
 
 `make clean`
 
-
 ## Runbook
 
 Managing the status|start|stop|restart of the re_dms service:
@@ -128,3 +132,45 @@ $ pip install boto # needed for creating the log group with community.aws.cloudw
 $ ansible-galaxy collection install community.aws
 $ ansible-playbook -i hosts re_dms.yml --tags cloudwatch --extra-vars "cloudwatch_aws_access_key_id=SOME_ACCESS_KEY_ID cloudwatch_aws_access_key_secret=SOME_SECRET" # or however you want to provide these variables
 ```
+
+## How it works
+* reads input data from a `test_decoding` logical replication slot.
+* It saves this data as soon as it comes in into a "WAL" file. (this allows picking up and restarting).
+* will process these changes and batches any changes together (There will only be 1 change per row, so a `create` followed by an `update` gets aggregated into a single change e.t.c.)
+* then will create a bunch of gzipped csv files containing the inserts/updates/deletes for each table.
+* concurrently for all tables it will:
+  * upload all of this csv files to s3.
+  * process them loading them into redshift.
+* NOTE: any text based columns that have a single null byte as the value of the text will come through as null values (we could fix this, but _come on!_).
+
+
+## Code structure
+* the `wal_file_manager.rs` handles writing the wal file, and then splitting it into multiple sections. (when the wal file splits, either by a configurable timeperiod elapsing, or the wal file reaching a configurable byte limit, the batched changes will be written to redshift)
+* files are parsed into structures by `parser.rs`
+* files are then collected into data structures in `change_processing.rs`
+* files are written via `file_writer.rs`
+* structs representing these files are passed on to the `file_uploader_threads`.
+* This reads from a single channel, and starts a new task for each distinct table (unless the task has already been started otherwise it uses the existing channel) giving it a channel. The new task will receive tables passed to the channel and sequentially upload files to s3 (via `file_uploader`), then posting the resulting CleoS3File to an output channel.
+* this output channel leads to a `database_writer_threads`.
+* similar to the `file_uploader_threads` this will read from the channel, and start a new task for each distinct table name (unless a task has already been started, otherwise it will reuse the channel). It will then send the `CleoS3File` to this task, which will process each `CleoS3File` and import it into the database via the `database_writer`.
+* `main.rs` does exactly what it says on the tin and runs the input loop, sending the results onwards through the pipeline. Initial files are written synchronously (`file_writer`).
+
+NOTE: this isn't actually threading, it's only based on async tasks and a few event loops. I use the term thread throughout since it's conceptually simpler.
+
+### Implementation note about TOAST-ed columns.
+* The design of re_dms has been influenced by how postgres treats [TOAST](https://www.postgresql.org/docs/current/storage-toast.html)-ed columns, and how they show up (or rather don't) through logical replication.
+* As a reminder, TOAST stands for "The Oversized attribute storage technique". When a single column has a value that is greater than a certain number of bytes, postgres moves this data to a separate area and stores this data there.
+* When an update is made to a row that has a TOASTed column, if the column itself is updated to have new data, then there is no problem, and the new data appears in the logical replication stream.
+* However, if an update is mode to a row that has a TOASTed column, that does not update the data within the TOASTed column, then the value of the data in the toasted column is _not_ provided in the logical replication stream.
+* This means for every table that has toasted columns, we may need to be able to update the rows both where the column has changed, and where it hasn't changed. This means for a single toasted column, we need to be able to generate 2 different update files, and in the general case, we need to be able to handle updates for any subset of columns.
+* For this tool, we also need to be able to distinguish this case from the case where a column has been dropped (since we keep the schema of the postgresql source, and the redshift target in sync.)
+* For this reason, we use the `test_decoding` plugin for postgres, as this exposes the data of whether the absense of data is due to an unchanged toast column, or because a column doesn't exist.
+
+## Architecture diagram
+https://drive.google.com/file/d/1L2Hd8hW8nhLKLGqcS1TkBWd1czcEc49x/view?usp=sharing
+
+## Contributing
+* feel free to open an issue or PR with any problems you run into, or suggestions for improvements.
+
+## License
+MIT license.
