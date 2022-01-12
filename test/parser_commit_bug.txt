@@ -1,0 +1,5 @@
+BEGIN 3970124255
+table public.foobar: INSERT: c_ddlqry[text]:'BEGIN;
+SELECT 1;
+COMMIT;'
+COMMIT 3970124255
