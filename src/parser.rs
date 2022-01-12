@@ -512,10 +512,10 @@ impl Parser {
 
     pub fn parse(&mut self, string: &String) -> ParsedLine {
         match string {
+            x if { self.parse_state.currently_parsing.is_some() } => self.continue_parse(x),
             x if { x.starts_with("BEGIN") } => self.parse_begin(x),
             x if { x.starts_with("COMMIT") } => self.parse_commit(x),
             x if { x.starts_with("table") } => self.parse_change(x),
-            x if { self.parse_state.currently_parsing.is_some() } => self.continue_parse(x),
             x if { x.starts_with("pg_recvlogical") } => self.parse_pg_rcvlogical_msg(x),
             x => {
                 panic!("Unknown change kind: {}!", x);
@@ -644,11 +644,11 @@ impl Parser {
                     &format!("Dropping no-tuple-data column:{}", string)
                 );
             } else {
-                let (column, rest_of_string) = self.parse_column(remaining_string, table_name.clone());
+                let (column, rest_of_string) =
+                    self.parse_column(remaining_string, table_name.clone());
                 remaining_string = rest_of_string;
                 column_vector.push(column);
             }
-
         }
         column_vector
     }
@@ -928,7 +928,7 @@ mod tests {
         let mut parser = Parser::new(true);
         let line = "table public.users: UPDATE: id[bigint]:123 foobar[numeric]:'1.11' baz[double precision]:'3.141'";
         let mut result = parser.parse(&line.to_string());
-        assert!(matches!(result, ParsedLine::ChangedData{..}));
+        assert!(matches!(result, ParsedLine::ChangedData { .. }));
         println!("{:?}", result);
         if let ParsedLine::ChangedData {
             ref mut columns, ..
@@ -1177,5 +1177,44 @@ mod tests {
                 kind: ChangeKind::Delete },
             ParsedLine::Commit(4220773599),
             ]));
+    }
+
+    #[test]
+    fn parsing_with_commit_line_works() {
+        use std::fs::File;
+        use std::io::{self, BufRead};
+
+        let mut parser = Parser::new(true);
+        let mut collector = Vec::new();
+        let file = File::open("./test/parser_commit_bug.txt")
+            .expect("couldn't find file containing test data");
+        let lines = io::BufReader::new(file).lines();
+        for line in lines {
+            if let Ok(ip) = line {
+                let parsed_line = parser.parse(&ip);
+                match parsed_line {
+                    ParsedLine::ContinueParse => {}
+                    _ => {
+                        collector.push(parsed_line);
+                    }
+                }
+            }
+        }
+
+        assert!(equal_unordered_list(
+            &collector,
+            &vec![
+                ParsedLine::Begin(3970124255),
+                ParsedLine::ChangedData {
+                    columns: vec![Column::ChangedColumn {
+                        column_info: ColumnInfo::new("c_ddlqry".to_string(), "text".to_string()),
+                        value: Some(ColumnValue::Text("BEGIN;\nSELECT 1;\nCOMMIT;".to_string()))
+                    }],
+                    table_name: ArcIntern::new("public.foobar".to_string()),
+                    kind: ChangeKind::Insert
+                },
+                ParsedLine::Commit(3970124255)
+            ]
+        ))
     }
 }
