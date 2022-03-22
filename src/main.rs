@@ -33,6 +33,7 @@ mod wal_file_manager;
 
 use file_uploader_threads::DEFAULT_CHANNEL_SIZE;
 use shutdown_handler::{RuntimeType, ShutdownHandler};
+use wal_file_manager::WalFile;
 
 lazy_static! {
     static ref OUTPUT_WAL_DIRECTORY: String =
@@ -55,6 +56,51 @@ enum InputType {
 fn panic_if_messy_shutdown() ->() {
     if ShutdownHandler::shutting_down_messily() {
         panic!("re_dms had a messy shut down. If running as a service, will attempt to restart automatically a limited number of times.");
+    }
+}
+
+struct PreprocessingManager {
+    continue_parsing_and_processing: bool,
+    wal_file: Option<WalFile>
+}
+
+impl PreprocessingManager {
+    fn new() -> PreprocessingManager {
+        PreprocessingManager {
+            continue_parsing_and_processing: true,
+            wal_file: None
+        }
+    }
+
+    fn halt_preprocessing_and_register_shutdown(&mut self, wal_file: WalFile, message: &str) {
+        let wal_file_number = wal_file.file_number;
+        self.continue_parsing_and_processing = false;
+        self.wal_file = Some(wal_file);
+        logger_error!(
+            Some(wal_file_number),
+            None,
+            message
+        );
+        logger_info!(
+            Some(wal_file_number),
+            None,
+            "Halting pre-processing"
+        );
+        ShutdownHandler::register_clean_shutdown();
+    }
+
+    fn halt_preprocessing(&mut self) {
+        self.continue_parsing_and_processing = false;
+
+        logger_info!(
+            None,
+            None,
+            "Halting pre-processing"
+        );
+    }
+
+    fn preprocessing_halted(&mut self) -> bool {
+        self.continue_parsing_and_processing == false
     }
 }
 
@@ -107,6 +153,7 @@ async fn main() {
     let mut child_process_guard = ChildGuard(None);
     let mut wal_file_manager;
     let mut previous_input_type = None;
+    let mut preprocessing_manager = PreprocessingManager::new();
     loop {
         // need to define this at this level so it lives long enough
         let stdin = io::stdin();
@@ -167,7 +214,6 @@ async fn main() {
         // for logging
         parser.register_wal_number(wal_file_manager.current_wal().file_number);
 
-        let mut continue_parsing_and_processing = true;
         for line in buffered_reader.lines() {
             if let Ok(ip) = line {
                 let wal_file_manager_result = wal_file_manager.next_line(&ip);
@@ -178,11 +224,11 @@ async fn main() {
                     }
 
                     if ShutdownHandler::shutting_down_messily() {
-                        continue_parsing_and_processing = false;
+                        preprocessing_manager.halt_preprocessing();
                     }
                 }
 
-                if continue_parsing_and_processing {
+                if !preprocessing_manager.preprocessing_halted() {
                     let parsed_line_result = parser.parse(&ip);
                     match parsed_line_result {
                         Ok(parsed_line) => {
@@ -196,13 +242,7 @@ async fn main() {
                                                 for change in change_vec {
                                                     match file_transmitter.send(change).await {
                                                         Err(err) => {
-                                                            continue_parsing_and_processing = false;
-                                                            ShutdownHandler::register_clean_shutdown();
-                                                            logger_error!(
-                                                                Some(wal_file_manager.current_wal().file_number),
-                                                                None,
-                                                                &format!("Error writing to file_transmitter channel. Channel dropped due to: {:?}", err)
-                                                            );
+                                                            preprocessing_manager.halt_preprocessing_and_register_shutdown(wal_file_manager.current_wal(), &format!("Error writing to file_transmitter channel. Channel dropped due to: {:?}", err));
                                                          },
                                                         _ => {}
                                                     };
@@ -210,30 +250,18 @@ async fn main() {
                                             }
                                         },
                                         Err(err) => {
-                                            continue_parsing_and_processing = false;
-                                            ShutdownHandler::register_clean_shutdown();
-                                            logger_error!(
-                                                Some(wal_file_manager.current_wal().file_number),
-                                                None,
-                                                &format!("Error processing changes. Failed due to: {:?}", err)
-                                            );
+                                            preprocessing_manager.halt_preprocessing_and_register_shutdown(wal_file_manager.current_wal(), &format!("Error processing changes. Failed due to: {:?}", err));
                                         }
                                     }
                                 }
                             }
                         },
                         Err(err) => {
-                            continue_parsing_and_processing = false;
-                            ShutdownHandler::register_clean_shutdown();
-                            logger_error!(
-                                Some(wal_file_manager.current_wal().file_number),
-                                None,
-                                &format!("Error parsing changes. Failed due to: {:?}", err)
-                            );
+                            preprocessing_manager.halt_preprocessing_and_register_shutdown(wal_file_manager.current_wal(), &format!("Error parsing changes. Failed due to: {:?}", err));
                         }
                     }
                 }
-                if continue_parsing_and_processing {
+                if !preprocessing_manager.preprocessing_halted() {
                     if let wal_file_manager::WalLineResult::SwapWal(wal_file) = wal_file_manager_result
                     {
                         // drain the collector of all it's tables, and send to file transmitter
