@@ -167,6 +167,7 @@ async fn main() {
         // for logging
         parser.register_wal_number(wal_file_manager.current_wal().file_number);
 
+        let mut continue_parsing_and_processing = true;
         for line in buffered_reader.lines() {
             if let Ok(ip) = line {
                 let wal_file_manager_result = wal_file_manager.next_line(&ip);
@@ -176,27 +177,70 @@ async fn main() {
                         break;
                     }
 
-                    panic_if_messy_shutdown();
+                    if ShutdownHandler::shutting_down_messily() {
+                        continue_parsing_and_processing = false;
+                    }
                 }
-                let parsed_line = parser.parse(&ip);
-                match parsed_line {
-                    parser::ParsedLine::ContinueParse => {} // Intentionally left blank, continue parsing
-                    _ => {
-                        if let Some(change_vec) = collector.add_change(parsed_line) {
-                            for change in change_vec {
-                                file_transmitter.send(change).await.expect(
-                                    "Error writing to file_transmitter channel. Channel dropped.",
-                                );
+
+                if continue_parsing_and_processing {
+                    let parsed_line_result = parser.parse(&ip);
+                    match parsed_line_result {
+                        Ok(parsed_line) => {
+                            match parsed_line {
+                                parser::ParsedLine::ContinueParse => {}, // Intentionally left blank, continue parsing
+                                _ => {
+                                    let change_vec_result = collector.add_change(parsed_line);
+                                    match change_vec_result {
+                                        Ok(change_vec) => {
+                                            if let Some(change_vec) = change_vec {
+                                                for change in change_vec {
+                                                    match file_transmitter.send(change).await {
+                                                        Err(err) => {
+                                                            continue_parsing_and_processing = false;
+                                                            ShutdownHandler::register_clean_shutdown();
+                                                            logger_error!(
+                                                                Some(wal_file_manager.current_wal().file_number),
+                                                                None,
+                                                                &format!("Error writing to file_transmitter channel. Channel dropped due to: {:?}", err)
+                                                            );
+                                                         },
+                                                        _ => {}
+                                                    };
+                                                }
+                                            }
+                                        },
+                                        Err(err) => {
+                                            continue_parsing_and_processing = false;
+                                            ShutdownHandler::register_clean_shutdown();
+                                            logger_error!(
+                                                Some(wal_file_manager.current_wal().file_number),
+                                                None,
+                                                &format!("Error processing changes. Failed due to: {:?}", err)
+                                            );
+                                        }
+                                    }
+                                }
                             }
+                        },
+                        Err(err) => {
+                            continue_parsing_and_processing = false;
+                            ShutdownHandler::register_clean_shutdown();
+                            logger_error!(
+                                Some(wal_file_manager.current_wal().file_number),
+                                None,
+                                &format!("Error parsing changes. Failed due to: {:?}", err)
+                            );
                         }
                     }
                 }
-                if let wal_file_manager::WalLineResult::SwapWal(wal_file) = wal_file_manager_result
-                {
-                    // drain the collector of all it's tables, and send to file transmitter
-                    drain_collector_and_transmit(&mut collector, &mut file_transmitter).await;
-                    collector.register_wal_file(Some(wal_file.clone()));
-                    parser.register_wal_number(wal_file.file_number);
+                if continue_parsing_and_processing {
+                    if let wal_file_manager::WalLineResult::SwapWal(wal_file) = wal_file_manager_result
+                    {
+                        // drain the collector of all it's tables, and send to file transmitter
+                        drain_collector_and_transmit(&mut collector, &mut file_transmitter).await;
+                        collector.register_wal_file(Some(wal_file.clone()));
+                        parser.register_wal_number(wal_file.file_number);
+                    }
                 }
             }
         }
