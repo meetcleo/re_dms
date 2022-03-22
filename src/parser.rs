@@ -77,9 +77,9 @@ struct ParserState {
 }
 
 #[derive(Debug)]
-struct ParsingError {
-    line: String,
-    message: String,
+pub struct ParsingError {
+    pub line: String,
+    pub message: String,
 }
 
 impl Error for ParsingError {}
@@ -378,22 +378,22 @@ impl ColumnValue {
         string: &'a str,
         column_type: &str,
         continue_parse: bool,
-    ) -> (Option<ColumnValue>, &'a str) {
+    ) -> Result<(Option<ColumnValue>, &'a str)> {
         const NULL_STRING: &str = "null";
         if string.starts_with(NULL_STRING) {
             let (_start, rest) = ColumnValue::split_until_char_or_end(string, ' ');
-            (None, rest)
+            Ok((None, rest))
         } else {
             let (column_value, rest_of_string): (ColumnValue, &str) =
                 match Self::column_type_for_str(column_type) {
-                    ColumnTypeEnum::Integer => ColumnValue::parse_integer(string),
-                    ColumnTypeEnum::Boolean => ColumnValue::parse_boolean(string),
+                    ColumnTypeEnum::Integer => ColumnValue::parse_integer(string)?,
+                    ColumnTypeEnum::Boolean => ColumnValue::parse_boolean(string)?,
                     ColumnTypeEnum::Numeric => ColumnValue::parse_numeric(string),
                     ColumnTypeEnum::RoundingNumeric => ColumnValue::parse_rounding_numeric(string),
-                    ColumnTypeEnum::Text => ColumnValue::parse_text(string, continue_parse),
-                    ColumnTypeEnum::Timestamp => ColumnValue::parse_text(string, continue_parse),
+                    ColumnTypeEnum::Text => ColumnValue::parse_text(string, continue_parse)?,
+                    ColumnTypeEnum::Timestamp => ColumnValue::parse_text(string, continue_parse)?,
                 };
-            (Some(column_value), rest_of_string)
+            Ok((Some(column_value), rest_of_string))
         }
     }
 
@@ -420,31 +420,30 @@ impl ColumnValue {
             _ => panic!("Unknown column type: {:?}", column_type_str),
         }
     }
-    fn parse_integer<'a>(string: &'a str) -> (ColumnValue, &'a str) {
+    fn parse_integer<'a>(string: &'a str) -> Result<(ColumnValue, &'a str)> {
         let (start, rest) = ColumnValue::split_until_char_or_end(string, ' ');
-        let integer: i64 = start
-            .parse()
-            .expect("Unable to parse integer from integer type");
-        (ColumnValue::Integer(integer), rest)
+        match start.parse() {
+            Ok(integer) => Ok((ColumnValue::Integer(integer), rest)),
+            Err(internal_message) => Err(ParsingError{ message: format!("Unable to parse integer from integer type for {}, message: {}", start, internal_message), line: string.to_string() })
+        }
     }
-    fn parse_text<'a>(string: &'a str, continue_parse: bool) -> (ColumnValue, &'a str) {
+    fn parse_text<'a>(string: &'a str, continue_parse: bool) -> Result<(ColumnValue, &'a str)> {
         if string.starts_with("unchanged-toast-datum") {
             let (start, rest) = ColumnValue::split_until_char_or_end(string, ' ');
-            assert_eq!(
+            fail_parse_if_unequal(
                 start, "unchanged-toast-datum",
-                "expected 'unchanged-toast-datum' at start of string, got: `{}` when parsing `{}`",
-                start, string
-            );
-            return (ColumnValue::UnchangedToast, rest);
+                &format!("expected 'unchanged-toast-datum' at start of string, got: `{}`", start),
+                string
+            )?;
+            return Ok((ColumnValue::UnchangedToast, rest));
         }
         if !continue_parse {
-            assert_eq!(
+            fail_parse_if_unequal(
                 &string[0..1],
                 "'",
-                "expected ', got `{}` when parsing `{}`",
-                &string[0..1],
+                &format!("expected ', got `{}`", &string[0..1]),
                 string
-            );
+            )?;
         }
         let mut total_index: usize = 0;
         let mut complete_text: bool = false;
@@ -476,19 +475,18 @@ impl ColumnValue {
         let (start, end) = without_first_quote.split_at(total_index);
         // move past final quote if found
         let (column, text) = if complete_text {
-            assert_eq!(
+            fail_parse_if_unequal(
                 &end[0..1],
                 "'",
-                "expected ', got `{}` when parsing `{}`",
-                &end[0..1],
+                &format!("expected ', got `{}`", &end[0..1]),
                 string
-            );
+            )?;
             (ColumnValue::Text(start.to_owned()), &end[1..])
         } else {
             (ColumnValue::IncompleteText(start.to_owned()), end)
         };
         let (_thrown_away_space, adjusted_end) = ColumnValue::split_until_char_or_end(text, ' ');
-        (column, adjusted_end)
+        Ok((column, adjusted_end))
     }
     fn split_until_char_or_end(string: &str, character: char) -> (&str, &str) {
         match string.split_once(character) {
@@ -506,14 +504,13 @@ impl ColumnValue {
         (ColumnValue::RoundingNumeric(start.to_owned()), rest)
     }
 
-    fn parse_boolean<'a>(string: &'a str) -> (ColumnValue, &'a str) {
+    fn parse_boolean<'a>(string: &'a str) -> Result<(ColumnValue, &'a str)> {
         let (start, rest) = ColumnValue::split_until_char_or_end(string, ' ');
-        let bool_value = match start {
-            "true" => true,
-            "false" => false,
-            _ => panic!("Unknown boolvalue {:?}", start),
-        };
-        (ColumnValue::Boolean(bool_value), rest)
+        match start {
+            "true" => Ok((ColumnValue::Boolean(true), rest)),
+            "false" => Ok((ColumnValue::Boolean(false), rest)),
+            _ => Err(ParsingError{ message: format!("Unknown boolvalue {:?}", start), line: string.to_string() })
+        }
     }
 }
 
@@ -615,7 +612,7 @@ impl Parser {
         let string_without_kind =
             &string_without_table[kind_string.len() + 2..string_without_table.len()];
 
-        let columns = self.parse_columns(string_without_kind, table_name.clone());
+        let columns = self.parse_columns(string_without_kind, table_name.clone())?;
         self.handle_parse_changed_data(table_name, kind, columns)
     }
 
@@ -648,7 +645,7 @@ impl Parser {
         }
     }
 
-    fn parse_columns(&self, string: &str, table_name: TableName) -> Vec<Column> {
+    fn parse_columns(&self, string: &str, table_name: TableName) -> Result<Vec<Column>> {
         let mut column_vector = Vec::new();
         let mut remaining_string = string;
         while remaining_string.len() > 0 {
@@ -663,28 +660,29 @@ impl Parser {
                 );
             } else {
                 let (column, rest_of_string) =
-                    self.parse_column(remaining_string, table_name.clone());
+                    self.parse_column(remaining_string, table_name.clone())?;
                 remaining_string = rest_of_string;
                 column_vector.push(column);
             }
         }
-        column_vector
+        Ok(column_vector)
     }
 
-    fn parse_column<'a>(&self, string: &'a str, _table_name: TableName) -> (Column, &'a str) {
+    fn parse_column<'a>(&self, string: &'a str, _table_name: TableName) -> Result<(Column, &'a str)> {
         let re = &PARSE_COLUMN_REGEX;
-        let captures = re
-            .captures(string)
-            .expect("Unable to match PARSE_COLUMN_REGEX to line");
+        let captures = match re.captures(string) {
+            Some(result) => result,
+            None => return Err(ParsingError{ message: "Unable to match PARSE_COLUMN_REGEX to line".to_string(), line: string.to_string() })
+        };
 
-        let column_name = captures
-            .get(1)
-            .expect("couldn't match column_name")
-            .as_str();
-        let column_type = captures
-            .get(2)
-            .expect("couldn't match column_type")
-            .as_str();
+        let column_name = match captures.get(1) {
+            Some(result) => result.as_str(),
+            None => return Err(ParsingError{ message: "couldn't match column_name".to_string(), line: string.to_string() })
+        };
+        let column_type = match captures.get(2) {
+            Some(result) => result.as_str(),
+            None => return Err(ParsingError{ message: "couldn't match column_type".to_string(), line: string.to_string() })
+        };
         // For array types, remove the inner type specification - we treat all array types as text
         let column_type = &COLUMN_TYPE_REGEX
             .replace_all(column_type, "array")
@@ -699,7 +697,7 @@ impl Parser {
         // );
 
         let (column_value, rest) =
-            ColumnValue::parse(string_without_column_type, column_type, false);
+            ColumnValue::parse(string_without_column_type, column_type, false)?;
         let column_info = ColumnInfo::new(column_name, column_type);
         let column = match column_value {
             Some(ColumnValue::UnchangedToast) => Column::UnchangedToastColumn {
@@ -719,7 +717,7 @@ impl Parser {
         //     Some(&table_name),
         //     &format!("column_parsed:{:?}", column)
         // );
-        (column, rest)
+        Ok((column, rest))
     }
 
     // TODO break this monster up a bit
@@ -732,16 +730,17 @@ impl Parser {
                 table_name,
                 mut columns,
             }) => {
-                let incomplete_column = columns
-                    .pop()
-                    .expect("error: continue parse called without any columns? wtf?");
+                let incomplete_column = match columns.pop() {
+                    Some(result) => result,
+                    None => return Err(ParsingError{ message: "error: continue parse called without any columns? wtf?".to_string(), line: string.to_string() })
+                };
                 assert!(matches!(incomplete_column, Column::IncompleteColumn { .. }));
                 match incomplete_column {
                     Column::IncompleteColumn { column_info: ColumnInfo{name, column_type}, value: incomplete_value } => {
-                        let (continued_column_value, rest) = ColumnValue::parse(string, &column_type, true);
+                        let (continued_column_value, rest) = ColumnValue::parse(string, &column_type, true)?;
                         let value = match incomplete_value {
                             ColumnValue::IncompleteText(value) => value,
-                            _ => panic!("Incomplete value is not ColumnValue::IncompleteText")
+                            _ => return Err(ParsingError{ message: "Incomplete value is not ColumnValue::IncompleteText".to_string(), line: string.to_string() })
                         };
 
                         let updated_column = match continued_column_value {
@@ -754,7 +753,7 @@ impl Parser {
                                 let column_value = ColumnValue::IncompleteText(value + "\n" + &string);
                                 Column::IncompleteColumn {column_info: ColumnInfo {name, column_type}, value: column_value}
                             },
-                            _ => panic!("Trying to continue to parse a value that's not of type text")
+                            _ => return Err(ParsingError{ message: "Trying to continue to parse a value that's not of type text".to_string(), line: string.to_string() })
                         };
 
                         columns.push(updated_column);
@@ -762,19 +761,16 @@ impl Parser {
                         if self.column_is_incomplete(&columns) {
                             return self.handle_parse_changed_data(table_name, kind, columns)
                         } else {
-                            let mut more_columns = self.parse_columns(rest, table_name.clone());
+                            let mut more_columns = self.parse_columns(rest, table_name.clone())?;
                             // append modifies in place
                             columns.append(&mut more_columns);
                             self.handle_parse_changed_data(table_name, kind, columns)
                         }
                     },
-                    _ => panic!("trying to parse an incomplete_column that's not a Column::IncompleteColumn {:?}", incomplete_column)
+                    _ => return Err(ParsingError{ message: format!("trying to parse an incomplete_column that's not a Column::IncompleteColumn {:?}", incomplete_column), line: string.to_string() })
                 }
             }
-            _ => panic!(
-                "Trying to continue parsing a {:?} rather than a ParsedLine::ChangedData",
-                incomplete_change
-            ),
+            _ => return Err(ParsingError{ message: format!("Trying to continue parsing a {:?} rather than a ParsedLine::ChangedData", incomplete_change), line: string.to_string() })
         }
     }
 
@@ -901,7 +897,7 @@ mod tests {
         let mut parser = Parser::new(true);
         let line =
             "table public.schema_migrations: INSERT: version[character varying]:'20210112112814'";
-        let parsed_line = parser.parse(&line.to_owned());
+        let parsed_line = parser.parse(&line.to_owned()).expect("failed parsing");
         assert_eq!(parsed_line, ParsedLine::ContinueParse);
     }
 
@@ -925,7 +921,7 @@ mod tests {
     fn parses_array_type() {
         let mut parser = Parser::new(true);
         let line = "table public.users: UPDATE: id[bigint]:123 foobar[text]:'foobar string' baz_array[character varying[]]:'{\"foo\", \"bar\", \"baz\"}'";
-        let result = parser.parse(&line.to_string());
+        let result = parser.parse(&line.to_string()).expect("failed parsing");
         assert_eq!(
             result,
             ParsedLine::ChangedData {
