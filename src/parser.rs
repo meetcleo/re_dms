@@ -86,7 +86,11 @@ impl Error for ParsingError {}
 
 impl fmt::Display for ParsingError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Failed to parse input due to: {}, Offending line: {}", self.message, self.line)
+        write!(
+            f,
+            "Failed to parse input due to: {}, Offending line: {}",
+            self.message, self.line
+        )
     }
 }
 
@@ -341,12 +345,13 @@ impl ParsedLine {
                 ..
             } => {
                 // unwrap because this is the id column which _must_ be here
-                match columns
-                    .iter()
-                    .find(|&x| x.is_id_column()) {
-                        Some(column) => Ok(column),
-                        None => Err(ParsingError { message: format!("We have no id column for {}", table_name.as_ref()), line: "No line".to_string() })
-                    }
+                match columns.iter().find(|&x| x.is_id_column()) {
+                    Some(column) => Ok(column),
+                    None => Err(ParsingError {
+                        message: format!("We have no id column for {}", table_name.as_ref()),
+                        line: "No line".to_string(),
+                    }),
+                }
             }
             _ => panic!("tried to find id column of non changed_data"),
         }
@@ -424,16 +429,26 @@ impl ColumnValue {
         let (start, rest) = ColumnValue::split_until_char_or_end(string, ' ');
         match start.parse() {
             Ok(integer) => Ok((ColumnValue::Integer(integer), rest)),
-            Err(internal_message) => Err(ParsingError{ message: format!("Unable to parse integer from integer type for {}, message: {}", start, internal_message), line: string.to_string() })
+            Err(internal_message) => Err(ParsingError {
+                message: format!(
+                    "Unable to parse integer from integer type for {}, message: {}",
+                    start, internal_message
+                ),
+                line: string.to_string(),
+            }),
         }
     }
     fn parse_text<'a>(string: &'a str, continue_parse: bool) -> Result<(ColumnValue, &'a str)> {
         if string.starts_with("unchanged-toast-datum") {
             let (start, rest) = ColumnValue::split_until_char_or_end(string, ' ');
             fail_parse_if_unequal(
-                start, "unchanged-toast-datum",
-                &format!("expected 'unchanged-toast-datum' at start of string, got: `{}`", start),
-                string
+                start,
+                "unchanged-toast-datum",
+                &format!(
+                    "expected 'unchanged-toast-datum' at start of string, got: `{}`",
+                    start
+                ),
+                string,
             )?;
             return Ok((ColumnValue::UnchangedToast, rest));
         }
@@ -442,7 +457,7 @@ impl ColumnValue {
                 &string[0..1],
                 "'",
                 &format!("expected ', got `{}`", &string[0..1]),
-                string
+                string,
             )?;
         }
         let mut total_index: usize = 0;
@@ -479,7 +494,7 @@ impl ColumnValue {
                 &end[0..1],
                 "'",
                 &format!("expected ', got `{}`", &end[0..1]),
-                string
+                string,
             )?;
             (ColumnValue::Text(start.to_owned()), &end[1..])
         } else {
@@ -509,7 +524,10 @@ impl ColumnValue {
         match start {
             "true" => Ok((ColumnValue::Boolean(true), rest)),
             "false" => Ok((ColumnValue::Boolean(false), rest)),
-            _ => Err(ParsingError{ message: format!("Unknown boolvalue {:?}", start), line: string.to_string() })
+            _ => Err(ParsingError {
+                message: format!("Unknown boolvalue {:?}", start),
+                line: string.to_string(),
+            }),
         }
     }
 }
@@ -532,9 +550,10 @@ impl Parser {
             x if { x.starts_with("COMMIT") } => self.parse_commit(x),
             x if { x.starts_with("table") } => self.parse_change(x),
             x if { x.starts_with("pg_recvlogical") } => self.parse_pg_rcvlogical_msg(x),
-            x => {
-                Err(ParsingError { line: string.clone(), message: format!("Unknown change kind: {}!", x) })
-            }
+            x => Err(ParsingError {
+                line: string.clone(),
+                message: format!("Unknown change kind: {}!", x),
+            }),
         }
     }
 
@@ -551,8 +570,11 @@ impl Parser {
                         &format!("xid:{}", xid)
                     );
                     Ok(ParsedLine::Begin(xid))
-                },
-                Err(inner_message) => Err(ParsingError { line: string.to_string(), message: format!("Unable to parse BEGIN xid as i64: {}", inner_message) })
+                }
+                Err(inner_message) => Err(ParsingError {
+                    line: string.to_string(),
+                    message: format!("Unable to parse BEGIN xid as i64: {}", inner_message),
+                }),
             }
         } else {
             Ok(ParsedLine::Begin(0))
@@ -573,8 +595,11 @@ impl Parser {
                         &format!("xid:{}", xid)
                     );
                     Ok(ParsedLine::Commit(xid))
-                },
-                Err(inner_message) => Err(ParsingError { line: string.to_string(), message: format!("Unable to parse COMMIT xid as i64: {}", inner_message) })
+                }
+                Err(inner_message) => Err(ParsingError {
+                    line: string.to_string(),
+                    message: format!("Unable to parse COMMIT xid as i64: {}", inner_message),
+                }),
             }
         } else {
             Ok(ParsedLine::Commit(0))
@@ -591,8 +616,11 @@ impl Parser {
         fail_parse_if_unequal(
             &string_without_tag[table_name.len()..table_name.len() + 2],
             ": ",
-            &format!("expected `: `, got `{}`", &string_without_tag[table_name.len()..table_name.len() + 2]),
-            string
+            &format!(
+                "expected `: `, got `{}`",
+                &string_without_tag[table_name.len()..table_name.len() + 2]
+            ),
+            string,
         )?;
         let string_without_table =
             &string_without_tag[table_name.len() + 2..string_without_tag.len()];
@@ -606,8 +634,11 @@ impl Parser {
         fail_parse_if_unequal(
             &string_without_table[kind_string.len()..kind_string.len() + 2],
             ": ",
-            &format!("expected `: `, got `{}`", &string_without_table[kind_string.len()..kind_string.len() + 2]),
-            string
+            &format!(
+                "expected `: `, got `{}`",
+                &string_without_table[kind_string.len()..kind_string.len() + 2]
+            ),
+            string,
         )?;
         let string_without_kind =
             &string_without_table[kind_string.len() + 2..string_without_table.len()];
@@ -668,20 +699,39 @@ impl Parser {
         Ok(column_vector)
     }
 
-    fn parse_column<'a>(&self, string: &'a str, _table_name: TableName) -> Result<(Column, &'a str)> {
+    fn parse_column<'a>(
+        &self,
+        string: &'a str,
+        _table_name: TableName,
+    ) -> Result<(Column, &'a str)> {
         let re = &PARSE_COLUMN_REGEX;
         let captures = match re.captures(string) {
             Some(result) => result,
-            None => return Err(ParsingError{ message: "Unable to match PARSE_COLUMN_REGEX to line".to_string(), line: string.to_string() })
+            None => {
+                return Err(ParsingError {
+                    message: "Unable to match PARSE_COLUMN_REGEX to line".to_string(),
+                    line: string.to_string(),
+                })
+            }
         };
 
         let column_name = match captures.get(1) {
             Some(result) => result.as_str(),
-            None => return Err(ParsingError{ message: "couldn't match column_name".to_string(), line: string.to_string() })
+            None => {
+                return Err(ParsingError {
+                    message: "couldn't match column_name".to_string(),
+                    line: string.to_string(),
+                })
+            }
         };
         let column_type = match captures.get(2) {
             Some(result) => result.as_str(),
-            None => return Err(ParsingError{ message: "couldn't match column_type".to_string(), line: string.to_string() })
+            None => {
+                return Err(ParsingError {
+                    message: "couldn't match column_type".to_string(),
+                    line: string.to_string(),
+                })
+            }
         };
         // For array types, remove the inner type specification - we treat all array types as text
         let column_type = &COLUMN_TYPE_REGEX
@@ -732,7 +782,13 @@ impl Parser {
             }) => {
                 let incomplete_column = match columns.pop() {
                     Some(result) => result,
-                    None => return Err(ParsingError{ message: "error: continue parse called without any columns? wtf?".to_string(), line: string.to_string() })
+                    None => {
+                        return Err(ParsingError {
+                            message: "error: continue parse called without any columns? wtf?"
+                                .to_string(),
+                            line: string.to_string(),
+                        })
+                    }
                 };
                 assert!(matches!(incomplete_column, Column::IncompleteColumn { .. }));
                 match incomplete_column {
@@ -770,7 +826,15 @@ impl Parser {
                     _ => return Err(ParsingError{ message: format!("trying to parse an incomplete_column that's not a Column::IncompleteColumn {:?}", incomplete_column), line: string.to_string() })
                 }
             }
-            _ => return Err(ParsingError{ message: format!("Trying to continue parsing a {:?} rather than a ParsedLine::ChangedData", incomplete_change), line: string.to_string() })
+            _ => {
+                return Err(ParsingError {
+                    message: format!(
+                        "Trying to continue parsing a {:?} rather than a ParsedLine::ChangedData",
+                        incomplete_change
+                    ),
+                    line: string.to_string(),
+                })
+            }
         }
     }
 
@@ -875,9 +939,17 @@ fn is_quote_escaped(string: &str, index: usize) -> bool {
     }
 }
 
-fn fail_parse_if_unequal(left: &str, right: &str, message: &str, line: &str) -> std::result::Result<(), ParsingError> {
+fn fail_parse_if_unequal(
+    left: &str,
+    right: &str,
+    message: &str,
+    line: &str,
+) -> std::result::Result<(), ParsingError> {
     if left != right {
-        Err(ParsingError { line: line.to_string(), message: message.to_string() })
+        Err(ParsingError {
+            line: line.to_string(),
+            message: message.to_string(),
+        })
     } else {
         Ok(())
     }
@@ -949,7 +1021,9 @@ mod tests {
     fn parse_numeric_type_as_rounded() {
         let mut parser = Parser::new(true);
         let line = "table public.users: UPDATE: id[bigint]:123 foobar[numeric]:'1.11' baz[double precision]:'3.141'";
-        let mut result = parser.parse(&line.to_string()).expect(&format!("failed to parse: {}", line));
+        let mut result = parser
+            .parse(&line.to_string())
+            .expect(&format!("failed to parse: {}", line));
         assert!(matches!(result, ParsedLine::ChangedData { .. }));
         println!("{:?}", result);
         if let ParsedLine::ChangedData {
@@ -1034,7 +1108,9 @@ mod tests {
         let lines = io::BufReader::new(file).lines();
         for line in lines {
             if let Ok(ip) = line {
-                let parsed_line = parser.parse(&ip).expect(&format!("failed to parse: {}", &ip));
+                let parsed_line = parser
+                    .parse(&ip)
+                    .expect(&format!("failed to parse: {}", &ip));
                 match parsed_line {
                     ParsedLine::ContinueParse => {}
                     _ => {
@@ -1213,7 +1289,9 @@ mod tests {
         let lines = io::BufReader::new(file).lines();
         for line in lines {
             if let Ok(ip) = line {
-                let parsed_line = parser.parse(&ip).expect(&format!("failed to parse: {}", &ip));
+                let parsed_line = parser
+                    .parse(&ip)
+                    .expect(&format!("failed to parse: {}", &ip));
                 match parsed_line {
                     ParsedLine::ContinueParse => {}
                     _ => {

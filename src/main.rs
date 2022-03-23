@@ -53,7 +53,7 @@ enum InputType {
     PgRcvlogical,
 }
 
-fn panic_if_messy_shutdown() ->() {
+fn panic_if_messy_shutdown() -> () {
     if ShutdownHandler::shutting_down_messily() {
         panic!("re_dms had a messy shut down. If running as a service, will attempt to restart automatically a limited number of times.");
     }
@@ -61,14 +61,14 @@ fn panic_if_messy_shutdown() ->() {
 
 struct PreprocessingManager {
     continue_parsing_and_processing: bool,
-    wal_file: Option<WalFile>
+    wal_file: Option<WalFile>,
 }
 
 impl PreprocessingManager {
     fn new() -> PreprocessingManager {
         PreprocessingManager {
             continue_parsing_and_processing: true,
-            wal_file: None
+            wal_file: None,
         }
     }
 
@@ -76,27 +76,15 @@ impl PreprocessingManager {
         let wal_file_number = wal_file.file_number;
         self.continue_parsing_and_processing = false;
         self.wal_file = Some(wal_file);
-        logger_error!(
-            Some(wal_file_number),
-            None,
-            message
-        );
-        logger_info!(
-            Some(wal_file_number),
-            None,
-            "Halting pre-processing"
-        );
+        logger_error!(Some(wal_file_number), None, message);
+        logger_info!(Some(wal_file_number), None, "Halting pre-processing");
         ShutdownHandler::register_clean_shutdown();
     }
 
     fn halt_preprocessing(&mut self) {
         self.continue_parsing_and_processing = false;
 
-        logger_info!(
-            None,
-            None,
-            "Halting pre-processing"
-        );
+        logger_info!(None, None, "Halting pre-processing");
     }
 
     fn preprocessing_halted(&mut self) -> bool {
@@ -233,7 +221,7 @@ async fn main() {
                     match parsed_line_result {
                         Ok(parsed_line) => {
                             match parsed_line {
-                                parser::ParsedLine::ContinueParse => {}, // Intentionally left blank, continue parsing
+                                parser::ParsedLine::ContinueParse => {} // Intentionally left blank, continue parsing
                                 _ => {
                                     let change_vec_result = collector.add_change(parsed_line);
                                     match change_vec_result {
@@ -243,26 +231,37 @@ async fn main() {
                                                     match file_transmitter.send(change).await {
                                                         Err(err) => {
                                                             preprocessing_manager.halt_preprocessing_and_register_shutdown(wal_file_manager.current_wal(), &format!("Error writing to file_transmitter channel. Channel dropped due to: {:?}", err));
-                                                         },
+                                                        }
                                                         _ => {}
                                                     };
                                                 }
                                             }
-                                        },
+                                        }
                                         Err(err) => {
-                                            preprocessing_manager.halt_preprocessing_and_register_shutdown(wal_file_manager.current_wal(), &format!("Error processing changes. Failed due to: {:?}", err));
+                                            preprocessing_manager
+                                                .halt_preprocessing_and_register_shutdown(
+                                                wal_file_manager.current_wal(),
+                                                &format!(
+                                                    "Error processing changes. Failed due to: {:?}",
+                                                    err
+                                                ),
+                                            );
                                         }
                                     }
                                 }
                             }
-                        },
+                        }
                         Err(err) => {
-                            preprocessing_manager.halt_preprocessing_and_register_shutdown(wal_file_manager.current_wal(), &format!("Error parsing changes. Failed due to: {:?}", err));
+                            preprocessing_manager.halt_preprocessing_and_register_shutdown(
+                                wal_file_manager.current_wal(),
+                                &format!("Error parsing changes. Failed due to: {:?}", err),
+                            );
                         }
                     }
                 }
                 if !preprocessing_manager.preprocessing_halted() {
-                    if let wal_file_manager::WalLineResult::SwapWal(wal_file) = wal_file_manager_result
+                    if let wal_file_manager::WalLineResult::SwapWal(wal_file) =
+                        wal_file_manager_result
                     {
                         // drain the collector of all it's tables, and send to file transmitter
                         drain_collector_and_transmit(&mut collector, &mut file_transmitter).await;
