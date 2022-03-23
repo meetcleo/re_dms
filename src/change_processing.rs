@@ -1,11 +1,12 @@
 use crate::parser::{
-    ChangeKind, Column, ColumnInfo, ColumnName, ColumnType, ColumnValue, ParsedLine, TableName, ParsingError
+    ChangeKind, Column, ColumnInfo, ColumnName, ColumnType, ColumnValue, ParsedLine, ParsingError,
+    TableName,
 };
 use crate::targets_tables_column_names::{Table as TableFromTarget, TargetsTablesColumnNames};
 use crate::wal_file_manager::WalFile;
 use itertools::Itertools;
-use std::collections::{BTreeMap, HashMap, HashSet};
 use std::collections::hash_map::Entry::{Occupied, Vacant};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::{error::Error, fmt};
 
 use crate::file_writer;
@@ -42,7 +43,7 @@ impl std::string::ToString for DdlChange {
 pub struct ChangeProcessingError {
     pub parsed_line: Option<ParsedLine>,
     pub message: String,
-    pub source_line: Option<String>
+    pub source_line: Option<String>,
 }
 
 impl Error for ChangeProcessingError {}
@@ -58,7 +59,11 @@ impl fmt::Display for ChangeProcessingError {
 
 impl From<ParsingError> for ChangeProcessingError {
     fn from(err: ParsingError) -> ChangeProcessingError {
-        ChangeProcessingError{ source_line: Some(err.line), message: err.message, parsed_line: None }
+        ChangeProcessingError {
+            source_line: Some(err.line),
+            message: err.message,
+            parsed_line: None,
+        }
     }
 }
 
@@ -117,33 +122,53 @@ impl ChangeSet {
         } = new_change
         {
             match kind {
-                ChangeKind::Insert => Err(ChangeProcessingError{ message: "attempting to insert a record twice".to_string(), parsed_line: None, source_line: None }),
+                ChangeKind::Insert => Err(ChangeProcessingError {
+                    message: "attempting to insert a record twice".to_string(),
+                    parsed_line: None,
+                    source_line: None,
+                }),
                 ChangeKind::Update => {
                     self.untoasted_changes(columns, table_name, ChangeKind::Insert)
                 }
                 ChangeKind::Delete => Ok(None),
             }
         } else {
-            Err(ChangeProcessingError{ message: "don't know how to handle this type of line here".to_string(), parsed_line: None, source_line: None })
+            Err(ChangeProcessingError {
+                message: "don't know how to handle this type of line here".to_string(),
+                parsed_line: None,
+                source_line: None,
+            })
         }
     }
 
     fn handle_update_subsequent(&self, new_change: ParsedLine) -> Result<Option<ParsedLine>> {
         if let ParsedLine::ChangedData { kind, .. } = new_change {
             match kind {
-                ChangeKind::Insert => Err(ChangeProcessingError{ message: "attempting to insert a record twice".to_string(), parsed_line: Some(new_change.clone()), source_line: None }),
+                ChangeKind::Insert => Err(ChangeProcessingError {
+                    message: "attempting to insert a record twice".to_string(),
+                    parsed_line: Some(new_change.clone()),
+                    source_line: None,
+                }),
                 ChangeKind::Update => match new_change {
                     ParsedLine::ChangedData {
                         columns,
                         table_name,
                         ..
                     } => self.untoasted_changes(columns, table_name, ChangeKind::Update),
-                    _ => Err(ChangeProcessingError{ message: "don't know how to handle this type of line here".to_string(), parsed_line: Some(new_change.clone()), source_line: None })
+                    _ => Err(ChangeProcessingError {
+                        message: "don't know how to handle this type of line here".to_string(),
+                        parsed_line: Some(new_change.clone()),
+                        source_line: None,
+                    }),
                 },
                 ChangeKind::Delete => Ok(Some(new_change)),
             }
         } else {
-            Err(ChangeProcessingError{ message: "don't know how to handle this type of line here".to_string(), parsed_line: Some(new_change.clone()), source_line: None })
+            Err(ChangeProcessingError {
+                message: "don't know how to handle this type of line here".to_string(),
+                parsed_line: Some(new_change.clone()),
+                source_line: None,
+            })
         }
     }
 
@@ -160,13 +185,23 @@ impl ChangeSet {
                     kind: ChangeKind::Update,
                     table_name: table_name,
                 })),
-                ChangeKind::Update => {
-                    Err(ChangeProcessingError{ message: "attempting to update a record after it's been deleted".to_string(), parsed_line: None, source_line: None })
-                },
-                ChangeKind::Delete => Err(ChangeProcessingError{ message: "attempting to delete a record twice".to_string(), parsed_line: None, source_line: None }),
+                ChangeKind::Update => Err(ChangeProcessingError {
+                    message: "attempting to update a record after it's been deleted".to_string(),
+                    parsed_line: None,
+                    source_line: None,
+                }),
+                ChangeKind::Delete => Err(ChangeProcessingError {
+                    message: "attempting to delete a record twice".to_string(),
+                    parsed_line: None,
+                    source_line: None,
+                }),
             }
         } else {
-            Err(ChangeProcessingError{ message: "don't know how to handle this type of line here".to_string(), parsed_line: None, source_line: None })
+            Err(ChangeProcessingError {
+                message: "don't know how to handle this type of line here".to_string(),
+                parsed_line: None,
+                source_line: None,
+            })
         }
     }
 
@@ -184,7 +219,12 @@ impl ChangeSet {
             fail_processing_if_unequal(
                 new_columns.len(),
                 old_columns.len(),
-                &format!("discrepancy in number of columns for table {}: {} vs {}", table_name, new_columns.len(), old_columns.len())
+                &format!(
+                    "discrepancy in number of columns for table {}: {} vs {}",
+                    table_name,
+                    new_columns.len(),
+                    old_columns.len()
+                ),
             )?;
             let untoasted_columns: Vec<Column> = new_columns
                 .iter()
@@ -213,7 +253,11 @@ impl ChangeSet {
                 table_name: table_name,
             }))
         } else {
-            Err(ChangeProcessingError{ message: "last change was not changed data, no idea how we got here".to_string(), parsed_line: None, source_line: None })
+            Err(ChangeProcessingError {
+                message: "last change was not changed data, no idea how we got here".to_string(),
+                parsed_line: None,
+                source_line: None,
+            })
         }
     }
 }
@@ -314,11 +358,18 @@ impl Table {
                 column_info_from_target,
             })
         } else {
-            Err(ChangeProcessingError{ message: "Non changed data used to try and initialize a table".to_string(), parsed_line: Some(parsed_line.clone()), source_line: None })
+            Err(ChangeProcessingError {
+                message: "Non changed data used to try and initialize a table".to_string(),
+                parsed_line: Some(parsed_line.clone()),
+                source_line: None,
+            })
         }
     }
 
-    fn add_change(&mut self, parsed_line: ParsedLine) -> Result<Option<(Table, Option<Vec<DdlChange>>)>> {
+    fn add_change(
+        &mut self,
+        parsed_line: ParsedLine,
+    ) -> Result<Option<(Table, Option<Vec<DdlChange>>)>> {
         if self.has_ddl_changes(&parsed_line) {
             // if we have ddl changes, send the table data off now, then send the ddl changes, then apply the change
             let ddl_changes = self.ddl_changes(&parsed_line)?;
@@ -377,10 +428,20 @@ impl Table {
                             .add_change(parsed_line)?
                     }
                 }
-                _ => return Err(ChangeProcessingError{ message: "Unhandled column value".to_string(), parsed_line: Some(parsed_line.clone()), source_line: None })
+                _ => {
+                    return Err(ChangeProcessingError {
+                        message: "Unhandled column value".to_string(),
+                        parsed_line: Some(parsed_line.clone()),
+                        source_line: None,
+                    })
+                }
             };
         } else {
-            return Err(ChangeProcessingError{ message: "No changed data present".to_string(), parsed_line: Some(parsed_line.clone()), source_line: None })
+            return Err(ChangeProcessingError {
+                message: "No changed data present".to_string(),
+                parsed_line: Some(parsed_line.clone()),
+                source_line: None,
+            });
         }
         Ok(())
     }
@@ -468,7 +529,15 @@ impl Table {
                 .map(|info| info.name.clone())
                 .collect_vec()
         {
-            Err(ChangeProcessingError{ message: format!("changes to column type from: {:?} to {:?}", parsed_line.column_info_set(), &self.column_info), parsed_line: Some(parsed_line.clone()), source_line: None })
+            Err(ChangeProcessingError {
+                message: format!(
+                    "changes to column type from: {:?} to {:?}",
+                    parsed_line.column_info_set(),
+                    &self.column_info
+                ),
+                parsed_line: Some(parsed_line.clone()),
+                source_line: None,
+            })
         } else {
             let mut added_ddl = new_column_info
                 .difference(&old_column_info)
@@ -562,17 +631,22 @@ impl ChangeProcessing {
         }
         self.associated_wal_file = associated_wal_file;
     }
-    pub fn add_change(&mut self, parsed_line: ParsedLine) -> Result<Option<Vec<ChangeProcessingResult>>> {
+    pub fn add_change(
+        &mut self,
+        parsed_line: ParsedLine,
+    ) -> Result<Option<Vec<ChangeProcessingResult>>> {
         match parsed_line {
-            ParsedLine::Begin(_)
-            | ParsedLine::Commit(_)
-            | ParsedLine::PgRcvlogicalMsg(_) => Ok(None),
+            ParsedLine::Begin(_) | ParsedLine::Commit(_) | ParsedLine::PgRcvlogicalMsg(_) => {
+                Ok(None)
+            }
             ParsedLine::ContinueParse => Ok(None), // need to be exhaustive
             ParsedLine::ChangedData { .. } => {
                 // map here maps over the option
                 // NOTE: this means that we must return a table if we want to return a ddl result
-                Ok(self.table_holder.add_change(parsed_line, &self.targets_tables_column_names)?.map(
-                    |(returned_table, maybe_ddl_changes)| {
+                Ok(self
+                    .table_holder
+                    .add_change(parsed_line, &self.targets_tables_column_names)?
+                    .map(|(returned_table, maybe_ddl_changes)| {
                         let mut start_vec = vec![ChangeProcessingResult::TableChanges(
                             Self::write_files_for_table(
                                 returned_table,
@@ -592,8 +666,7 @@ impl ChangeProcessing {
                             }
                         }
                         start_vec
-                    },
-                ))
+                    }))
             }
         }
     }
@@ -682,9 +755,17 @@ fn column_info_has_ddl_changes_compared_to_target(
     column_names != column_names_from_target
 }
 
-fn fail_processing_if_unequal(left: usize, right: usize, message: &str) -> std::result::Result<(), ChangeProcessingError> {
+fn fail_processing_if_unequal(
+    left: usize,
+    right: usize,
+    message: &str,
+) -> std::result::Result<(), ChangeProcessingError> {
     if left != right {
-        Err(ChangeProcessingError { parsed_line: None, message: message.to_string(), source_line: None })
+        Err(ChangeProcessingError {
+            parsed_line: None,
+            message: message.to_string(),
+            source_line: None,
+        })
     } else {
         Ok(())
     }
@@ -772,10 +853,14 @@ mod tests {
         change_processing.register_wal_file(Some(new_wal_file()));
         let blank_stats_hash = hashmap!();
         assert_eq!(change_processing.get_stats(), blank_stats_hash);
-        let mut first_result = change_processing.add_change(first_change).expect("Failed processing changes");
+        let mut first_result = change_processing
+            .add_change(first_change)
+            .expect("Failed processing changes");
         let single_entry_stats_hash = hashmap!(&table_name => 1);
         assert_eq!(change_processing.get_stats(), single_entry_stats_hash);
-        let second_result = change_processing.add_change(second_change).expect("Failed processing changes");
+        let second_result = change_processing
+            .add_change(second_change)
+            .expect("Failed processing changes");
         let double_entry_stats_hash = hashmap!(&table_name => 2);
         assert_eq!(change_processing.get_stats(), double_entry_stats_hash);
         assert!(first_result.is_some());
@@ -850,10 +935,14 @@ mod tests {
         change_processing.register_wal_file(Some(new_wal_file()));
         let blank_stats_hash = hashmap!();
         assert_eq!(change_processing.get_stats(), blank_stats_hash);
-        let mut first_result = change_processing.add_change(first_change).expect("Failed processing changes");
+        let mut first_result = change_processing
+            .add_change(first_change)
+            .expect("Failed processing changes");
         let single_entry_stats_hash = hashmap!(&table_name => 1);
         assert_eq!(change_processing.get_stats(), single_entry_stats_hash);
-        let second_result = change_processing.add_change(second_change).expect("Failed processing changes");
+        let second_result = change_processing
+            .add_change(second_change)
+            .expect("Failed processing changes");
         let double_entry_stats_hash = hashmap!(&table_name => 2);
         assert_eq!(change_processing.get_stats(), double_entry_stats_hash);
         assert!(first_result.is_some());
@@ -920,7 +1009,9 @@ mod tests {
         change_processing.register_wal_file(Some(new_wal_file()));
         let blank_stats_hash = hashmap!();
         assert_eq!(change_processing.get_stats(), blank_stats_hash);
-        let first_result = change_processing.add_change(first_change).expect("Failed processing changes");
+        let first_result = change_processing
+            .add_change(first_change)
+            .expect("Failed processing changes");
         let single_entry_stats_hash = hashmap!(&table_name => 1);
         assert_eq!(change_processing.get_stats(), single_entry_stats_hash);
         assert!(first_result.is_none());
@@ -982,13 +1073,19 @@ mod tests {
         change_processing.register_wal_file(Some(new_wal_file()));
         let blank_stats_hash = hashmap!();
         assert_eq!(change_processing.get_stats(), blank_stats_hash);
-        let first_result = change_processing.add_change(first_change).expect("Failed processing changes");
+        let first_result = change_processing
+            .add_change(first_change)
+            .expect("Failed processing changes");
         let single_entry_stats_hash = hashmap!(&table_name => 1);
         assert_eq!(change_processing.get_stats(), single_entry_stats_hash);
-        let mut second_result = change_processing.add_change(second_change).expect("Failed processing changes");
+        let mut second_result = change_processing
+            .add_change(second_change)
+            .expect("Failed processing changes");
         // we popped a record off, and then added another record, so should still have 1 in there
         assert_eq!(change_processing.get_stats(), single_entry_stats_hash);
-        let third_result = change_processing.add_change(third_change).expect("Failed processing changes");
+        let third_result = change_processing
+            .add_change(third_change)
+            .expect("Failed processing changes");
         let double_entry_stats_hash = hashmap!(&table_name => 2);
         assert_eq!(change_processing.get_stats(), double_entry_stats_hash);
         assert!(first_result.is_none());
@@ -1068,13 +1165,19 @@ mod tests {
         change_processing.register_wal_file(Some(new_wal_file()));
         let blank_stats_hash = hashmap!();
         assert_eq!(change_processing.get_stats(), blank_stats_hash);
-        let first_result = change_processing.add_change(first_change).expect("Failed processing changes");
+        let first_result = change_processing
+            .add_change(first_change)
+            .expect("Failed processing changes");
         let single_entry_stats_hash = hashmap!(&table_name => 1);
         assert_eq!(change_processing.get_stats(), single_entry_stats_hash);
-        let mut second_result = change_processing.add_change(second_change).expect("Failed processing changes");
+        let mut second_result = change_processing
+            .add_change(second_change)
+            .expect("Failed processing changes");
         // we popped a record off, and then added another record, so should still have 1 in there
         assert_eq!(change_processing.get_stats(), single_entry_stats_hash);
-        let third_result = change_processing.add_change(third_change).expect("Failed processing changes");
+        let third_result = change_processing
+            .add_change(third_change)
+            .expect("Failed processing changes");
         let double_entry_stats_hash = hashmap!(&table_name => 2);
         assert_eq!(change_processing.get_stats(), double_entry_stats_hash);
         assert!(first_result.is_none());
@@ -1176,13 +1279,19 @@ mod tests {
         change_processing.register_wal_file(Some(new_wal_file()));
         let blank_stats_hash = hashmap!();
         assert_eq!(change_processing.get_stats(), blank_stats_hash);
-        let first_result = change_processing.add_change(first_change).expect("Failed processing changes");
+        let first_result = change_processing
+            .add_change(first_change)
+            .expect("Failed processing changes");
         let single_entry_stats_hash = hashmap!(&table_name => 1);
         assert_eq!(change_processing.get_stats(), single_entry_stats_hash);
-        let mut second_result = change_processing.add_change(second_change).expect("Failed processing changes");
+        let mut second_result = change_processing
+            .add_change(second_change)
+            .expect("Failed processing changes");
         // we popped a record off, and then added another record, so should still have 1 in there
         assert_eq!(change_processing.get_stats(), single_entry_stats_hash);
-        let third_result = change_processing.add_change(third_change).expect("Failed processing changes");
+        let third_result = change_processing
+            .add_change(third_change)
+            .expect("Failed processing changes");
         let double_entry_stats_hash = hashmap!(&table_name => 2);
         assert_eq!(change_processing.get_stats(), double_entry_stats_hash);
         assert!(first_result.is_none());
@@ -1244,7 +1353,9 @@ mod tests {
         };
         let mut change_processing =
             ChangeProcessing::new(TargetsTablesColumnNames::from_map(HashMap::new()));
-        let result_1 = change_processing.add_change(change_1).expect("Failed processing changes");
+        let result_1 = change_processing
+            .add_change(change_1)
+            .expect("Failed processing changes");
         let mut expected_changes_1 = BTreeMap::<i64, ChangeSet>::new();
         expected_changes_1.insert(
             1,
@@ -1292,7 +1403,9 @@ mod tests {
             table_name: table_name.clone(),
             columns: changed_columns_2,
         };
-        let result_2 = change_processing.add_change(change_2).expect("Failed processing changes");
+        let result_2 = change_processing
+            .add_change(change_2)
+            .expect("Failed processing changes");
         let mut expected_changes_2 = BTreeMap::<i64, ChangeSet>::new();
         expected_changes_2.insert(
             1,
@@ -1334,7 +1447,9 @@ mod tests {
             table_name: table_name.clone(),
             columns: changed_columns_3,
         };
-        let result_3 = change_processing.add_change(change_3).expect("Failed processing changes");
+        let result_3 = change_processing
+            .add_change(change_3)
+            .expect("Failed processing changes");
         let mut expected_changes_3 = BTreeMap::<i64, ChangeSet>::new();
         expected_changes_3.insert(1, ChangeSet { changes: None });
         let expected_change_set_3 = ChangeSetWithColumnType::IntColumnType(expected_changes_3);
@@ -1373,8 +1488,12 @@ mod tests {
         };
         let mut change_processing =
             ChangeProcessing::new(TargetsTablesColumnNames::from_map(HashMap::new()));
-        change_processing.add_change(change_1.clone()).expect("failed processing");
-        change_processing.add_change(change_1.clone()).expect("failed processing");
+        change_processing
+            .add_change(change_1.clone())
+            .expect("failed processing");
+        change_processing
+            .add_change(change_1.clone())
+            .expect("failed processing");
     }
 
     #[test]
@@ -1406,8 +1525,12 @@ mod tests {
         };
         let mut change_processing =
             ChangeProcessing::new(TargetsTablesColumnNames::from_map(HashMap::new()));
-        change_processing.add_change(change_1.clone()).expect("failed processing");
-        change_processing.add_change(change_2.clone()).expect("failed processing");
+        change_processing
+            .add_change(change_1.clone())
+            .expect("failed processing");
+        change_processing
+            .add_change(change_2.clone())
+            .expect("failed processing");
     }
 
     #[test]
@@ -1439,8 +1562,12 @@ mod tests {
         };
         let mut change_processing =
             ChangeProcessing::new(TargetsTablesColumnNames::from_map(HashMap::new()));
-        change_processing.add_change(change_1.clone()).expect("failed processing");
-        change_processing.add_change(change_2.clone()).expect("failed processing");
+        change_processing
+            .add_change(change_1.clone())
+            .expect("failed processing");
+        change_processing
+            .add_change(change_2.clone())
+            .expect("failed processing");
     }
 
     #[test]
@@ -1471,8 +1598,12 @@ mod tests {
         };
         let mut change_processing =
             ChangeProcessing::new(TargetsTablesColumnNames::from_map(HashMap::new()));
-        change_processing.add_change(change_1.clone()).expect("failed processing");
-        change_processing.add_change(change_2.clone()).expect("failed processing");
+        change_processing
+            .add_change(change_1.clone())
+            .expect("failed processing");
+        change_processing
+            .add_change(change_2.clone())
+            .expect("failed processing");
 
         let mut expected_changes_1 = BTreeMap::<i64, ChangeSet>::new();
         expected_changes_1.insert(
@@ -1529,7 +1660,9 @@ mod tests {
         };
         let mut change_processing =
             ChangeProcessing::new(TargetsTablesColumnNames::from_map(HashMap::new()));
-        let result_1 = change_processing.add_change(change_1).expect("Failed processing changes");
+        let result_1 = change_processing
+            .add_change(change_1)
+            .expect("Failed processing changes");
         let mut expected_changes_1 = BTreeMap::<i64, ChangeSet>::new();
         expected_changes_1.insert(
             1,
@@ -1577,7 +1710,9 @@ mod tests {
             table_name: table_name.clone(),
             columns: changed_columns_2,
         };
-        let result_2 = change_processing.add_change(change_2).expect("Failed processing changes");
+        let result_2 = change_processing
+            .add_change(change_2)
+            .expect("Failed processing changes");
         let mut expected_changes_2 = BTreeMap::<i64, ChangeSet>::new();
         expected_changes_2.insert(
             1,
@@ -1619,7 +1754,9 @@ mod tests {
             table_name: table_name.clone(),
             columns: changed_columns_3,
         };
-        let result_3 = change_processing.add_change(change_3).expect("Failed processing changes");
+        let result_3 = change_processing
+            .add_change(change_3)
+            .expect("Failed processing changes");
         let mut expected_changes_3 = BTreeMap::<i64, ChangeSet>::new();
         expected_changes_3.insert(
             1,
@@ -1663,8 +1800,12 @@ mod tests {
         };
         let mut change_processing =
             ChangeProcessing::new(TargetsTablesColumnNames::from_map(HashMap::new()));
-        change_processing.add_change(change.clone()).expect("failed processing");
-        change_processing.add_change(change.clone()).expect("failed processing");
+        change_processing
+            .add_change(change.clone())
+            .expect("failed processing");
+        change_processing
+            .add_change(change.clone())
+            .expect("failed processing");
     }
 
     #[test]
@@ -1691,7 +1832,9 @@ mod tests {
         };
         let mut change_processing =
             ChangeProcessing::new(TargetsTablesColumnNames::from_map(HashMap::new()));
-        let result_1 = change_processing.add_change(change_1).expect("Failed processing changes");
+        let result_1 = change_processing
+            .add_change(change_1)
+            .expect("Failed processing changes");
         let mut expected_changes_1 = BTreeMap::<i64, ChangeSet>::new();
         expected_changes_1.insert(
             1,
@@ -1738,7 +1881,9 @@ mod tests {
             table_name: table_name.clone(),
             columns: changed_columns_2,
         };
-        let result_2 = change_processing.add_change(change_2).expect("Failed processing changes");
+        let result_2 = change_processing
+            .add_change(change_2)
+            .expect("Failed processing changes");
         let mut expected_changes_2 = BTreeMap::<i64, ChangeSet>::new();
         expected_changes_2.insert(
             1,
@@ -1795,7 +1940,9 @@ mod tests {
         };
         let mut change_processing =
             ChangeProcessing::new(TargetsTablesColumnNames::from_map(HashMap::new()));
-        let result_1 = change_processing.add_change(change_1).expect("Failed processing changes");
+        let result_1 = change_processing
+            .add_change(change_1)
+            .expect("Failed processing changes");
         let mut expected_changes_1 = BTreeMap::<i64, ChangeSet>::new();
         expected_changes_1.insert(
             1,
@@ -1842,7 +1989,9 @@ mod tests {
             table_name: table_name.clone(),
             columns: changed_columns_2,
         };
-        let result_2 = change_processing.add_change(change_2).expect("Failed processing changes");
+        let result_2 = change_processing
+            .add_change(change_2)
+            .expect("Failed processing changes");
         let mut expected_changes_2 = BTreeMap::<i64, ChangeSet>::new();
         expected_changes_2.insert(
             1,
@@ -1898,7 +2047,9 @@ mod tests {
         };
         let mut change_processing =
             ChangeProcessing::new(TargetsTablesColumnNames::from_map(HashMap::new()));
-        let result_1 = change_processing.add_change(change_1).expect("Failed processing changes");
+        let result_1 = change_processing
+            .add_change(change_1)
+            .expect("Failed processing changes");
         let mut expected_changes_1 = BTreeMap::<i64, ChangeSet>::new();
         expected_changes_1.insert(
             1,
@@ -1944,7 +2095,9 @@ mod tests {
             table_name: table_name.clone(),
             columns: changed_columns_2,
         };
-        let result_2 = change_processing.add_change(change_2).expect("Failed processing changes");
+        let result_2 = change_processing
+            .add_change(change_2)
+            .expect("Failed processing changes");
         let mut expected_changes_2 = BTreeMap::<i64, ChangeSet>::new();
         expected_changes_2.insert(
             1,
