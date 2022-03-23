@@ -33,6 +33,7 @@ mod wal_file_manager;
 
 use file_uploader_threads::DEFAULT_CHANNEL_SIZE;
 use shutdown_handler::{RuntimeType, ShutdownHandler};
+use wal_file_manager::WalFile;
 
 lazy_static! {
     static ref OUTPUT_WAL_DIRECTORY: String =
@@ -52,9 +53,45 @@ enum InputType {
     PgRcvlogical,
 }
 
-fn panic_if_messy_shutdown() ->() {
+fn panic_if_messy_shutdown() -> () {
     if ShutdownHandler::shutting_down_messily() {
         panic!("re_dms had a messy shut down. If running as a service, will attempt to restart automatically a limited number of times.");
+    }
+}
+
+struct PreprocessingManager {
+    continue_parsing_and_processing: bool,
+    wal_files_to_preserve_for_reprocessing: Vec<WalFile>,
+}
+
+impl PreprocessingManager {
+    fn new() -> PreprocessingManager {
+        PreprocessingManager {
+            continue_parsing_and_processing: true,
+            wal_files_to_preserve_for_reprocessing: vec![],
+        }
+    }
+
+    fn halt_preprocessing_and_register_shutdown(&mut self, wal_file: WalFile, message: &str) {
+        let wal_file_number = wal_file.file_number;
+        logger_error!(Some(wal_file_number), None, message);
+        self.halt_preprocessing();
+        self.preserve_wal_file_for_reprocessing(wal_file);
+        ShutdownHandler::register_clean_shutdown();
+    }
+
+    fn preserve_wal_file_for_reprocessing(&mut self, wal_file: WalFile) {
+        self.wal_files_to_preserve_for_reprocessing.push(wal_file);
+    }
+
+    fn halt_preprocessing(&mut self) {
+        self.continue_parsing_and_processing = false;
+
+        logger_info!(None, None, "Halting pre-processing");
+    }
+
+    fn preprocessing_halted(&mut self) -> bool {
+        self.continue_parsing_and_processing == false
     }
 }
 
@@ -107,6 +144,7 @@ async fn main() {
     let mut child_process_guard = ChildGuard(None);
     let mut wal_file_manager;
     let mut previous_input_type = None;
+    let mut preprocessing_manager = PreprocessingManager::new();
     loop {
         // need to define this at this level so it lives long enough
         let stdin = io::stdin();
@@ -176,27 +214,65 @@ async fn main() {
                         break;
                     }
 
-                    panic_if_messy_shutdown();
+                    if ShutdownHandler::shutting_down_messily() {
+                        preprocessing_manager.halt_preprocessing();
+                    }
                 }
-                let parsed_line = parser.parse(&ip);
-                match parsed_line {
-                    parser::ParsedLine::ContinueParse => {} // Intentionally left blank, continue parsing
-                    _ => {
-                        if let Some(change_vec) = collector.add_change(parsed_line) {
-                            for change in change_vec {
-                                file_transmitter.send(change).await.expect(
-                                    "Error writing to file_transmitter channel. Channel dropped.",
-                                );
+
+                if !preprocessing_manager.preprocessing_halted() {
+                    let parsed_line_result = parser.parse(&ip);
+                    match parsed_line_result {
+                        Ok(parsed_line) => {
+                            match parsed_line {
+                                parser::ParsedLine::ContinueParse => {} // Intentionally left blank, continue parsing
+                                _ => {
+                                    let change_vec_result = collector.add_change(parsed_line);
+                                    match change_vec_result {
+                                        Ok(change_vec) => {
+                                            if let Some(change_vec) = change_vec {
+                                                for change in change_vec {
+                                                    match file_transmitter.send(change).await {
+                                                        Err(err) => {
+                                                            preprocessing_manager.halt_preprocessing_and_register_shutdown(wal_file_manager.current_wal(), &format!("Error writing to file_transmitter channel. Channel dropped due to: {:?}", err));
+                                                        }
+                                                        _ => {}
+                                                    };
+                                                }
+                                            }
+                                        }
+                                        Err(err) => {
+                                            preprocessing_manager
+                                                .halt_preprocessing_and_register_shutdown(
+                                                    wal_file_manager.current_wal(),
+                                                    &format!(
+                                                    "Error processing changes. Failed due to: {:?}",
+                                                    err
+                                                ),
+                                                );
+                                        }
+                                    }
+                                }
                             }
+                        }
+                        Err(err) => {
+                            preprocessing_manager.halt_preprocessing_and_register_shutdown(
+                                wal_file_manager.current_wal(),
+                                &format!("Error parsing changes. Failed due to: {:?}", err),
+                            );
                         }
                     }
                 }
+
                 if let wal_file_manager::WalLineResult::SwapWal(wal_file) = wal_file_manager_result
                 {
-                    // drain the collector of all it's tables, and send to file transmitter
-                    drain_collector_and_transmit(&mut collector, &mut file_transmitter).await;
-                    collector.register_wal_file(Some(wal_file.clone()));
-                    parser.register_wal_number(wal_file.file_number);
+                    if !preprocessing_manager.preprocessing_halted() {
+                        // drain the collector of all it's tables, and send to file transmitter
+                        drain_collector_and_transmit(&mut collector, &mut file_transmitter).await;
+                        collector.register_wal_file(Some(wal_file.clone()));
+                        parser.register_wal_number(wal_file.file_number);
+                    } else {
+                        preprocessing_manager.preserve_wal_file_for_reprocessing(wal_file);
+                    }
                 }
             }
         }
