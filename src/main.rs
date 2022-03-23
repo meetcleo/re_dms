@@ -61,24 +61,27 @@ fn panic_if_messy_shutdown() -> () {
 
 struct PreprocessingManager {
     continue_parsing_and_processing: bool,
-    wal_file: Option<WalFile>,
+    wal_files_to_preserve_for_reprocessing: Vec<WalFile>,
 }
 
 impl PreprocessingManager {
     fn new() -> PreprocessingManager {
         PreprocessingManager {
             continue_parsing_and_processing: true,
-            wal_file: None,
+            wal_files_to_preserve_for_reprocessing: vec![],
         }
     }
 
     fn halt_preprocessing_and_register_shutdown(&mut self, wal_file: WalFile, message: &str) {
         let wal_file_number = wal_file.file_number;
-        self.continue_parsing_and_processing = false;
-        self.wal_file = Some(wal_file);
         logger_error!(Some(wal_file_number), None, message);
-        logger_info!(Some(wal_file_number), None, "Halting pre-processing");
+        self.halt_preprocessing();
+        self.preserve_wal_file_for_reprocessing(wal_file);
         ShutdownHandler::register_clean_shutdown();
+    }
+
+    fn preserve_wal_file_for_reprocessing(&mut self, wal_file: WalFile) {
+        self.wal_files_to_preserve_for_reprocessing.push(wal_file);
     }
 
     fn halt_preprocessing(&mut self) {
@@ -240,12 +243,12 @@ async fn main() {
                                         Err(err) => {
                                             preprocessing_manager
                                                 .halt_preprocessing_and_register_shutdown(
-                                                wal_file_manager.current_wal(),
-                                                &format!(
+                                                    wal_file_manager.current_wal(),
+                                                    &format!(
                                                     "Error processing changes. Failed due to: {:?}",
                                                     err
                                                 ),
-                                            );
+                                                );
                                         }
                                     }
                                 }
@@ -259,14 +262,16 @@ async fn main() {
                         }
                     }
                 }
-                if !preprocessing_manager.preprocessing_halted() {
-                    if let wal_file_manager::WalLineResult::SwapWal(wal_file) =
-                        wal_file_manager_result
-                    {
+
+                if let wal_file_manager::WalLineResult::SwapWal(wal_file) = wal_file_manager_result
+                {
+                    if !preprocessing_manager.preprocessing_halted() {
                         // drain the collector of all it's tables, and send to file transmitter
                         drain_collector_and_transmit(&mut collector, &mut file_transmitter).await;
                         collector.register_wal_file(Some(wal_file.clone()));
                         parser.register_wal_number(wal_file.file_number);
+                    } else {
+                        preprocessing_manager.preserve_wal_file_for_reprocessing(wal_file);
                     }
                 }
             }
