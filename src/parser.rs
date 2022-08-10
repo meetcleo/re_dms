@@ -36,6 +36,7 @@ lazy_static! {
     // we use this regex to strip off the `[string]` part as all arrays get mapped to a text type in redshift
     static ref COLUMN_TYPE_REGEX: regex::Regex = Regex::new(r"^.+\[\]$").unwrap();
     static ref TABLE_BLACKLIST: Vec<String> = env::var("TABLE_BLACKLIST").unwrap_or("".to_owned()).split(",").map(|x| x.to_owned()).collect();
+    static ref SCHEMA_BLACKLIST: Vec<String> = env::var("SCHEMA_BLACKLIST").unwrap_or("".to_owned()).split(",").map(|x| x.to_owned()).collect();
     static ref TARGET_SCHEMA_NAME: Option<String> = std::env::var("TARGET_SCHEMA_NAME").ok();
 
     // 99_999_999_999.99999999
@@ -856,6 +857,7 @@ impl Parser {
             self.parse_state.currently_parsing = Some(changed_data);
             ParsedLine::ContinueParse
         } else {
+            let schema_name: String = table_name.schema_and_table_name().0.clone().to_string();
             if TABLE_BLACKLIST.contains(table_name.as_ref()) {
                 logger_info!(
                     self.parse_state.wal_file_number,
@@ -869,7 +871,21 @@ impl Parser {
                 // we still want this to be after the continue parse line so we can
                 // handle newlines in our blacklisted tables
                 ParsedLine::ContinueParse
-            } else {
+            } else if SCHEMA_BLACKLIST.contains(&schema_name)  {
+                logger_info!(
+                    self.parse_state.wal_file_number,
+                    Some(&table_name),
+                    &format!(
+                        "schema_skipped_due_to_blacklist:{} blacklist:{:?}",
+                        table_name, *SCHEMA_BLACKLIST
+                    )
+                );
+                // we don't save any parse state, since we're skipping this changed_data and dropping it on the ground
+                // we still want this to be after the continue parse line so we can
+                // handle newlines in our blacklisted schemas
+                ParsedLine::ContinueParse
+            }
+            else {
                 changed_data
             }
         };
@@ -962,6 +978,7 @@ mod tests {
     #[ctor::ctor]
     fn setup_tests() {
         std::env::set_var("TABLE_BLACKLIST", "public.schema_migrations");
+        std::env::set_var("SCHEMA_BLACKLIST", "private");
     }
 
     #[test]
@@ -969,6 +986,15 @@ mod tests {
         let mut parser = Parser::new(true);
         let line =
             "table public.schema_migrations: INSERT: version[character varying]:'20210112112814'";
+        let parsed_line = parser.parse(&line.to_owned()).expect("failed parsing");
+        assert_eq!(parsed_line, ParsedLine::ContinueParse);
+    }
+
+    #[test]
+    fn schema_blacklist_works_as_expected() {
+        let mut parser = Parser::new(true);
+        let line =
+            "table private.anythings: INSERT: version[character varying]:'20210112112814'";
         let parsed_line = parser.parse(&line.to_owned()).expect("failed parsing");
         assert_eq!(parsed_line, ParsedLine::ContinueParse);
     }
