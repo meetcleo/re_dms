@@ -63,7 +63,7 @@ impl SchemaAndTable for TableName {
     fn schema_and_table_name(&self) -> (&str, &str) {
         let result = self
             .split_once('.')
-            .expect("can't split schema and table name. No `.` character");
+            .expect(&format!("can't split schema and table name. No `.` character: {}", self));
         match &*TARGET_SCHEMA_NAME {
             None => result,
             Some(schema_name) => (schema_name, result.1),
@@ -71,7 +71,7 @@ impl SchemaAndTable for TableName {
     }
     fn original_schema_and_table_name(&self) -> (&str, &str) {
         self.split_once('.')
-            .expect("can't split schema and table name. No `.` character")
+            .expect(&format!("can't split schema and table name. No `.` character: {}", self))
     }
 }
 
