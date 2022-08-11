@@ -122,6 +122,8 @@ pub enum ColumnTypeEnum {
     RoundingNumeric,
     Text,
     Timestamp,
+    Oid,
+    StringEnumType,
 }
 
 impl fmt::Display for ColumnValue {
@@ -398,6 +400,10 @@ impl ColumnValue {
                     ColumnTypeEnum::RoundingNumeric => ColumnValue::parse_rounding_numeric(string),
                     ColumnTypeEnum::Text => ColumnValue::parse_text(string, continue_parse)?,
                     ColumnTypeEnum::Timestamp => ColumnValue::parse_text(string, continue_parse)?,
+                    ColumnTypeEnum::Oid => ColumnValue::parse_numeric(string),
+                    ColumnTypeEnum::StringEnumType => {
+                        ColumnValue::parse_text(string, continue_parse)?
+                    }
                 };
             Ok((Some(column_value), rest_of_string))
         }
@@ -423,6 +429,8 @@ impl ColumnValue {
             "public.hstore" => ColumnTypeEnum::Text,
             "interval" => ColumnTypeEnum::Text,
             "array" => ColumnTypeEnum::Text,
+            "oid" => ColumnTypeEnum::Oid,
+            "sch_repcloud.ty_repack_step" => ColumnTypeEnum::StringEnumType,
             _ => panic!("Unknown column type: {:?}", column_type_str),
         }
     }
@@ -871,7 +879,7 @@ impl Parser {
                 // we still want this to be after the continue parse line so we can
                 // handle newlines in our blacklisted tables
                 ParsedLine::ContinueParse
-            } else if SCHEMA_BLACKLIST.contains(&schema_name)  {
+            } else if SCHEMA_BLACKLIST.contains(&schema_name) {
                 logger_info!(
                     self.parse_state.wal_file_number,
                     Some(&table_name),
@@ -884,8 +892,7 @@ impl Parser {
                 // we still want this to be after the continue parse line so we can
                 // handle newlines in our blacklisted schemas
                 ParsedLine::ContinueParse
-            }
-            else {
+            } else {
                 changed_data
             }
         };
@@ -978,7 +985,10 @@ mod tests {
     #[ctor::ctor]
     fn setup_tests() {
         std::env::set_var("TABLE_BLACKLIST", "public.schema_migrations");
-        std::env::set_var("SCHEMA_BLACKLIST", "private");
+        std::env::set_var(
+            "SCHEMA_BLACKLIST",
+            "partman,data_science,sch_repcloud,sch_repdrop,sch_repnew,private",
+        );
     }
 
     #[test]
@@ -993,8 +1003,23 @@ mod tests {
     #[test]
     fn schema_blacklist_works_as_expected() {
         let mut parser = Parser::new(true);
-        let line =
-            "table private.anythings: INSERT: version[character varying]:'20210112112814'";
+        let line = "table private.anythings: INSERT: version[character varying]:'20210112112814'";
+        let parsed_line = parser.parse(&line.to_owned()).expect("failed parsing");
+        assert_eq!(parsed_line, ParsedLine::ContinueParse);
+    }
+
+    #[test]
+    fn schema_blacklist_still_works_as_expected() {
+        let mut parser = Parser::new(true);
+        let line = "table partman.anythings: INSERT: version[character varying]:'20210112112814'";
+        let parsed_line = parser.parse(&line.to_owned()).expect("failed parsing");
+        assert_eq!(parsed_line, ParsedLine::ContinueParse);
+    }
+
+    #[test]
+    fn schema_blacklist_still2_works_as_expected() {
+        let mut parser = Parser::new(true);
+        let line = "table sch_repcloud.t_table_repack: INSERT: i_id_table[bigint]:1 oid_old_table[oid]:16745 oid_new_table[oid]:459073292 v_old_table_name[character varying]:'admins' v_new_table_name[character varying]:'admins_16745' v_log_table_name[character varying]:'log_16745' v_schema_name[character varying]:'public' t_tab_pk[text[]]:null en_repack_step[sch_repcloud.ty_repack_step]:null v_status[character varying]:null b_ready_for_swap[boolean]:false i_size_start[bigint]:null i_size_end[bigint]:null xid_copy_start[bigint]:null xid_sync_end[bigint]:null ts_repack_start[timestamp without time zone]:null ts_repack_end[timestamp without time zone]:null";
         let parsed_line = parser.parse(&line.to_owned()).expect("failed parsing");
         assert_eq!(parsed_line, ParsedLine::ContinueParse);
     }
