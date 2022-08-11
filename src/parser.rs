@@ -430,6 +430,7 @@ impl ColumnValue {
             "public.citext" => ColumnTypeEnum::Text, // extensions come through as public.
             "text" => ColumnTypeEnum::Text,
             "timestamp without time zone" => ColumnTypeEnum::Timestamp,
+            "timestamp with time zone" => ColumnTypeEnum::Timestamp,
             "date" => ColumnTypeEnum::Timestamp,
             "uuid" => ColumnTypeEnum::Text,
             "jsonb" => ColumnTypeEnum::Text,
