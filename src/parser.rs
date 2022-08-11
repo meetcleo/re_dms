@@ -58,6 +58,8 @@ pub trait SchemaAndTable {
 // schema.table_name
 // we assume a valid table name, so unwrap
 impl SchemaAndTable for TableName {
+    // NOTE: this gives the DESTINATION target schema name.
+    // which could be really f-ing confusing if you don't expect that.
     fn schema_and_table_name(&self) -> (&str, &str) {
         let result = self
             .split_once('.')
