@@ -52,6 +52,7 @@ lazy_static! {
 // for tablename
 pub trait SchemaAndTable {
     fn schema_and_table_name(&self) -> (&str, &str);
+    fn original_schema_and_table_name(&self) -> (&str, &str);
 }
 
 // schema.table_name
@@ -65,6 +66,10 @@ impl SchemaAndTable for TableName {
             None => result,
             Some(schema_name) => (schema_name, result.1),
         }
+    }
+    fn original_schema_and_table_name(&self) -> (&str, &str) {
+        self.split_once('.')
+            .expect("can't split schema and table name. No `.` character")
     }
 }
 
@@ -418,6 +423,7 @@ impl ColumnValue {
             "decimal" => ColumnTypeEnum::RoundingNumeric,
             "double precision" => ColumnTypeEnum::Numeric,
             "boolean" => ColumnTypeEnum::Boolean,
+            "character" => ColumnTypeEnum::Text,
             "character varying" => ColumnTypeEnum::Text,
             "public.citext" => ColumnTypeEnum::Text, // extensions come through as public.
             "text" => ColumnTypeEnum::Text,
@@ -865,7 +871,11 @@ impl Parser {
             self.parse_state.currently_parsing = Some(changed_data);
             ParsedLine::ContinueParse
         } else {
-            let schema_name: String = table_name.schema_and_table_name().0.clone().to_string();
+            let schema_name: String = table_name
+                .original_schema_and_table_name()
+                .0
+                .clone()
+                .to_string();
             if TABLE_BLACKLIST.contains(table_name.as_ref()) {
                 logger_info!(
                     self.parse_state.wal_file_number,
@@ -1019,7 +1029,15 @@ mod tests {
     #[test]
     fn schema_blacklist_still2_works_as_expected() {
         let mut parser = Parser::new(true);
-        let line = "table sch_repcloud.t_table_repack: INSERT: i_id_table[bigint]:1 oid_old_table[oid]:16745 oid_new_table[oid]:459073292 v_old_table_name[character varying]:'admins' v_new_table_name[character varying]:'admins_16745' v_log_table_name[character varying]:'log_16745' v_schema_name[character varying]:'public' t_tab_pk[text[]]:null en_repack_step[sch_repcloud.ty_repack_step]:null v_status[character varying]:null b_ready_for_swap[boolean]:false i_size_start[bigint]:null i_size_end[bigint]:null xid_copy_start[bigint]:null xid_sync_end[bigint]:null ts_repack_start[timestamp without time zone]:null ts_repack_end[timestamp without time zone]:null";
+        let line = "table sch_repcloud.t_table_repack: UPDATE: i_id_table[bigint]:1 oid_old_table[oid]:16745 oid_new_table[oid]:459073292 v_old_table_name[character varying]:'admins' v_new_table_name[character varying]:'admins_16745' v_log_table_name[character varying]:'log_16745' v_schema_name[character varying]:'public' t_tab_pk[text[]]:null en_repack_step[sch_repcloud.ty_repack_step]:null v_status[character varying]:null b_ready_for_swap[boolean]:false i_size_start[bigint]:null i_size_end[bigint]:null xid_copy_start[bigint]:null xid_sync_end[bigint]:null ts_repack_start[timestamp without time zone]:null ts_repack_end[timestamp without time zone]:null";
+        let parsed_line = parser.parse(&line.to_owned()).expect("failed parsing");
+        assert_eq!(parsed_line, ParsedLine::ContinueParse);
+    }
+
+    #[test]
+    fn schema_blacklist_still3_works_as_expected() {
+        let mut parser = Parser::new(true);
+        let line = "table sch_repcloud.t_idx_repack: INSERT: i_id_index[bigint]:1 i_id_table[bigint]:1 v_table_name[character varying]:'admins_16745' v_schema_name[character varying]:'public' b_indisunique[boolean]:true b_idx_constraint[boolean]:true v_contype[character]:'p' t_index_name[text]:'admins_pkey' t_index_def[text]:' btree (id)' t_constraint_def[text]:'PRIMARY KEY (id)'";
         let parsed_line = parser.parse(&line.to_owned()).expect("failed parsing");
         assert_eq!(parsed_line, ParsedLine::ContinueParse);
     }
