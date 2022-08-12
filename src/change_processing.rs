@@ -1018,6 +1018,89 @@ mod tests {
     }
 
     #[test]
+    fn ddl_change_change_column_type() {
+        clear_testing_directory();
+        let table_name = TableName::new("public.foobar".to_string());
+        let id_column_info = ColumnInfo::new("id", "bigint");
+        let old_column_info = ColumnInfo::new("foobar", "int");
+        let new_column_info = ColumnInfo::new("foobar", "bigint");
+        let first_changed_columns = vec![
+            Column::ChangedColumn {
+                column_info: id_column_info.clone(),
+                value: Some(ColumnValue::Integer(1)),
+            }, // id column
+            Column::ChangedColumn {
+                column_info: old_column_info.clone(),
+                value: Some(ColumnValue::Integer(1)),
+            }, // new column
+        ];
+        let second_changed_columns = vec![
+            Column::ChangedColumn {
+                column_info: id_column_info.clone(),
+                value: Some(ColumnValue::Integer(1)),
+            }, // id column
+            Column::ChangedColumn {
+                column_info: new_column_info.clone(),
+                value: Some(ColumnValue::Integer(2)),
+            }, // new column
+        ];
+        let third_changed_columns = vec![
+            Column::ChangedColumn {
+                column_info: id_column_info.clone(),
+                value: Some(ColumnValue::Integer(2)),
+            }, // id column
+            Column::ChangedColumn {
+                column_info: new_column_info.clone(),
+                value: Some(ColumnValue::Integer(1)),
+            }, // new column
+        ];
+        let first_change = ParsedLine::ChangedData {
+            kind: ChangeKind::Insert,
+            table_name: table_name.clone(),
+            columns: first_changed_columns,
+        };
+        let second_change = ParsedLine::ChangedData {
+            kind: ChangeKind::Update,
+            table_name: table_name.clone(),
+            columns: second_changed_columns,
+        };
+        // check we have the new schema and can keep adding changes
+        let third_change = ParsedLine::ChangedData {
+            kind: ChangeKind::Update,
+            table_name: table_name.clone(),
+            columns: third_changed_columns,
+        };
+        let mut tables_columns_names_map = HashMap::new();
+        tables_columns_names_map.insert(
+            table_name.clone(),
+            vec![id_column_info.clone().name, old_column_info.clone().name].iter().cloned().collect(),
+        );
+        let mut change_processing =
+            ChangeProcessing::new(TargetsTablesColumnNames::from_map(tables_columns_names_map));
+        change_processing.register_wal_file(Some(new_wal_file()));
+        let blank_stats_hash = hashmap!();
+        assert_eq!(change_processing.get_stats(), blank_stats_hash);
+        let first_result = change_processing
+            .add_change(first_change)
+            .expect("Failed processing changes");
+        let single_entry_stats_hash = hashmap!(&table_name => 1);
+        assert_eq!(change_processing.get_stats(), single_entry_stats_hash);
+        let second_result = change_processing
+            .add_change(second_change)
+            .expect("Failed processing changes");
+        // we popped a record off, and then added another record, so should still have 1 in there
+        assert_eq!(change_processing.get_stats(), single_entry_stats_hash);
+        let third_result = change_processing
+            .add_change(third_change)
+            .expect("Failed processing changes");
+        let double_entry_stats_hash = hashmap!(&table_name => 2);
+        assert_eq!(change_processing.get_stats(), double_entry_stats_hash);
+        assert!(first_result.is_none());
+        assert!(second_result.is_none());
+        assert!(third_result.is_none());
+    }
+
+    #[test]
     fn ddl_change_add_column() {
         clear_testing_directory();
         let table_name = TableName::new("public.foobar".to_string());

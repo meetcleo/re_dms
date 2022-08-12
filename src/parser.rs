@@ -6,6 +6,7 @@ use num_bigint::Sign;
 use regex::Regex;
 use std::collections::HashSet;
 use std::{error::Error, fmt};
+use std::hash::{Hash, Hasher};
 
 use std::env;
 
@@ -233,7 +234,7 @@ impl fmt::Display for Column {
 }
 
 // happy to clone it, it only holds two pointers
-#[derive(Debug, Clone, Hash, Eq, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct ColumnInfo {
     pub name: ColumnName,
     pub column_type: ColumnType,
@@ -258,6 +259,19 @@ impl ColumnInfo {
     }
     pub fn is_id_column(&self) -> bool {
         self.name.as_ref() == "id"
+    }
+}
+
+impl PartialEq for ColumnInfo {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name
+    }
+}
+impl Eq for ColumnInfo {}
+
+impl Hash for ColumnInfo {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.name.hash(state);
     }
 }
 
@@ -1059,6 +1073,12 @@ mod tests {
         assert!(!is_quote_escaped(&string, 0));
         assert!(!is_quote_escaped(&string, string.len()));
         assert!(is_quote_escaped(&string, 2));
+    }
+
+    #[test]
+    fn column_info_compares_on_name() {
+        assert!(ColumnInfo::new("baz_array".to_string(), "array".to_string()) == ColumnInfo::new("baz_array".to_string(), "integer".to_string()));
+        assert!(ColumnInfo::new("baz_array".to_string(), "array".to_string()) != ColumnInfo::new("not_baz_array".to_string(), "array".to_string()));
     }
 
     #[test]
