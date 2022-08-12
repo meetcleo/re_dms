@@ -880,7 +880,7 @@ impl Parser {
                 .clone()
                 .to_string();
             if TABLE_BLACKLIST.contains(table_name.as_ref()) {
-                logger_info!(
+                logger_debug!(
                     self.parse_state.wal_file_number,
                     Some(&table_name),
                     &format!(
@@ -893,7 +893,7 @@ impl Parser {
                 // handle newlines in our blacklisted tables
                 ParsedLine::ContinueParse
             } else if SCHEMA_BLACKLIST.contains(&schema_name) {
-                logger_info!(
+                logger_debug!(
                     self.parse_state.wal_file_number,
                     Some(&table_name),
                     &format!(
