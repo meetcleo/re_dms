@@ -115,6 +115,7 @@ impl ChangeSet {
     }
 
     fn handle_insert_subsequent(&self, new_change: ParsedLine) -> Result<Option<ParsedLine>> {
+        let cloned_new_change: ParsedLine = new_change.clone();
         if let ParsedLine::ChangedData {
             kind,
             columns,
@@ -124,7 +125,7 @@ impl ChangeSet {
             match kind {
                 ChangeKind::Insert => Err(ChangeProcessingError {
                     message: "attempting to insert a record twice".to_string(),
-                    parsed_line: None,
+                    parsed_line: Some(cloned_new_change),
                     source_line: None,
                 }),
                 ChangeKind::Update => {
