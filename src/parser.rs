@@ -40,6 +40,7 @@ lazy_static! {
     static ref TABLE_BLACKLIST: Vec<String> = env::var("TABLE_BLACKLIST").unwrap_or("".to_owned()).split(",").map(|x| x.to_owned()).collect();
     static ref SCHEMA_BLACKLIST: Vec<String> = env::var("SCHEMA_BLACKLIST").unwrap_or("".to_owned()).split(",").map(|x| x.to_owned()).collect();
     static ref TARGET_SCHEMA_NAME: Option<String> = std::env::var("TARGET_SCHEMA_NAME").ok();
+    static ref ARRAY_STRING: String = "array".to_string();
 
     // 99_999_999_999.99999999
     static ref MAX_NUMERIC_VALUE: String = "9".repeat(
@@ -63,17 +64,20 @@ impl SchemaAndTable for TableName {
     // NOTE: this gives the DESTINATION target schema name.
     // which could be really f-ing confusing if you don't expect that.
     fn schema_and_table_name(&self) -> (&str, &str) {
-        let result = self
-            .split_once('.')
-            .expect(&format!("can't split schema and table name. No `.` character: {}", self));
+        let result = self.split_once('.').expect(&format!(
+            "can't split schema and table name. No `.` character: {}",
+            self
+        ));
         match &*TARGET_SCHEMA_NAME {
             None => result,
             Some(schema_name) => (schema_name, result.1),
         }
     }
     fn original_schema_and_table_name(&self) -> (&str, &str) {
-        self.split_once('.')
-            .expect(&format!("can't split schema and table name. No `.` character: {}", self))
+        self.split_once('.').expect(&format!(
+            "can't split schema and table name. No `.` character: {}",
+            self
+        ))
     }
 }
 
@@ -718,11 +722,10 @@ impl Parser {
         Ok(column_vector)
     }
 
-    fn parse_column<'a>(
+    fn parse_column_value_and_type<'a>(
         &self,
         string: &'a str,
-        _table_name: TableName,
-    ) -> Result<(Column, &'a str)> {
+    ) -> Result<(&'a str, &'a str, usize)> {
         let re = &PARSE_COLUMN_REGEX;
         let captures = match re.captures(string) {
             Some(result) => result,
@@ -753,11 +756,25 @@ impl Parser {
             }
         };
         // For array types, remove the inner type specification - we treat all array types as text
-        let column_type = &COLUMN_TYPE_REGEX
-            .replace_all(column_type, "array")
-            .to_string();
-        let string_without_column_type =
-            &string[captures.get(0).map_or("", |m| m.as_str()).len() + 0..];
+        let column_type = if COLUMN_TYPE_REGEX.is_match(column_type) {
+            &ARRAY_STRING.as_str()
+        } else {
+            column_type
+        };
+        Ok((
+            column_name,
+            column_type,
+            captures.get(0).map_or("", |m| m.as_str()).len(),
+        ))
+    }
+
+    fn parse_column<'a>(
+        &self,
+        string: &'a str,
+        _table_name: TableName,
+    ) -> Result<(Column, &'a str)> {
+        let (column_name, column_type, capture_size) = self.parse_column_value_and_type(string)?;
+        let string_without_column_type = &string[capture_size + 0..];
 
         // logger_debug!(
         //     self.parse_state.wal_file_number,
