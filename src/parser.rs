@@ -5,7 +5,6 @@ use internment::ArcIntern;
 use lazy_static::lazy_static;
 use num_bigint::BigInt;
 use num_bigint::Sign;
-use regex::Regex;
 use std::collections::HashSet;
 use std::{error::Error, fmt};
 
@@ -26,17 +25,6 @@ pub type ColumnType = ArcIntern<String>;
 
 lazy_static! {
     // leave these as unwrap
-    // this regex matches things like `"offset"[integer]:1` giving ("offset", "integer") capture groups
-    // and `id[uuid]:"i-am-a-uuid"`, giving ("id", "uuid") capture groups
-    // note the first capture group is surrounded by optional quotes to handle the first case above,
-    // and the + inside it is made non-greedy to not eat the subsequent optional quote.
-    // this is fine as we have a literal `[` to terminate the
-    // repetition so it can't end too soon
-    static ref PARSE_COLUMN_REGEX: regex::Regex = Regex::new(r#"^"?([^\[^\]]+?)"?\[([^:]+)\]:"#).unwrap();
-    // for array types we  actually looks like `my_array[array[string]]:"[\"foobar\"]"`
-    // this means the type regex match will be `array[string]`
-    // we use this regex to strip off the `[string]` part as all arrays get mapped to a text type in redshift
-    static ref COLUMN_TYPE_REGEX: regex::Regex = Regex::new(r"^.+\[\]$").unwrap();
     static ref TABLE_BLACKLIST: Vec<String> = env::var("TABLE_BLACKLIST").unwrap_or("".to_owned()).split(",").map(|x| x.to_owned()).collect();
     static ref SCHEMA_BLACKLIST: Vec<String> = env::var("SCHEMA_BLACKLIST").unwrap_or("".to_owned()).split(",").map(|x| x.to_owned()).collect();
     static ref TARGET_SCHEMA_NAME: Option<String> = std::env::var("TARGET_SCHEMA_NAME").ok();
@@ -722,50 +710,62 @@ impl Parser {
         Ok(column_vector)
     }
 
-    fn parse_column_value_and_type<'a>(
-        &self,
-        string: &'a str,
-    ) -> Result<(&'a str, &'a str, usize)> {
-        let re = &PARSE_COLUMN_REGEX;
-        let captures = match re.captures(string) {
-            Some(result) => result,
-            None => {
-                return Err(ParsingError {
-                    message: "Unable to match PARSE_COLUMN_REGEX to line".to_string(),
-                    line: string.to_string(),
-                })
-            }
-        };
+    // this function matches things like `"offset"[integer]:1` giving ("offset", "integer") capture groups
+    // and `id[uuid]:"i-am-a-uuid"`, giving ("id", "uuid") capture groups
+    // note the first capture group is surrounded by optional quotes to handle the first case above,
+    // and the + inside it is made non-greedy to not eat the subsequent optional quote.
+    // this is fine as we have a literal `[` to terminate the
+    // repetition so it can't end too soon
+    fn parse_column_name_and_type<'a>(&self, string: &'a str) -> Result<(&'a str, &'a str, usize)> {
+        let string_find_index = string.find('[').ok_or_else(|| ParsingError {
+            message: "Unable to match bracket while searching for column name".to_string(),
+            line: string.to_string(),
+        })?;
+        let column_name = &string[0..string_find_index];
+        let original_column_name_size = column_name.len();
 
-        let column_name = match captures.get(1) {
-            Some(result) => result.as_str(),
-            None => {
-                return Err(ParsingError {
-                    message: "couldn't match column_name".to_string(),
-                    line: string.to_string(),
-                })
-            }
+        // +1 to skip the open square bracket
+        let string_without_column_name = &string[column_name.len() + 1..];
+        // we then rewrite our column name to strip the quotes from it.
+        let column_name = if column_name.starts_with('"') && column_name.ends_with('"') {
+            &column_name[1..column_name.len() - 1]
+        } else {
+            column_name
         };
-        let column_type = match captures.get(2) {
-            Some(result) => result.as_str(),
-            None => {
-                return Err(ParsingError {
-                    message: "couldn't match column_type".to_string(),
-                    line: string.to_string(),
-                })
+        let mut initial_string = string_without_column_name;
+
+        // we've had a single open `[` so far
+        let mut column_type = "";
+        let mut bracket_stack = 1;
+        let mut current_index = 0;
+        while bracket_stack > 0 {
+            let matching_bracket =
+                initial_string
+                    .find(&['[', ']'])
+                    .ok_or_else(|| ParsingError {
+                        message: "couldn't match column_type brackets".to_string(),
+                        line: string.to_string(),
+                    })?;
+            if &string_without_column_name[matching_bracket..matching_bracket + 1] == "[" {
+                bracket_stack += 1
+            } else {
+                bracket_stack -= 1
             }
-        };
-        // For array types, remove the inner type specification - we treat all array types as text
-        let column_type = if COLUMN_TYPE_REGEX.is_match(column_type) {
+            current_index += matching_bracket + 1;
+            // advance
+            initial_string = &initial_string[matching_bracket + 1..];
+            // we don't include the final `]`
+            column_type = &string_without_column_name[0..current_index - 1];
+        }
+        // column name, open square bracket, column type, close square bracket
+        let column_string_size = original_column_name_size + 1 + column_type.len() + 1;
+        // // For array types, remove the inner type specification - we treat all array types as text
+        let column_type = if column_type.ends_with("[]") {
             &ARRAY_STRING.as_str()
         } else {
             column_type
         };
-        Ok((
-            column_name,
-            column_type,
-            captures.get(0).map_or("", |m| m.as_str()).len(),
-        ))
+        Ok((column_name, column_type, column_string_size))
     }
 
     fn parse_column<'a>(
@@ -773,8 +773,9 @@ impl Parser {
         string: &'a str,
         _table_name: TableName,
     ) -> Result<(Column, &'a str)> {
-        let (column_name, column_type, capture_size) = self.parse_column_value_and_type(string)?;
-        let string_without_column_type = &string[capture_size + 0..];
+        let (column_name, column_type, capture_size) = self.parse_column_name_and_type(string)?;
+        // add 1 for the `:`
+        let string_without_column_type = &string[capture_size + 1..];
 
         // logger_debug!(
         //     self.parse_state.wal_file_number,
@@ -1174,17 +1175,14 @@ mod tests {
 
     #[test]
     fn parse_column_regex_works() {
-        let string = "\"offset\"[integer]:0";
-        let re = &PARSE_COLUMN_REGEX;
-        let captures = re
-            .captures(string)
-            .expect("Unable to match PARSE_COLUMN_REGEX to line");
+        let parser = Parser::new(true);
 
-        let column_name = captures
-            .get(1)
-            .expect("couldn't match column_name")
-            .as_str();
-        assert_eq!(column_name, "offset"); // no quotes
+        let string = "\"offset\"[integer]:0";
+        let (column_name, column_type, capture_size) =
+            parser.parse_column_name_and_type(string).unwrap();
+        assert_eq!(column_name, "offset");
+        assert_eq!(column_type, "integer");
+        assert_eq!(capture_size, 17);
     }
 
     #[test]
