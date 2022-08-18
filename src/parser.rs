@@ -710,12 +710,10 @@ impl Parser {
         Ok(column_vector)
     }
 
-    // this function matches things like `"offset"[integer]:1` giving ("offset", "integer") capture groups
-    // and `id[uuid]:"i-am-a-uuid"`, giving ("id", "uuid") capture groups
-    // note the first capture group is surrounded by optional quotes to handle the first case above,
-    // and the + inside it is made non-greedy to not eat the subsequent optional quote.
-    // this is fine as we have a literal `[` to terminate the
-    // repetition so it can't end too soon
+    // this function matches things like `"offset"[integer]:1` giving ("offset", "integer", 17) result (the 17 is the length up to the colon).
+    // and `id[uuid]:"i-am-a-uuid"`, giving ("id", "uuid", 8) result
+    // NOTE: notice that it removes quotes from offset above.
+    // NOTE: it will match `my_column[character varying[]]:` and return ("my_column", "array", 30) (note that it calls all arrays type "array")
     fn parse_column_name_and_type<'a>(&self, string: &'a str) -> Result<(&'a str, &'a str, usize)> {
         let string_find_index = string.find('[').ok_or_else(|| ParsingError {
             message: "Unable to match bracket while searching for column name".to_string(),
