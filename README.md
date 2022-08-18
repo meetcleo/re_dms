@@ -155,6 +155,10 @@ $ ansible-playbook -i hosts re_dms.yml --tags cloudwatch --extra-vars "cloudwatc
 * similar to the `file_uploader_threads` this will read from the channel, and start a new task for each distinct table name (unless a task has already been started, otherwise it will reuse the channel). It will then send the `CleoS3File` to this task, which will process each `CleoS3File` and import it into the database via the `database_writer`.
 * `main.rs` does exactly what it says on the tin and runs the input loop, sending the results onwards through the pipeline. Initial files are written synchronously (`file_writer`).
 
+## Benchmarking
+* we currently have a single benchmark, it can be run with `cargo bench`
+* BONUS: you can create a flamegraph from the benchmark with `cargo flamegraph --unit-test -- parser::tests::parsing_is_fast --bench`. You can use this to guide any optimisation you want to perform.
+
 NOTE: this isn't actually threading, it's only based on async tasks and a few event loops. I use the term thread throughout since it's conceptually simpler.
 
 ### Implementation note about TOAST-ed columns.
