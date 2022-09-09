@@ -76,7 +76,6 @@
     - measure_number_of_wal_files.sh
     - measure_age_of_oldest_wal_file.sh
     - measure_age_of_youngest_wal_file.sh
-    - measure_number_of_re_dms_processes.sh
   tags: statsd-metrics
 
 - name: set custom cron metric reporting to statsd
@@ -89,7 +88,7 @@
     # calculate number of wal files
     # pipefail to exit early
     # echo as a guage to netcat, and send to default statsd collection agent.
-    job: "(/usr/local/bin/measure_number_of_wal_files.sh ; /usr/local/bin/measure_age_of_oldest_wal_file.sh ; /usr/local/bin/measure_age_of_youngest_wal_file.sh ; /usr/local/bin/measure_number_of_re_dms_processes.sh) 2>&1 | logger -t bash_metrics"
+    job: "(/usr/local/bin/measure_number_of_wal_files.sh ; /usr/local/bin/measure_age_of_oldest_wal_file.sh ; /usr/local/bin/measure_age_of_youngest_wal_file.sh) 2>&1 | logger -t bash_metrics"
   tags: statsd-metrics
       
 
