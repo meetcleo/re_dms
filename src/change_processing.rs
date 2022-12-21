@@ -123,11 +123,22 @@ impl ChangeSet {
         } = new_change
         {
             match kind {
-                ChangeKind::Insert => Err(ChangeProcessingError {
-                    message: "attempting to insert a record twice".to_string(),
-                    parsed_line: Some(cloned_new_change),
-                    source_line: None,
-                }),
+                ChangeKind::Insert => {
+                    if let Some(ParsedLine::ChangedData {
+                        columns: old_columns,
+                        ..
+                    }) = &self.changes
+                    {
+                        if old_columns == &columns {
+                            return self.untoasted_changes(columns, table_name, ChangeKind::Insert)
+                        }
+                    }
+                    Err(ChangeProcessingError {
+                        message: "attempting to insert a record twice".to_string(),
+                        parsed_line: Some(cloned_new_change),
+                        source_line: None,
+                    })
+                }
                 ChangeKind::Update => {
                     self.untoasted_changes(columns, table_name, ChangeKind::Insert)
                 }
@@ -146,7 +157,7 @@ impl ChangeSet {
         if let ParsedLine::ChangedData { kind, .. } = new_change {
             match kind {
                 ChangeKind::Insert => Err(ChangeProcessingError {
-                    message: "attempting to insert a record twice".to_string(),
+                    message: "attempting to insert a record after an update".to_string(),
                     parsed_line: Some(new_change.clone()),
                     source_line: None,
                 }),
@@ -1550,7 +1561,55 @@ mod tests {
 
     #[test]
     #[should_panic]
-    fn dml_change_insert_insert_panics() {
+    fn dml_change_insert_insert_panics_when_they_are_conflicting() {
+        let table_name = TableName::new("public.foobar".to_string());
+        let id_column_info = ColumnInfo::new("id", "bigint");
+        let text_column_info = ColumnInfo::new("foobar", "text");
+
+        let changed_columns_1 = vec![
+            Column::ChangedColumn {
+                column_info: id_column_info.clone(),
+                value: Some(ColumnValue::Integer(1)),
+            },
+            Column::ChangedColumn {
+                column_info: text_column_info.clone(),
+                value: Some(ColumnValue::Text("1".to_string())),
+            },
+        ];
+        let changed_columns_2 = vec![
+            Column::ChangedColumn {
+                column_info: id_column_info.clone(),
+                value: Some(ColumnValue::Integer(1)),
+            },
+            Column::ChangedColumn {
+                column_info: text_column_info.clone(),
+                value: Some(ColumnValue::Text("2".to_string())),
+            },
+        ];
+        let change_1 = ParsedLine::ChangedData {
+            kind: ChangeKind::Insert,
+            table_name: table_name.clone(),
+            columns: changed_columns_1,
+        };
+        let change_2 = ParsedLine::ChangedData {
+            kind: ChangeKind::Insert,
+            table_name: table_name.clone(),
+            columns: changed_columns_2,
+        };
+        let mut change_processing =
+            ChangeProcessing::new(TargetsTablesColumnNames::from_map(HashMap::new()));
+
+        change_processing
+            .add_change(change_1.clone())
+            .expect("failed processing");
+
+        change_processing
+            .add_change(change_2.clone())
+            .expect("failed processing");
+    }
+
+    #[test]
+    fn dml_change_insert_insert_ignores_second_insert_when_they_are_equal() {
         let table_name = TableName::new("public.foobar".to_string());
         let id_column_info = ColumnInfo::new("id", "bigint");
         let text_column_info = ColumnInfo::new("foobar", "text");
