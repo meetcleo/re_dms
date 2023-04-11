@@ -607,29 +607,11 @@ impl DatabaseWriter {
         schema_name: &str,
         table_name: &str,
     ) -> String {
-        match kind {
-            ChangeKind::Insert => {
-                format!(
-                    "create temp table \"{}\" ({}) DISTSTYLE ALL",
-                    &staging_name,
-                    self.values_description_for_table(columns)
-                )
-            }
-            ChangeKind::Delete => {
-                format!(
-                    "create temp table \"{}\" ({}) DISTSTYLE ALL",
-                    &staging_name,
-                    self.values_description_for_table(columns)
-                )
-            }
-            ChangeKind::Update => {
-                format!(
-                    "create temp table \"{}\" ({}) DISTSTYLE ALL",
-                    &staging_name,
-                    self.values_description_for_table(columns)
-                )
-            }
-        }
+        format!(
+            "create temp table \"{}\" ({}) DISTSTYLE ALL",
+            &staging_name,
+            self.values_description_for_table(columns)
+        )
     }
 
     fn values_description_for_table(&self, columns: &Vec<ColumnInfo>) -> String {
