@@ -320,7 +320,6 @@ impl DatabaseWriter {
             &staging_name,
             &schema_name,
             &just_table_name,
-            &staging_name
         );
 
         let access_key_id =
