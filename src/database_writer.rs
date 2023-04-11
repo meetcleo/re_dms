@@ -610,20 +610,21 @@ impl DatabaseWriter {
         match kind {
             ChangeKind::Insert => {
                 format!(
-                    "create temp table \"{}\" (like \"{}\".\"{}\")",
-                    &staging_name, &schema_name, &table_name
+                    "create temp table \"{}\" ({}) DISTSTYLE ALL",
+                    &staging_name,
+                    self.values_description_for_table(columns)
                 )
             }
             ChangeKind::Delete => {
                 format!(
-                    "create temp table \"{}\" ({})",
+                    "create temp table \"{}\" ({}) DISTSTYLE ALL",
                     &staging_name,
                     self.values_description_for_table(columns)
                 )
             }
             ChangeKind::Update => {
                 format!(
-                    "create temp table \"{}\" ({})",
+                    "create temp table \"{}\" ({}) DISTSTYLE ALL",
                     &staging_name,
                     self.values_description_for_table(columns)
                 )
