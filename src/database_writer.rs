@@ -315,7 +315,11 @@ impl DatabaseWriter {
             return Ok(());
         }
         let create_staging_table = self.query_for_create_staging_table(
+            kind,
             &s3_file.columns,
+            &staging_name,
+            &schema_name,
+            &just_table_name,
             &staging_name
         );
 
@@ -598,8 +602,11 @@ impl DatabaseWriter {
 
     fn query_for_create_staging_table(
         &self,
+        kind: &ChangeKind,
         columns: &Vec<ColumnInfo>,
         staging_name: &str,
+        schema_name: &str,
+        table_name: &str,
     ) -> String {
         match kind {
             ChangeKind::Insert => {
