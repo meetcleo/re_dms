@@ -1,12 +1,12 @@
 use deadpool_postgres::{Client, ManagerConfig, Pool, RecyclingMethod};
+use dogstatsd::{Client as StatsdClient, Options as StatsdOptions};
 use openssl::ssl::{SslConnector, SslMethod};
 use postgres_openssl::MakeTlsConnector;
-use tokio_postgres::{CancelToken, Row};
-use tokio_postgres::error::Error as TokioPostgresError;
-use tokio::time::timeout;
-use std::time::{Duration, Instant};
 use serde::Deserialize;
-use dogstatsd::{Client as StatsdClient, Options as StatsdOptions};
+use std::time::{Duration, Instant};
+use tokio::time::timeout;
+use tokio_postgres::error::Error as TokioPostgresError;
+use tokio_postgres::{CancelToken, Row};
 // use config;
 use std::env;
 
@@ -24,13 +24,12 @@ pub const DEFAULT_NUMERIC_SCALE: i32 = 8;
 
 use lazy_static::lazy_static;
 lazy_static! {
-    static ref CLIENT_SIDE_DB_QUERY_TIMEOUT_IN_SECONDS: Duration =
-        Duration::from_secs(
-            std::env::var("CLIENT_SIDE_DB_QUERY_TIMEOUT_IN_SECONDS")
-                .expect("CLIENT_SIDE_DB_QUERY_TIMEOUT_IN_SECONDS env is not set")
-                .parse::<u64>()
-                .expect("CLIENT_SIDE_DB_QUERY_TIMEOUT_IN_SECONDS is not a valid integer")
-        );
+    static ref CLIENT_SIDE_DB_QUERY_TIMEOUT_IN_SECONDS: Duration = Duration::from_secs(
+        std::env::var("CLIENT_SIDE_DB_QUERY_TIMEOUT_IN_SECONDS")
+            .expect("CLIENT_SIDE_DB_QUERY_TIMEOUT_IN_SECONDS env is not set")
+            .parse::<u64>()
+            .expect("CLIENT_SIDE_DB_QUERY_TIMEOUT_IN_SECONDS is not a valid integer")
+    );
     static ref STATSD_IP_AND_PORT: String =
         std::env::var("STATSD_IP_AND_PORT").unwrap_or("127.0.0.1:8125".to_string());
 }
@@ -48,7 +47,7 @@ struct Config {
 pub struct QueryExecution {
     cancel_token: CancelToken,
     query: String,
-    statsd : StatsdClient
+    statsd: StatsdClient,
 }
 
 #[derive(Debug)]
@@ -72,34 +71,41 @@ impl QueryExecution {
             // the cancel token is related to the connection owned by this client (it will cancel any query running on this connection when `cancel_query` is invoked)
             cancel_token: client.cancel_token(),
             query: query,
-            statsd: StatsdClient::new(StatsdOptions::new("127.0.0.1:0", &STATSD_IP_AND_PORT.to_owned(), "re_dms")).unwrap()
+            statsd: StatsdClient::new(StatsdOptions::new(
+                "127.0.0.1:0",
+                &STATSD_IP_AND_PORT.to_owned(),
+                "re_dms",
+            ))
+            .unwrap(),
         }
     }
 
     pub async fn cancel(&self) -> Result<(), TokioPostgresError> {
-        logger_info!(
-            None,
-            None,
-            &format!("Cancelling query:{}", self.query)
-        );
+        logger_info!(None, None, &format!("Cancelling query:{}", self.query));
         let builder = SslConnector::builder(SslMethod::tls())
             .expect("Unable to build ssl connector. Are ssl libraries configured correctly?");
         let connector = MakeTlsConnector::new(builder.build());
         self.cancel_token.cancel_query(connector).await
     }
 
-    pub async fn execute_with_timeout(&self, client: &Client, metric_name: &str, metric_tags: &[String]) -> Result<(), DatabaseWriterError> {
+    pub async fn execute_with_timeout(
+        &self,
+        client: &Client,
+        metric_name: &str,
+        metric_tags: &[String],
+    ) -> Result<(), DatabaseWriterError> {
         let query_execution = client.execute(self.query.as_str(), &[]);
         let start = Instant::now();
-        let timeout_result = timeout(*CLIENT_SIDE_DB_QUERY_TIMEOUT_IN_SECONDS, query_execution).await;
+        let timeout_result =
+            timeout(*CLIENT_SIDE_DB_QUERY_TIMEOUT_IN_SECONDS, query_execution).await;
         let duration = start.elapsed();
-        self.statsd.timing(metric_name, duration.as_millis() as i64, metric_tags).unwrap();
+        self.statsd
+            .timing(metric_name, duration.as_millis() as i64, metric_tags)
+            .unwrap();
         match timeout_result {
-            Ok(query_result) => {
-                match query_result {
-                    Ok(_) => Ok(()),
-                    Err(err) => Err(err).map_err(DatabaseWriterError::TokioError)
-                }
+            Ok(query_result) => match query_result {
+                Ok(_) => Ok(()),
+                Err(err) => Err(err).map_err(DatabaseWriterError::TokioError),
             },
             Err(err) => {
                 logger_error!(
@@ -110,17 +116,16 @@ impl QueryExecution {
                 let cancel_result = self.cancel().await;
                 match cancel_result {
                     Ok(_) => {
-                        logger_info!(
-                            None,
-                            None,
-                            &format!("Cancelled query:{}", self.query)
-                        );
-                    },
+                        logger_info!(None, None, &format!("Cancelled query:{}", self.query));
+                    }
                     Err(cancel_err) => {
                         logger_warning!(
                             None,
                             None,
-                            &format!("Failed to cancel query:{}, query: {}", cancel_err, self.query)
+                            &format!(
+                                "Failed to cancel query:{}, query: {}",
+                                cancel_err, self.query
+                            )
                         );
                     }
                 }
@@ -129,18 +134,24 @@ impl QueryExecution {
         }
     }
 
-    pub async fn query_one_with_timeout(&self, client: &Client, metric_name: &str, metric_tags: &[String], params: &[&(dyn tokio_postgres::types::ToSql + std::marker::Sync)]) -> Result<Row, DatabaseWriterError> {
+    pub async fn query_one_with_timeout(
+        &self,
+        client: &Client,
+        metric_name: &str,
+        metric_tags: &[String],
+        params: &[&(dyn tokio_postgres::types::ToSql + std::marker::Sync)],
+    ) -> Result<Row, DatabaseWriterError> {
         let query_one = client.query_one(self.query.as_str(), params);
         let start = Instant::now();
         let timeout_result = timeout(*CLIENT_SIDE_DB_QUERY_TIMEOUT_IN_SECONDS, query_one).await;
         let duration = start.elapsed();
-        self.statsd.timing(metric_name, duration.as_millis() as i64, metric_tags).unwrap();
+        self.statsd
+            .timing(metric_name, duration.as_millis() as i64, metric_tags)
+            .unwrap();
         match timeout_result {
-            Ok(query_result) => {
-                match query_result {
-                    Ok(row) => Ok(row),
-                    Err(err) => Err(err).map_err(DatabaseWriterError::TokioError)
-                }
+            Ok(query_result) => match query_result {
+                Ok(row) => Ok(row),
+                Err(err) => Err(err).map_err(DatabaseWriterError::TokioError),
             },
             Err(err) => {
                 logger_error!(
@@ -151,17 +162,16 @@ impl QueryExecution {
                 let cancel_result = self.cancel().await;
                 match cancel_result {
                     Ok(_) => {
-                        logger_info!(
-                            None,
-                            None,
-                            &format!("Cancelled query:{}", self.query)
-                        );
-                    },
+                        logger_info!(None, None, &format!("Cancelled query:{}", self.query));
+                    }
                     Err(cancel_err) => {
                         logger_warning!(
                             None,
                             None,
-                            &format!("Failed to cancel query:{}, query: {}", cancel_err, self.query)
+                            &format!(
+                                "Failed to cancel query:{}, query: {}",
+                                cancel_err, self.query
+                            )
                         );
                     }
                 }
@@ -352,6 +362,17 @@ impl DatabaseWriter {
 
         self.execute_single_query(
             &transaction,
+            drop_staging_table.as_str(),
+            "ensure_we_have_dropped_staging_table",
+            &kind.to_string(),
+            &remote_filepath,
+            table_name.clone(),
+            wal_file_number,
+        )
+        .await?;
+
+        self.execute_single_query(
+            &transaction,
             create_staging_table.as_str(),
             "create_staging_table",
             &kind.to_string(),
@@ -466,8 +487,13 @@ impl DatabaseWriter {
         );
 
         let query_execution = QueryExecution::new(client, query_to_execute.to_string());
-        let metric_tags = &[format!("change_kind:{}", change_kind), format!("table_name:{}", table_name)];
-        let result = query_execution.execute_with_timeout(client, action_name, metric_tags).await;
+        let metric_tags = &[
+            format!("change_kind:{}", change_kind),
+            format!("table_name:{}", table_name),
+        ];
+        let result = query_execution
+            .execute_with_timeout(client, action_name, metric_tags)
+            .await;
         match result {
             Ok(..) => {
                 logger_info!(
@@ -489,9 +515,12 @@ impl DatabaseWriter {
     }
 
     fn table_exists_in_cache(&self, table_name_with_schema: &TableName) -> bool {
-        match self.targets_tables_column_names.get_by_name(table_name_with_schema) {
+        match self
+            .targets_tables_column_names
+            .get_by_name(table_name_with_schema)
+        {
             Some(..) => true,
-            None => false
+            None => false,
         }
     }
 
@@ -532,7 +561,14 @@ impl DatabaseWriter {
 
         let query_execution = QueryExecution::new(database_client, query_to_execute.to_string());
         let metric_tags = &[format!("table_name:{}", table_name)];
-        let result = query_execution.query_one_with_timeout(database_client, "existence_check_for_table", metric_tags, &[&schema_name, &just_table_name]).await?;
+        let result = query_execution
+            .query_one_with_timeout(
+                database_client,
+                "existence_check_for_table",
+                metric_tags,
+                &[&schema_name, &just_table_name],
+            )
+            .await?;
         let table_exists: bool = result.get(0);
         if !table_exists {
             // check this isn't a delete command, because if it is,
@@ -646,7 +682,11 @@ impl DatabaseWriter {
             "\"{column_name}\" {column_type}{constraints}",
             column_name = column_info.column_name().replace("\"", ""),
             column_type = self.column_type_mapping(column_info.column_type()).as_str(),
-            constraints = if column_info.is_id_column() { " sortkey primary key not null" } else { "" }
+            constraints = if column_info.is_id_column() {
+                " sortkey primary key not null"
+            } else {
+                ""
+            }
         )
     }
 
