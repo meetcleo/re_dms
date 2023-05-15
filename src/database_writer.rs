@@ -646,7 +646,7 @@ impl DatabaseWriter {
         match kind {
             ChangeKind::Insert => {
                 format!(
-                    "create temp table \"{}\" (like \"{}\".\"{}\")",
+                    "create temp table \"{}\" DISTSTYLE ALL sortkey(id) as (SELECT * FROM \"{}\".\"{}\" where false)",
                     &staging_name, &schema_name, &table_name
                 )
             }
