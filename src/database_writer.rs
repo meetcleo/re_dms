@@ -610,7 +610,7 @@ impl DatabaseWriter {
         match kind {
             ChangeKind::Insert => {
                 format!(
-                    "create temp table \"{}\" DISTSTYLE ALL as (SELECT * FROM \"{}\".\"{}\" where id is NULL)",
+                    "create temp table \"{}\" DISTSTYLE ALL as (SELECT * FROM \"{}\".\"{}\" where false)",
                     &staging_name, &schema_name, &table_name
                 )
             }
