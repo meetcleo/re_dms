@@ -334,7 +334,7 @@ impl DatabaseWriter {
         let column_list = self.column_name_list(&s3_file.columns);
         // no gzip
         let copy_to_staging_table = format!(
-            "copy \"{staging_name}\" ({column_list}) from '{remote_filepath}' CREDENTIALS '{credentials_string}' GZIP CSV TRUNCATECOLUMNS IGNOREHEADER 1 DELIMITER ',' NULL as '\\0' compupdate off statupdate off",
+            "copy \"{staging_name}\" ({column_list}) from '{remote_filepath}' CREDENTIALS '{credentials_string}' GZIP CSV TRUNCATECOLUMNS IGNOREHEADER 1 DELIMITER ',' NULL as '\\0' compupdate off",
             staging_name = &staging_name,
             column_list = &column_list,
             remote_filepath = &remote_filepath,
