@@ -351,7 +351,7 @@ impl DatabaseWriter {
             credentials_string = &credentials_string,
         );
 
-        let data_migration_query_string = self.query_for_change_kind(
+        let data_migration_queries = self.queries_for_change_kind(
             kind,
             staging_name.as_ref(),
             just_table_name.as_ref(),
@@ -423,16 +423,21 @@ impl DatabaseWriter {
                 }
             }
         }
-        self.execute_single_query(
-            &transaction,
-            data_migration_query_string.as_str(),
-            "apply_changes_to_real_table",
-            &kind.to_string(),
-            &remote_filepath,
-            table_name.clone(),
-            wal_file_number,
-        )
-        .await?;
+
+        let mut query_number = 1;
+        for data_migration_query_string in data_migration_queries {
+            self.execute_single_query(
+                &transaction,
+                data_migration_query_string.as_str(),
+                &format!("apply_changes_to_real_table: {}", query_number),
+                &kind.to_string(),
+                &remote_filepath,
+                table_name.clone(),
+                wal_file_number,
+            )
+            .await?;
+            query_number += 1;
+        }
 
         self.execute_single_query(
             &transaction,
@@ -698,37 +703,42 @@ impl DatabaseWriter {
             .join(",")
     }
 
-    fn query_for_change_kind(
+    fn queries_for_change_kind(
         &self,
         kind: &ChangeKind,
         staging_name: &str,
         table_name: &str,
         schema_name: &str,
         columns: &Vec<ColumnInfo>,
-    ) -> String {
+    ) -> Vec<String> {
         match kind {
             ChangeKind::Insert => {
-                format!(
-                    "insert into \"{schema_name}\".\"{table_name}\"
-                    select s.* from \"{staging_name}\" s left join \"{schema_name}\".\"{table_name}\" t
-                    on s.id = t.id
-                    where t.id is NULL",
+                // we're doing this to avoid any casting of the tables across the cluster, and this is likely to mitigate a failing in the redshift query planner, because it's needed even when we've diststyle all-ed our staging table
+                vec![format!(
+                    "delete from \"{staging_name}\" where id in (select id from \"{schema_name}\".\"{table_name}\" where id in (select id from \"{staging_name}\"))",
                     schema_name=&schema_name,
                     table_name=&table_name,
                     staging_name=&staging_name
-                )
+                ),
+                format!(
+                    "insert into \"{schema_name}\".\"{table_name}\"
+                    select s.* from \"{staging_name}\" s",
+                    schema_name=&schema_name,
+                    table_name=&table_name,
+                    staging_name=&staging_name
+                )]
             }
             ChangeKind::Delete => {
-                format!(
+                vec![format!(
                     "delete from \"{schema_name}\".\"{table_name}\" where id in (select id from \"{staging_name}\")",
                     schema_name=&schema_name,
                     table_name=&table_name,
                     staging_name=&staging_name
-                )
+                )]
             }
             ChangeKind::Update => {
                 // Don't update the id column
-                format!(
+                vec![format!(
                     "
                     update \"{schema_name}\".\"{table_name}\" t
                     set {columns_to_update} from \"{staging_name}\" s
@@ -744,7 +754,7 @@ impl DatabaseWriter {
                         .collect::<Vec<_>>()
                         .join(","),
                     staging_name = &staging_name
-                )
+                )]
             }
         }
     }
