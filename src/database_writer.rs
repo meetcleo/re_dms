@@ -429,7 +429,7 @@ impl DatabaseWriter {
             self.execute_single_query(
                 &transaction,
                 data_migration_query_string.as_str(),
-                &format!("apply_changes_to_real_table_{}", query_number),
+                &format!("apply_changes_to_real_table: {}", query_number),
                 &kind.to_string(),
                 &remote_filepath,
                 table_name.clone(),
