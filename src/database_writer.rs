@@ -710,12 +710,13 @@ impl DatabaseWriter {
             ChangeKind::Insert => {
                 format!(
                     "insert into \"{schema_name}\".\"{table_name}\"
-                    select s.* from \"{staging_name}\" s left join \"{schema_name}\".\"{table_name}\" t
-                    on s.id = t.id
-                    where t.id is NULL",
-                    schema_name=&schema_name,
-                    table_name=&table_name,
-                    staging_name=&staging_name
+                    select s.* from \"{staging_name}\" s
+                    where not exists (
+                        select 1 from \"{schema_name}\".\"{table_name}\" t
+                        where s.id = t.id)",
+                    schema_name = &schema_name,
+                    table_name = &table_name,
+                    staging_name = &staging_name
                 )
             }
             ChangeKind::Delete => {
