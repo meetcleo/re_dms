@@ -130,8 +130,20 @@ impl ChangeSet {
                     }) = &self.changes
                     {
                         if old_columns == &columns {
-                            return self.untoasted_changes(columns, table_name, ChangeKind::Insert)
+                            logger_debug!(
+                                None,
+                                Some(&table_name),
+                                &format!("attempting to insert a record twice and the columns matched:{:?}", cloned_new_change)
+                            );
+                        } else {
+                            logger_info!(
+                                None,
+                                Some(&table_name),
+                                &format!("attempting to insert a record twice and the columns didn't match:{:?}", cloned_new_change)
+                            );
                         }
+
+                        return self.untoasted_changes(columns, table_name, ChangeKind::Insert);
                     }
                     Err(ChangeProcessingError {
                         message: "attempting to insert a record twice".to_string(),
@@ -1085,7 +1097,10 @@ mod tests {
         let mut tables_columns_names_map = HashMap::new();
         tables_columns_names_map.insert(
             table_name.clone(),
-            vec![id_column_info.clone().name, old_column_info.clone().name].iter().cloned().collect(),
+            vec![id_column_info.clone().name, old_column_info.clone().name]
+                .iter()
+                .cloned()
+                .collect(),
         );
         let mut change_processing =
             ChangeProcessing::new(TargetsTablesColumnNames::from_map(tables_columns_names_map));
@@ -1560,8 +1575,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
-    fn dml_change_insert_insert_panics_when_they_are_conflicting() {
+    fn dml_change_insert_insert_uses_second_insert_when_they_are_conflicting() {
         let table_name = TableName::new("public.foobar".to_string());
         let id_column_info = ColumnInfo::new("id", "bigint");
         let text_column_info = ColumnInfo::new("foobar", "text");
