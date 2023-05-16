@@ -197,6 +197,7 @@ impl ChangeSet {
     }
 
     fn handle_delete_subsequent(&self, new_change: ParsedLine) -> Result<Option<ParsedLine>> {
+        let cloned_new_change: ParsedLine = new_change.clone();
         if let ParsedLine::ChangedData {
             kind,
             columns,
@@ -214,11 +215,18 @@ impl ChangeSet {
                     parsed_line: None,
                     source_line: None,
                 }),
-                ChangeKind::Delete => Err(ChangeProcessingError {
-                    message: "attempting to delete a record twice".to_string(),
-                    parsed_line: None,
-                    source_line: None,
-                }),
+                ChangeKind::Delete => {
+                    logger_info!(
+                        None,
+                        Some(&table_name),
+                        &format!(
+                            "attempting to delete a record twice:{:?}",
+                            cloned_new_change
+                        )
+                    );
+
+                    self.untoasted_changes(columns, table_name, ChangeKind::Delete)
+                }
             }
         } else {
             Err(ChangeProcessingError {
@@ -1941,8 +1949,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
-    fn dml_change_delete_delete_panics() {
+    fn dml_change_delete_delete_works() {
         let table_name = TableName::new("public.foobar".to_string());
         let id_column_info = ColumnInfo::new("id", "bigint");
 
