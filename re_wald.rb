@@ -12,7 +12,7 @@ puts "Writing new .wal files to #{OUTPUT_DIR} with a batch size of #{MAX_FILES_T
 wal_file_number = 1
 file_name_buffer = []
 
-Dir.glob('*.wal') do |file|
+Dir.glob('*.wal').sort.each do |file|
   puts "buf += #{file}"
   file_name_buffer << file
   next if file_name_buffer.length < MAX_FILES_TO_COMBINE
