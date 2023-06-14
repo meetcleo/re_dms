@@ -130,8 +130,20 @@ impl ChangeSet {
                     }) = &self.changes
                     {
                         if old_columns == &columns {
-                            return self.untoasted_changes(columns, table_name, ChangeKind::Insert)
+                            logger_debug!(
+                                None,
+                                Some(&table_name),
+                                &format!("attempting to insert a record twice and the columns matched:{:?}", cloned_new_change)
+                            );
+                        } else {
+                            logger_info!(
+                                None,
+                                Some(&table_name),
+                                &format!("attempting to insert a record twice and the columns didn't match:{:?}", cloned_new_change)
+                            );
                         }
+
+                        return self.untoasted_changes(columns, table_name, ChangeKind::Insert);
                     }
                     Err(ChangeProcessingError {
                         message: "attempting to insert a record twice".to_string(),
@@ -185,6 +197,7 @@ impl ChangeSet {
     }
 
     fn handle_delete_subsequent(&self, new_change: ParsedLine) -> Result<Option<ParsedLine>> {
+        let cloned_new_change: ParsedLine = new_change.clone();
         if let ParsedLine::ChangedData {
             kind,
             columns,
@@ -202,11 +215,18 @@ impl ChangeSet {
                     parsed_line: None,
                     source_line: None,
                 }),
-                ChangeKind::Delete => Err(ChangeProcessingError {
-                    message: "attempting to delete a record twice".to_string(),
-                    parsed_line: None,
-                    source_line: None,
-                }),
+                ChangeKind::Delete => {
+                    logger_info!(
+                        None,
+                        Some(&table_name),
+                        &format!(
+                            "attempting to delete a record twice:{:?}",
+                            cloned_new_change
+                        )
+                    );
+
+                    self.untoasted_changes(columns, table_name, ChangeKind::Delete)
+                }
             }
         } else {
             Err(ChangeProcessingError {
@@ -1085,7 +1105,10 @@ mod tests {
         let mut tables_columns_names_map = HashMap::new();
         tables_columns_names_map.insert(
             table_name.clone(),
-            vec![id_column_info.clone().name, old_column_info.clone().name].iter().cloned().collect(),
+            vec![id_column_info.clone().name, old_column_info.clone().name]
+                .iter()
+                .cloned()
+                .collect(),
         );
         let mut change_processing =
             ChangeProcessing::new(TargetsTablesColumnNames::from_map(tables_columns_names_map));
@@ -1560,8 +1583,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
-    fn dml_change_insert_insert_panics_when_they_are_conflicting() {
+    fn dml_change_insert_insert_uses_second_insert_when_they_are_conflicting() {
         let table_name = TableName::new("public.foobar".to_string());
         let id_column_info = ColumnInfo::new("id", "bigint");
         let text_column_info = ColumnInfo::new("foobar", "text");
@@ -1927,8 +1949,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
-    fn dml_change_delete_delete_panics() {
+    fn dml_change_delete_delete_works() {
         let table_name = TableName::new("public.foobar".to_string());
         let id_column_info = ColumnInfo::new("id", "bigint");
 
