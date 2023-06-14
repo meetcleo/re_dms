@@ -6,8 +6,8 @@ use lazy_static::lazy_static;
 use num_bigint::BigInt;
 use num_bigint::Sign;
 use std::collections::HashSet;
-use std::{error::Error, fmt};
 use std::hash::{Hash, Hasher};
+use std::{error::Error, fmt};
 
 use std::env;
 
@@ -352,6 +352,7 @@ pub enum ParsedLine {
     },
     ContinueParse, // this is to signify that we're halfway through parsing a change
     PgRcvlogicalMsg(String),
+    Truncate,
 }
 
 impl ParsedLine {
@@ -574,6 +575,7 @@ impl Parser {
             x if { self.parse_state.currently_parsing.is_some() } => self.continue_parse(x),
             x if { x.starts_with("BEGIN") } => self.parse_begin(x),
             x if { x.starts_with("COMMIT") } => self.parse_commit(x),
+            x if { x.ends_with("TRUNCATE: (no-flags)") } => self.parse_truncate_msg(x),
             x if { x.starts_with("table") } => self.parse_change(x),
             x if { x.starts_with("pg_recvlogical") } => self.parse_pg_rcvlogical_msg(x),
             x => Err(ParsingError {
@@ -683,6 +685,16 @@ impl Parser {
             &format!("parsed_pg_rcvlogical_message:{}", rest_of_string)
         );
         Ok(ParsedLine::PgRcvlogicalMsg(rest_of_string.to_string()))
+    }
+
+    fn parse_truncate_msg(&self, string: &str) -> Result<ParsedLine> {
+        // "table public.transaction_enrichment_merchant_matching_logs: TRUNCATE: (no-flags)"
+        logger_info!(
+            self.parse_state.wal_file_number,
+            None,
+            &format!("parsed_truncate:{}", string)
+        );
+        Ok(ParsedLine::Truncate)
     }
 
     fn column_is_incomplete(&self, columns: &Vec<Column>) -> bool {
@@ -1096,8 +1108,14 @@ mod tests {
 
     #[test]
     fn column_info_compares_on_name() {
-        assert!(ColumnInfo::new("baz_array".to_string(), "array".to_string()) == ColumnInfo::new("baz_array".to_string(), "integer".to_string()));
-        assert!(ColumnInfo::new("baz_array".to_string(), "array".to_string()) != ColumnInfo::new("not_baz_array".to_string(), "array".to_string()));
+        assert!(
+            ColumnInfo::new("baz_array".to_string(), "array".to_string())
+                == ColumnInfo::new("baz_array".to_string(), "integer".to_string())
+        );
+        assert!(
+            ColumnInfo::new("baz_array".to_string(), "array".to_string())
+                != ColumnInfo::new("not_baz_array".to_string(), "array".to_string())
+        );
     }
 
     #[test]
@@ -1382,6 +1400,9 @@ mod tests {
                 table_name: ArcIntern::new("public.smart_insight_admin_conditions".to_string()),
                 kind: ChangeKind::Delete },
             ParsedLine::Commit(4220773599),
+            ParsedLine::Begin(4220773600),
+            ParsedLine::Truncate,
+            ParsedLine::Commit(4220773600),
             ]));
     }
 

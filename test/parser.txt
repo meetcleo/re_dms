@@ -19,3 +19,6 @@ COMMIT 4220773511
 BEGIN 4220773599
 table public.smart_insight_admin_conditions: DELETE: (no-tuple-data)
 COMMIT 4220773599
+BEGIN 4220773600
+table public.transaction_enrichment_merchant_matching_logs: TRUNCATE: (no-flags)
+COMMIT 4220773600
