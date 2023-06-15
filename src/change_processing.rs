@@ -668,9 +668,10 @@ impl ChangeProcessing {
         parsed_line: ParsedLine,
     ) -> Result<Option<Vec<ChangeProcessingResult>>> {
         match parsed_line {
-            ParsedLine::Begin(_) | ParsedLine::Commit(_) | ParsedLine::PgRcvlogicalMsg(_) => {
-                Ok(None)
-            }
+            ParsedLine::Begin(_)
+            | ParsedLine::Commit(_)
+            | ParsedLine::PgRcvlogicalMsg(_)
+            | ParsedLine::Truncate => Ok(None),
             ParsedLine::ContinueParse => Ok(None), // need to be exhaustive
             ParsedLine::ChangedData { .. } => {
                 // map here maps over the option
