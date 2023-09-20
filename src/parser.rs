@@ -921,7 +921,6 @@ impl Parser {
             let schema_name: String = table_name
                 .original_schema_and_table_name()
                 .0
-                .clone()
                 .to_string();
             if TABLE_BLACKLIST.contains(table_name.as_ref()) {
                 logger_debug!(
