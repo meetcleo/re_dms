@@ -114,7 +114,7 @@ impl DatabaseWriterThreads {
                 // so we can register an error if we fail
                 let mut wal_file = uploader_stage_result.wal_file();
                 last_table_name = Some(table_name);
-                let backoff_result = (|| async {
+                let backoff_result = retry(default_exponential_backoff(), || async {
                     match uploader_stage_result {
                         UploaderStageResult::S3File(cleo_s3_file) => {
                             // dereference to get the struct, then clone,
@@ -137,9 +137,7 @@ impl DatabaseWriterThreads {
                         }
                     };
                     Ok(())
-                })
-                .retry(default_exponential_backoff())
-                .await;
+                }).await;
                 match backoff_result {
                     Ok(..) => {
                         // need to clean up our wal file

@@ -8,7 +8,7 @@ edition = "2018"
 [features]
 
 # Feature names must not conflict with other package names in the manifest. This is because they are opted into via features = [...], which only has a single namespace.
-with_rollbar = ["rollbar", "backtrace"]
+with_sentry = ["sentry"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -37,8 +37,8 @@ num-bigint = "0.3.3" # same version as used in bigdecimal above
 dotenv = "0.15.0"
 
 # s3
-rusoto_core = "0.45.0"
-rusoto_s3 = "0.45.0"
+rusoto_core = "0.48.0"
+rusoto_s3 = "0.48.0"
 # rusoto uses tokio 0.2, try it for now
 # if we need another, look into
 # https://github.com/tokio-rs/tokio-compat
@@ -50,25 +50,23 @@ clap = "2.33.3"
 flate2 = "1.0.19"
 
 # async
-# highest tokio version that rusoto supports
-# TODO: think about tokio_compat / or switch to
-tokio = { version = "0.2.9", features = ["full"] }
+tokio = { version = "1.35.1", features = ["full"] }
 # gotta stream those files to s3
 # let's get async up in here
-tokio-util = {version = "0.3.1", features = ["codec"] }
-futures = "0.3.1"
+tokio-util = {version = "0.7.10", features = ["codec"] }
+futures = "0.3.23"
 
 # backoff
-backoff = {version = "0.2.1", features = ["tokio"]}
+backoff = {version = "0.4.0", features = ["tokio"]}
 
 # string internment
 internment = "0.4.1"
 
 # db connections
 # these are specific versions chosen to work with the tokio version above
-deadpool-postgres = { version = "0.5.6" }
-tokio-postgres = { version = "0.5.1", features = ["with-uuid-0_8"] }
-postgres-openssl = "0.3.0"
+deadpool-postgres = { version = "0.12.1", features = ["serde"] }
+tokio-postgres = { version = "0.7.10", features = ["with-uuid-0_8"] }
+postgres-openssl = "0.5.0"
 openssl = "0.10"
 
 # serialisation
@@ -85,8 +83,7 @@ signal-hook = "0.3.4"
 # recording query durations
 dogstatsd = "0.6.2"
 
-rollbar = { version = "0.7.0", optional = true }
-backtrace = { version = "0.3.56", optional = true }
+sentry = { version = "0.32.1", optional = true }
 
 [dev_dependencies]
 mock_instant = { version = "0.2", features = ["sync"] }
