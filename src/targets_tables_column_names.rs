@@ -1,4 +1,4 @@
-use deadpool_postgres::{Client, ManagerConfig, Pool, RecyclingMethod};
+use deadpool_postgres::{Client, ManagerConfig, Pool, RecyclingMethod, Runtime};
 use lazy_static::lazy_static;
 use openssl::ssl::{SslConnector, SslMethod};
 use postgres_openssl::MakeTlsConnector;
@@ -122,7 +122,7 @@ impl TargetsTablesColumnNames {
             .expect("Unable to build ssl connector. Are ssl libraries configured correctly?");
         let connector = MakeTlsConnector::new(builder.build());
         cfg.pg
-            .create_pool(connector)
+            .create_pool(Some(Runtime::Tokio1), connector)
             .expect("Unable to build database connection pool")
     }
 

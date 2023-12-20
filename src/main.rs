@@ -11,10 +11,6 @@ use std::io::{self, BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
-#[cfg(feature = "with_rollbar")]
-#[macro_use]
-extern crate rollbar;
-
 use dotenv::dotenv;
 
 use tokio::sync::mpsc;
@@ -35,6 +31,11 @@ mod wal_file_manager;
 use file_uploader_threads::DEFAULT_CHANNEL_SIZE;
 use shutdown_handler::{RuntimeType, ShutdownHandler};
 use wal_file_manager::WalFile;
+#[cfg(feature = "with_sentry")]
+use crate::logger::init_sentry;
+
+#[cfg(feature = "with_sentry")]
+extern crate sentry;
 
 lazy_static! {
     static ref OUTPUT_WAL_DIRECTORY: String =
@@ -96,14 +97,23 @@ impl PreprocessingManager {
     }
 }
 
-#[tokio::main]
-async fn main() {
+fn main() {
+    #[cfg(feature = "with_sentry")]
+    init_sentry();
+
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(async {
+            main_impl().await
+        });
+}
+
+async fn main_impl() {
     ShutdownHandler::register_signal_handlers();
     dotenv().ok();
     env_logger::init();
-
-    #[cfg(feature = "with_rollbar")]
-    logger::register_panic_handler();
 
     let mut targets_tables_column_names =
         targets_tables_column_names::TargetsTablesColumnNames::new();
@@ -314,9 +324,6 @@ async fn main() {
     wal_file_manager.clean_up_final_wal_file();
 
     ShutdownHandler::log_shutdown_status();
-
-    #[cfg(feature = "with_rollbar")]
-    logger::block_on_last_rollbar_thread_handle();
 
     panic_if_messy_shutdown();
 }
