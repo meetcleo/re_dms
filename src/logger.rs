@@ -15,8 +15,13 @@ lazy_static! {
 }
 
 #[cfg(feature = "with_sentry")]
-pub fn init_sentry() {
-    let _guard = sentry::init(&**SENTRY_DSN);
+pub fn init_sentry() -> sentry::ClientInitGuard {
+    let guard = sentry::init((&**SENTRY_DSN, sentry::ClientOptions{
+        release: sentry::release_name!(),
+        attach_stacktrace: true,
+        ..Default::default()
+    }));
+    return guard;
 }
 
 pub struct Logger {}

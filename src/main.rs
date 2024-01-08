@@ -99,7 +99,7 @@ impl PreprocessingManager {
 
 fn main() {
     #[cfg(feature = "with_sentry")]
-    init_sentry();
+    let _guard = init_sentry();
 
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
