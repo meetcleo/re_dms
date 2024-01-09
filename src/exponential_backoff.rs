@@ -1,6 +1,6 @@
 // re-export for simplicity
 // first part provides the `.retry` function, second part provides the config struct
-pub use backoff::{future::FutureOperation as _, ExponentialBackoff};
+pub use backoff::{future::retry, ExponentialBackoff};
 
 use lazy_static::lazy_static;
 lazy_static! {

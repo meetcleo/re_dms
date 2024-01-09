@@ -186,7 +186,7 @@ impl FileUploaderThreads {
     pub async fn spawn_table_thread(
         mut receiver: mpsc::Receiver<change_processing::ChangeProcessingResult>,
         uploader: Arc<FileUploader>,
-        mut result_sender: mpsc::Sender<UploaderStageResult>,
+        result_sender: mpsc::Sender<UploaderStageResult>,
     ) {
         let mut last_table_name = None;
         let mut last_wal_number = None;

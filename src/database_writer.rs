@@ -1,4 +1,4 @@
-use deadpool_postgres::{Client, ManagerConfig, Pool, RecyclingMethod};
+use deadpool_postgres::{Client, ManagerConfig, Pool, RecyclingMethod, Runtime};
 use dogstatsd::{Client as StatsdClient, Options as StatsdOptions};
 use openssl::ssl::{SslConnector, SslMethod};
 use postgres_openssl::MakeTlsConnector;
@@ -54,7 +54,7 @@ pub struct QueryExecution {
 pub enum DatabaseWriterError {
     PoolError(deadpool_postgres::PoolError),
     TokioError(tokio_postgres::Error),
-    TimeoutError(tokio::time::Elapsed),
+    TimeoutError(tokio::time::error::Elapsed),
 }
 
 impl Config {
@@ -217,7 +217,7 @@ impl DatabaseWriter {
             .expect("Unable to build ssl connector. Are ssl libraries configured correctly?");
         let connector = MakeTlsConnector::new(builder.build());
         cfg.pg
-            .create_pool(connector)
+            .create_pool(Some(Runtime::Tokio1), connector)
             .expect("Unable to build database connection pool")
     }
 

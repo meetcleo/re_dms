@@ -9,7 +9,7 @@ This project provides
 * The client itself.
 * a systemd service to handle running the client
 * a Makefile and docker based build system (targetting ubuntu)
-* (Optional) integration with an error reporting service ([Rollbar](https://rollbar.com))
+* (Optional) integration with an error reporting service ([Sentry](https://sentry.io))
 * an ansible script to allow you to deploy this service.
 * cloudwatch configuration and metrics integration for the service.
 
@@ -120,7 +120,7 @@ Tailing the logs of the re_dms service:
 ### configuring rollbar (optional)
 to build with rollbar error reporting you need to build with:
 ```
-cargo build --features with_rollbar
+cargo build --features with_sentry
 ```
 and when running you need to specify the `ROLLBAR_ACCESS_TOKEN` environment variable.
 

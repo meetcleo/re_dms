@@ -99,7 +99,7 @@ impl FileUploader {
                     }
                     Err(result) => {
                         // treat s3 errors as transient
-                        return Err(BackoffError::Transient(result));
+                        return Err(BackoffError::transient(result));
                     }
                 }
                 if let Some(columns) = &file_struct.columns {
@@ -167,9 +167,7 @@ impl FileUploader {
         file_struct: &FileStruct,
     ) -> Result<CleoS3File, BackoffError<RusotoError<PutObjectError>>> {
         // for simplicity, this
-        let result = (|| async { self.upload_to_s3(wal_file, file_name, file_struct).await })
-            .retry(default_exponential_backoff())
-            .await;
+        let result = retry(default_exponential_backoff(), || async { self.upload_to_s3(wal_file, file_name, file_struct).await }).await;
         match result {
             Ok(s3_file) => Ok(s3_file),
             Err(err) => {
