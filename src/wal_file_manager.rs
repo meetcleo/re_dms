@@ -165,7 +165,7 @@ impl WalFile {
 
     fn write(&mut self, string: &str) {
         self.with_locked_internal_file()
-            .write(format!("{}\n", string).as_bytes())
+            .write_all(format!("{}\n", string).as_bytes())
             .expect("Unable to write line to wal_file");
     }
     pub fn flush(&mut self) {
