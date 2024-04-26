@@ -8,7 +8,7 @@ build: clean
 
 deploy: build
 	cp bin/re_dms roles/re_dms/files/re_dms
-	ansible-playbook -i hosts re_dms.yml --tags re_dms
+	ansible-playbook -i hosts re_dms.yml --tags re_dms --skip-tags copy_config
 
 deploy_with_config: build
 	cp bin/re_dms roles/re_dms/files/re_dms
