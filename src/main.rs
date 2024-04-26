@@ -55,9 +55,12 @@ enum InputType {
     PgRcvlogical,
 }
 
-fn panic_if_messy_shutdown() -> () {
+fn panic_if_messy_shutdown() -> Result<(), ()> {
     if ShutdownHandler::shutting_down_messily() {
-        panic!("re_dms had a messy shut down. If running as a service, will attempt to restart automatically a limited number of times.");
+        logger_error!(None, None, "re_dms had a messy shut down. If running as a service, will attempt to restart automatically a limited number of times.");
+        Result::Err(())
+    } else {
+        Result::Ok(())
     }
 }
 
@@ -101,16 +104,21 @@ fn main() {
     #[cfg(feature = "with_sentry")]
     let _guard = init_sentry();
 
-    tokio::runtime::Builder::new_multi_thread()
+    let result = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .unwrap()
         .block_on(async {
             main_impl().await
         });
+
+    match result {
+        Ok(_) => std::process::exit(0),
+        Err(_) => std::process::exit(1),  // Adjust the exit code as you see fit
+    }
 }
 
-async fn main_impl() {
+async fn main_impl() -> Result<(),()> {
     ShutdownHandler::register_signal_handlers();
     dotenv().ok();
     env_logger::init();
@@ -288,7 +296,16 @@ async fn main_impl() {
             }
         }
 
-        panic_if_messy_shutdown();
+        // NOTE: here we exit the main loop (impl), during a messy shutdown without
+        // `await`-ing the result of the futures `spawn`-ed within our file_uploader_threads
+        // or our database_uploader_threads.
+        // [the docs](https://docs.rs/tokio/1.35.1/tokio/runtime/struct.Runtime.html#multi-thread-scheduler)
+        // say that spawned tasks will continue running after `main_impl` returns.
+        // This should mean, that when we exit the program right after, the spawned tasks are all cancelled
+        // (if they've not already finished, we do exit all of the loops anyways during messy shutdown)
+        // this is the behaviour that we want, so it's all good.
+        // (all tasks either stop themselves, or are terminated on shutdown hereafter)
+        panic_if_messy_shutdown()?;
         logger_info!(None, None, "exitted_main_loop");
 
         drain_collector_and_transmit(&mut collector, &mut file_transmitter).await;
@@ -325,7 +342,8 @@ async fn main_impl() {
 
     ShutdownHandler::log_shutdown_status();
 
-    panic_if_messy_shutdown();
+    panic_if_messy_shutdown()?;
+    Result::Ok(())
 }
 
 async fn drain_collector_and_transmit(
