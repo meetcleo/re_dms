@@ -1,5 +1,3 @@
-extern crate test;
-
 use bigdecimal::BigDecimal;
 use internment::ArcIntern;
 use lazy_static::lazy_static;
@@ -1037,7 +1035,6 @@ fn fail_parse_if_unequal(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use test::Bencher;
 
     #[ctor::ctor]
     fn setup_tests() {
@@ -1444,26 +1441,5 @@ mod tests {
                 ParsedLine::Commit(3970124255)
             ]
         ))
-    }
-
-    #[bench]
-    fn parsing_is_fast(b: &mut Bencher) {
-        use std::fs::File;
-        use std::io::{self, BufRead};
-
-        let mut parser = Parser::new(true);
-        let file =
-            File::open("./test/parser.txt").expect("couldn't find file containing test data");
-        let lines = io::BufReader::new(file).lines().collect::<Vec<_>>();
-        b.iter(|| {
-            for line in &lines {
-                if let Ok(ip) = line {
-                    let parsed_line = parser
-                        .parse(&ip)
-                        .expect(&format!("failed to parse: {}", &ip));
-                    test::black_box(&parsed_line);
-                }
-            }
-        });
     }
 }

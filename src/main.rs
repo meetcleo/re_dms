@@ -1,4 +1,3 @@
-#![feature(test)]
 #![deny(warnings)]
 
 use clap::{App, Arg};
