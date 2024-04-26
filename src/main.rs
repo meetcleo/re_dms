@@ -296,6 +296,15 @@ async fn main_impl() -> Result<(),()> {
             }
         }
 
+        // NOTE: here we exit the main loop (impl), during a messy shutdown without
+        // `await`-ing the result of the futures `spawn`-ed within our file_uploader_threads
+        // or our database_uploader_threads.
+        // [the docs](https://docs.rs/tokio/1.35.1/tokio/runtime/struct.Runtime.html#multi-thread-scheduler)
+        // say that spawned tasks will continue running after `main_impl` returns.
+        // This should mean, that when we exit the program right after, the spawned tasks are all cancelled
+        // (if they've not already finished, we do exit all of the loops anyways during messy shutdown)
+        // this is the behaviour that we want, so it's all good.
+        // (all tasks either stop themselves, or are terminated on shutdown hereafter)
         panic_if_messy_shutdown()?;
         logger_info!(None, None, "exitted_main_loop");
 
