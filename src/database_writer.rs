@@ -1,4 +1,4 @@
-use deadpool_postgres::{Client, ManagerConfig, Pool, RecyclingMethod, Runtime};
+use deadpool_postgres::{Client, GenericClient, ManagerConfig, Pool, RecyclingMethod, Runtime};
 use dogstatsd::{Client as StatsdClient, Options as StatsdOptions};
 use openssl::ssl::{SslConnector, SslMethod};
 use postgres_openssl::MakeTlsConnector;
@@ -66,10 +66,11 @@ impl Config {
 }
 
 impl QueryExecution {
-    pub fn new(client: &Client, query: String) -> QueryExecution {
+    pub fn new(cancel_token: &CancelToken, query: String) -> QueryExecution
+    {
         QueryExecution {
             // the cancel token is related to the connection owned by this client (it will cancel any query running on this connection when `cancel_query` is invoked)
-            cancel_token: client.cancel_token(),
+            cancel_token: cancel_token.clone(),
             query: query,
             statsd: StatsdClient::new(StatsdOptions::new(
                 "127.0.0.1:0",
@@ -90,7 +91,7 @@ impl QueryExecution {
 
     pub async fn execute_with_timeout(
         &self,
-        client: &Client,
+        client: &impl GenericClient,
         metric_name: &str,
         metric_tags: &[String],
     ) -> Result<(), DatabaseWriterError> {
@@ -136,7 +137,7 @@ impl QueryExecution {
 
     pub async fn query_one_with_timeout(
         &self,
-        client: &Client,
+        client: &impl GenericClient,
         metric_name: &str,
         metric_tags: &[String],
         params: &[&(dyn tokio_postgres::types::ToSql + std::marker::Sync)],
@@ -241,6 +242,7 @@ impl DatabaseWriter {
 
         self.execute_single_query(
             &client,
+            &client.cancel_token(),
             alter_table_statement.as_str(),
             "alter_table_statement",
             &ddl_change.to_string(),
@@ -309,17 +311,17 @@ impl DatabaseWriter {
             &format!("begin_import:{}", remote_filepath)
         );
 
-        let client = self
+        let mut client = self
             .get_connection_from_pool(wal_file_number, table_name)
             .await?;
 
-        // let transaction = client.transaction().await.unwrap();
-        let transaction = client;
+        let transaction = client.transaction().await.unwrap();
+        let cancel_token = &transaction.cancel_token();
         let (schema_name, just_table_name) = table_name.schema_and_table_name();
         assert!(!table_name.contains('"'));
         let staging_name = self.staging_name(s3_file);
         let return_early = self
-            .create_table_if_not_exists(s3_file, &transaction)
+            .create_table_if_not_exists(s3_file, &transaction, cancel_token)
             .await?;
         if return_early {
             return Ok(());
@@ -362,6 +364,7 @@ impl DatabaseWriter {
 
         self.execute_single_query(
             &transaction,
+            cancel_token,
             drop_staging_table.as_str(),
             "ensure_we_have_dropped_staging_table",
             &kind.to_string(),
@@ -373,6 +376,7 @@ impl DatabaseWriter {
 
         self.execute_single_query(
             &transaction,
+            cancel_token,
             create_staging_table.as_str(),
             "create_staging_table",
             &kind.to_string(),
@@ -385,6 +389,7 @@ impl DatabaseWriter {
         let result = self
             .execute_single_query(
                 &transaction,
+                cancel_token,
                 copy_to_staging_table.as_str(),
                 "copy_to_staging_table",
                 &kind.to_string(),
@@ -425,6 +430,7 @@ impl DatabaseWriter {
         }
         self.execute_single_query(
             &transaction,
+            cancel_token,
             data_migration_query_string.as_str(),
             "apply_changes_to_real_table",
             &kind.to_string(),
@@ -436,6 +442,7 @@ impl DatabaseWriter {
 
         self.execute_single_query(
             &transaction,
+            cancel_token,
             drop_staging_table.as_str(),
             "drop_staging_table",
             &kind.to_string(),
@@ -445,10 +452,12 @@ impl DatabaseWriter {
         )
         .await?;
 
-        // TEMP
-        // serialiseable isolation error. might be to do with dms.
-        // transaction.commit().await.unwrap();
-        // info!("COMMITTED TX {}", table_name);
+        transaction.commit().await.unwrap();
+        logger_info!(
+            Some(wal_file_number),
+            Some(&table_name),
+            "committed_txn"
+        );
 
         logger_info!(
             Some(wal_file_number),
@@ -463,7 +472,8 @@ impl DatabaseWriter {
 
     async fn execute_single_query(
         &self,
-        client: &Client,
+        client: &impl GenericClient,
+        cancel_token: &CancelToken,
         query_to_execute: &str,
         action_name: &str,
         change_kind: &str,
@@ -486,7 +496,7 @@ impl DatabaseWriter {
             )
         );
 
-        let query_execution = QueryExecution::new(client, query_to_execute.to_string());
+        let query_execution = QueryExecution::new(cancel_token, query_to_execute.to_string());
         let metric_tags = &[
             format!("change_kind:{}", change_kind),
             format!("table_name:{}", table_name),
@@ -529,7 +539,8 @@ impl DatabaseWriter {
     async fn create_table_if_not_exists(
         &self,
         s3_file: &CleoS3File,
-        database_client: &Client,
+        database_client: &impl GenericClient,
+        cancel_token: &CancelToken,
     ) -> Result<bool, DatabaseWriterError> {
         let (schema_name, just_table_name) = s3_file.table_name.schema_and_table_name();
         let table_name = s3_file.table_name.clone();
@@ -559,7 +570,7 @@ impl DatabaseWriter {
             "about_to_execute_existence_check_for_table"
         );
 
-        let query_execution = QueryExecution::new(database_client, query_to_execute.to_string());
+        let query_execution = QueryExecution::new(cancel_token, query_to_execute.to_string());
         let metric_tags = &[format!("table_name:{}", table_name)];
         let result = query_execution
             .query_one_with_timeout(
@@ -603,7 +614,8 @@ impl DatabaseWriter {
             );
 
             self.execute_single_query(
-                &database_client,
+                database_client,
+                cancel_token,
                 create_table_query.as_str(),
                 "create_table_statement",
                 "create_table",
