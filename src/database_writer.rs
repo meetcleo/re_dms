@@ -47,7 +47,7 @@ struct Config {
 pub struct QueryExecution {
     cancel_token: CancelToken,
     query: String,
-    statsd: StatsdClient,
+    statsd: StatsdWrapper,
 }
 
 #[derive(Debug)]
@@ -65,19 +65,43 @@ impl Config {
     }
 }
 
-impl QueryExecution {
-    pub fn new(cancel_token: &CancelToken, query: String) -> QueryExecution
-    {
-        QueryExecution {
-            // the cancel token is related to the connection owned by this client (it will cancel any query running on this connection when `cancel_query` is invoked)
-            cancel_token: cancel_token.clone(),
-            query: query,
+pub struct StatsdWrapper {
+    statsd: StatsdClient
+}
+
+impl StatsdWrapper {
+    pub fn new() -> StatsdWrapper {
+        StatsdWrapper {
             statsd: StatsdClient::new(StatsdOptions::new(
                 "127.0.0.1:0",
                 &STATSD_IP_AND_PORT.to_owned(),
                 "re_dms",
-            ))
-            .unwrap(),
+            )).expect("Failed to initialize Statsdclient")
+        }
+    }
+
+    // same api as dogstatsd, (with a little switcheroo
+    // for Cow<str> to String because I don't care about grabbing that dependency here)
+    pub fn timing<'a, I, S, T>(&self, stat: S, ms: i64, tags: I)
+    where
+        I: IntoIterator<Item = T>,
+        S: Into<String>,
+        T: AsRef<str>,
+    {
+        self.statsd.timing(stat.into(), ms, tags).expect("Failed to send timing metric");
+    }
+
+}
+
+impl QueryExecution {
+    pub fn new(cancel_token: &CancelToken, query: String) -> QueryExecution
+    {
+        QueryExecution {
+            // the cancel token is related to the connection owned by this client
+            // (it will cancel any query running on this connection when `cancel_query` is invoked)
+            cancel_token: cancel_token.clone(),
+            query,
+            statsd: StatsdWrapper::new(),
         }
     }
 
@@ -101,8 +125,7 @@ impl QueryExecution {
             timeout(*CLIENT_SIDE_DB_QUERY_TIMEOUT_IN_SECONDS, query_execution).await;
         let duration = start.elapsed();
         self.statsd
-            .timing(metric_name, duration.as_millis() as i64, metric_tags)
-            .unwrap();
+            .timing(metric_name, duration.as_millis() as i64, metric_tags);
         match timeout_result {
             Ok(query_result) => match query_result {
                 Ok(_) => Ok(()),
@@ -146,9 +169,7 @@ impl QueryExecution {
         let start = Instant::now();
         let timeout_result = timeout(*CLIENT_SIDE_DB_QUERY_TIMEOUT_IN_SECONDS, query_one).await;
         let duration = start.elapsed();
-        self.statsd
-            .timing(metric_name, duration.as_millis() as i64, metric_tags)
-            .unwrap();
+        self.statsd.timing(metric_name, duration.as_millis() as i64, metric_tags);
         match timeout_result {
             Ok(query_result) => match query_result {
                 Ok(row) => Ok(row),
@@ -300,8 +321,15 @@ impl DatabaseWriter {
         &self,
         s3_file: &mut CleoS3File,
     ) -> Result<(), DatabaseWriterError> {
+        let statsd = StatsdWrapper::new();
+        let start = Instant::now();
         let kind = &s3_file.kind;
         let table_name = &s3_file.table_name;
+
+        let metric_tags = &[
+            format!("change_kind:{}", &kind.to_string()),
+            format!("table_name:{}", table_name),
+        ];
         let wal_file_number = s3_file.wal_file.file_number;
         // temp tables are present in the session, so we still need to drop it at the end of the transaction
         let remote_filepath = s3_file.remote_path();
@@ -315,7 +343,7 @@ impl DatabaseWriter {
             .get_connection_from_pool(wal_file_number, table_name)
             .await?;
 
-        let transaction = client.transaction().await.unwrap();
+        let transaction = client.transaction().await.expect("Failed to initialize a db transaction.");
         let cancel_token = &transaction.cancel_token();
         let (schema_name, just_table_name) = table_name.schema_and_table_name();
         assert!(!table_name.contains('"'));
@@ -452,7 +480,10 @@ impl DatabaseWriter {
         )
         .await?;
 
-        transaction.commit().await.unwrap();
+        let start_commit = Instant::now();
+        transaction.commit().await.expect("Failed to commit the db transaction");
+        let duration_commit = start_commit.elapsed();
+        statsd.timing("apply_s3_changes_commit_time", duration_commit.as_millis() as i64, metric_tags);
         logger_info!(
             Some(wal_file_number),
             Some(&table_name),
@@ -466,6 +497,8 @@ impl DatabaseWriter {
         );
 
         s3_file.wal_file.maybe_remove_wal_file();
+        let duration = start.elapsed();
+        statsd.timing("apply_s3_changes_total_time", duration.as_millis() as i64, metric_tags);
 
         Ok(())
     }
