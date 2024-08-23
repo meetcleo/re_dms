@@ -41,3 +41,7 @@ SENTRY_DSN=
 
 # 30 minutes, and should be less than what is set for SECONDS_UNTIL_END_OF_EXPONENTIAL_BACKOFF
 CLIENT_SIDE_DB_QUERY_TIMEOUT_IN_SECONDS=1800
+
+# A regexp you can set that will be used to replace partition suffix values from target table names
+# For example, this regexp: _p\d{4}w\d{1,2}\z would transform this source table name: webhooks_incoming_webhooks_p2024w30 to webhooks_incoming_webhooks in the target db
+PARTITION_SUFFIX_REGEXP=

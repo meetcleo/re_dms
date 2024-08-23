@@ -3,6 +3,8 @@ use internment::ArcIntern;
 use lazy_static::lazy_static;
 use num_bigint::BigInt;
 use num_bigint::Sign;
+use regex::Regex;
+use std::borrow::Cow;
 use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
 use std::{error::Error, fmt};
@@ -26,7 +28,8 @@ lazy_static! {
     // leave these as unwrap
     static ref TABLE_BLACKLIST: Vec<String> = env::var("TABLE_BLACKLIST").unwrap_or("".to_owned()).split(",").map(|x| x.to_owned()).collect();
     static ref SCHEMA_BLACKLIST: Vec<String> = env::var("SCHEMA_BLACKLIST").unwrap_or("".to_owned()).split(",").map(|x| x.to_owned()).collect();
-    static ref TARGET_SCHEMA_NAME: Option<String> = std::env::var("TARGET_SCHEMA_NAME").ok();
+    static ref TARGET_SCHEMA_NAME: Option<String> = env::var("TARGET_SCHEMA_NAME").ok();
+    static ref PARTITION_SUFFIX_REGEXP: Option<Regex> = env::var("PARTITION_SUFFIX_REGEXP").map(|s| Regex::new(&s).expect("Failed to parse partition suffix regexp")).ok();
     static ref ARRAY_STRING: String = "array".to_string();
 
     // 99_999_999_999.99999999
@@ -41,8 +44,15 @@ lazy_static! {
 
 // for tablename
 pub trait SchemaAndTable {
-    fn schema_and_table_name(&self) -> (&str, &str);
+    fn schema_and_table_name(&self) -> (&str, Cow<str>);
     fn original_schema_and_table_name(&self) -> (&str, &str);
+}
+
+fn departition_table_name(table_name: &str) -> Cow<str> {
+    match &*PARTITION_SUFFIX_REGEXP {
+        None => Cow::from(table_name),
+        Some(partition_suffix_regexp) => partition_suffix_regexp.replacen(table_name, 1, ""),
+    }
 }
 
 // schema.table_name
@@ -50,14 +60,15 @@ pub trait SchemaAndTable {
 impl SchemaAndTable for TableName {
     // NOTE: this gives the DESTINATION target schema name.
     // which could be really f-ing confusing if you don't expect that.
-    fn schema_and_table_name(&self) -> (&str, &str) {
+    fn schema_and_table_name(&self) -> (&str, Cow<str>) {
         let result = self.split_once('.').expect(&format!(
             "can't split schema and table name. No `.` character: {}",
             self
         ));
+        let departitioned_table_name = departition_table_name(result.1);
         match &*TARGET_SCHEMA_NAME {
-            None => result,
-            Some(schema_name) => (schema_name, result.1),
+            None => (result.0, departitioned_table_name),
+            Some(schema_name) => (schema_name, departitioned_table_name),
         }
     }
     fn original_schema_and_table_name(&self) -> (&str, &str) {
@@ -1042,6 +1053,26 @@ mod tests {
         std::env::set_var(
             "SCHEMA_BLACKLIST",
             "partman,data_science,sch_repcloud,sch_repdrop,sch_repnew,private",
+        );
+        std::env::set_var("PARTITION_SUFFIX_REGEXP", r"_p\d{4}w\d{1,2}\z");
+    }
+
+    #[test]
+    fn table_departition_works_as_expected() {
+        let mut parser = Parser::new(true);
+        let line = "table public.webhooks_incoming_webhooks_p2024w30: INSERT: id[bigint]:123";
+        let result = parser.parse(&line.to_string()).expect("failed parsing");
+        let table_name = match result {
+            ParsedLine::ChangedData {
+                table_name,
+                ..
+            } => table_name,
+            _ => panic!("tried to find table name of non changed_data"),
+        };
+        let actual = table_name.schema_and_table_name().1.to_string();
+        assert_eq!(
+            actual,
+            "webhooks_incoming_webhooks".to_string()
         );
     }
 
