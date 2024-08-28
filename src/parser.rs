@@ -44,7 +44,7 @@ lazy_static! {
 
 // for tablename
 pub trait SchemaAndTable {
-    fn schema_and_table_name(&self) -> (&str, Cow<str>);
+    fn schema_and_table_name(&self) -> (&str, &str);
     fn original_schema_and_table_name(&self) -> (&str, &str);
 }
 
@@ -60,15 +60,14 @@ fn departition_table_name(table_name: &str) -> Cow<str> {
 impl SchemaAndTable for TableName {
     // NOTE: this gives the DESTINATION target schema name.
     // which could be really f-ing confusing if you don't expect that.
-    fn schema_and_table_name(&self) -> (&str, Cow<str>) {
+    fn schema_and_table_name(&self) -> (&str, &str) {
         let result = self.split_once('.').expect(&format!(
             "can't split schema and table name. No `.` character: {}",
             self
         ));
-        let departitioned_table_name = departition_table_name(result.1);
         match &*TARGET_SCHEMA_NAME {
-            None => (result.0, departitioned_table_name),
-            Some(schema_name) => (schema_name, departitioned_table_name),
+            None => result,
+            Some(schema_name) => (schema_name, result.1),
         }
     }
     fn original_schema_and_table_name(&self) -> (&str, &str) {
@@ -648,7 +647,8 @@ impl Parser {
         let string_without_tag = &string[SIZE_OF_TABLE_TAG..string.len()];
         // we assume tables can't have colons in their names
         // fuck you if you put a colon in a table name, you psychopath
-        let table_name = TableName::new(slice_until_colon_or_end(string_without_tag).into());
+        let table_name = slice_until_colon_or_end(string_without_tag);
+        let departitioned_table_name = TableName::new(departition_table_name(table_name).into());
         // + 2 for colon + space
         fail_parse_if_unequal(
             &string_without_tag[table_name.len()..table_name.len() + 2],
@@ -680,8 +680,8 @@ impl Parser {
         let string_without_kind =
             &string_without_table[kind_string.len() + 2..string_without_table.len()];
 
-        let columns = self.parse_columns(string_without_kind, table_name.clone())?;
-        self.handle_parse_changed_data(table_name, kind, columns)
+        let columns = self.parse_columns(string_without_kind, departitioned_table_name.clone())?;
+        self.handle_parse_changed_data(departitioned_table_name, kind, columns)
     }
 
     fn parse_pg_rcvlogical_msg(&self, string: &str) -> Result<ParsedLine> {
@@ -927,17 +927,12 @@ impl Parser {
             self.parse_state.currently_parsing = Some(changed_data);
             ParsedLine::ContinueParse
         } else {
-            let schema_name: String = table_name
-                .original_schema_and_table_name()
-                .0
-                .to_string();
+            let schema_name: String = table_name.original_schema_and_table_name().0.to_string();
             // We need to use the target table name to ensure the table name is de-partitioned
             let target_table_name = table_name.schema_and_table_name().1;
             // Reconstruct the schema.table name, but using the de-partitioned table name
-            let source_schema_and_target_table_name = &format!(
-                "{}.{}",
-                schema_name, target_table_name
-            );
+            let source_schema_and_target_table_name =
+                &format!("{}.{}", schema_name, target_table_name);
             if TABLE_BLACKLIST.contains(source_schema_and_target_table_name) {
                 logger_debug!(
                     self.parse_state.wal_file_number,
@@ -1070,17 +1065,11 @@ mod tests {
         let line = "table public.webhooks_incoming_webhooks_p2024w30: INSERT: id[bigint]:123";
         let result = parser.parse(&line.to_string()).expect("failed parsing");
         let table_name = match result {
-            ParsedLine::ChangedData {
-                table_name,
-                ..
-            } => table_name,
+            ParsedLine::ChangedData { table_name, .. } => table_name,
             _ => panic!("tried to find table name of non changed_data"),
         };
         let actual = table_name.schema_and_table_name().1.to_string();
-        assert_eq!(
-            actual,
-            "webhooks_incoming_webhooks".to_string()
-        );
+        assert_eq!(actual, "webhooks_incoming_webhooks".to_string());
     }
 
     #[test]
