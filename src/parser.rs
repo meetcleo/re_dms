@@ -928,12 +928,7 @@ impl Parser {
             ParsedLine::ContinueParse
         } else {
             let schema_name: String = table_name.original_schema_and_table_name().0.to_string();
-            // We need to use the target table name to ensure the table name is de-partitioned
-            let target_table_name = table_name.schema_and_table_name().1;
-            // Reconstruct the schema.table name, but using the de-partitioned table name
-            let source_schema_and_target_table_name =
-                &format!("{}.{}", schema_name, target_table_name);
-            if TABLE_BLACKLIST.contains(source_schema_and_target_table_name) {
+            if TABLE_BLACKLIST.contains(table_name.as_ref()) {
                 logger_debug!(
                     self.parse_state.wal_file_number,
                     Some(&table_name),
