@@ -2,8 +2,8 @@ all: build
 
 build: clean
 	mkdir -p bin
-	docker build -t re_dms .
-	docker create -ti --name re_dms re_dms bash
+	docker build --platform linux/amd64 -t re_dms .
+	docker create --platform linux/amd64 -ti --name re_dms re_dms bash
 	docker cp re_dms:/tmp/re_dms/target/release/re_dms ./bin/re_dms
 
 deploy: build
