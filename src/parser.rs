@@ -569,6 +569,11 @@ impl ColumnValue {
 
 impl Parser {
     pub fn new(include_xids: bool) -> Parser {
+        logger_info!(
+            None,
+            None,
+            &format!("partition_suffix_regexp:{:?}", PARTITION_SUFFIX_REGEXP.clone().ok_or("none"))
+        );
         Parser {
             config: ParserConfig { include_xids },
             parse_state: ParserState {
