@@ -1,8 +1,4 @@
-# > Start > Borrowed from: https://github.com/rust-lang/docker-rust-nightly/blob/2896708e58424ce0495c83f0364106e4f93b31bf/buster/Dockerfile
-# As of Dec, 2021, we run re_dms on Ubuntu 18.04 which has glibc 2.27. However, Rust official docker images are based on directly on Debian. Ubuntu 18.04 is based
-# on Debian Buster, however Buster runs glibc 2.28. Hence, building our executable against a Buster Debian image breaks because it expects glibc 2.28 at
-# runtime (and it's not there). We've essentially created our own Rust docker image against Ubuntu 18.04 in order to build our executable guaranteed to be compatible with our deploy target.
-FROM buildpack-deps:bionic
+FROM buildpack-deps:noble
 
 ENV RUSTUP_HOME=/usr/local/rustup \
     CARGO_HOME=/usr/local/cargo \

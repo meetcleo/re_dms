@@ -1,8 +1,7 @@
 ---
-# Needs to use client v10 https://forums.aws.amazon.com/thread.jspa?messageID=936554
 - name: Install postgresql-client
   package:
-    name: postgresql-client-10
+    name: postgresql-client
     state: present
 
 - name: create re_dms group
