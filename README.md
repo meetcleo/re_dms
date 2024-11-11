@@ -81,7 +81,7 @@ Docs on `pg_recvlogical` [here](https://www.postgresql.org/docs/10/app-pgrecvlog
     1. Writable directory (ideally with persistent storage) for keeping WAL files
     1. Ability to communicate with source and target DB
 1. SSH config for target instance, name of connection specified in `hosts` file (copy from `hosts.example`)
-1. `roles/re_dms/files/re_dms.conf.example` copied to `roles/re_dms/files/re_dms.conf`, including the following:
+1. `roles/re_dms/files/re_dms.conf.example` copied to `roles/re_dms/files/re_dms.conf.[staging|production]`, including the following:
     1. Write creds for Redshift
     1. S3 bucket for storing changes to be applied
     1. AWS creds for writing to S3 bucket

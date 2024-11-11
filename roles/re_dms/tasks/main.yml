@@ -20,8 +20,8 @@
 
 - name: Copy systemd config file to server
   copy:
-    src: re_dms.conf
-    dest: /etc
+    src: "re_dms.conf.{{ env }}"
+    dest: /etc/re_dms.conf
     owner: root
     group: root
     mode: 0660

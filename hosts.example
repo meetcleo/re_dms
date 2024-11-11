@@ -1,2 +1,5 @@
-[myservers]
-<target hostname goes here>
+[production]
+<target production hostname goes here>
+
+[staging]
+<target staging hostname goes here>
