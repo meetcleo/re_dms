@@ -74,7 +74,9 @@ Docs on `pg_recvlogical` [here](https://www.postgresql.org/docs/10/app-pgrecvlog
 
 ### Pre-requisites
 
-1. Have ansible installed locally
+1. Have ansible installed locally, including the following collections (`ansible-galaxy collection install ...`):
+    - `community.general`
+    - `ansible.posix`
 1. Have Docker running locally
 1. Have a target instance with the following:
     1. Debian or Ubuntu (based on `Noble`) installed

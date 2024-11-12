@@ -1,5 +1,5 @@
 [production]
-<target production hostname goes here>
+<target production hostname goes here> filesystemDev=/dev/<device>
 
 [staging]
-<target staging hostname goes here>
+<target staging hostname goes here> filesystemDev=/dev/<device>

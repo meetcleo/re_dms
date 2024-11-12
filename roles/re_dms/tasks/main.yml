@@ -18,6 +18,27 @@
     state: present
     create_home: no
 
+- name: create ext4 filesystem
+  community.general.filesystem:
+    fstype: ext4
+    dev: "{{filesystemDev}}"
+
+- name: mount filesystem
+  ansible.posix.mount:
+    path: /re_dms
+    src: "{{filesystemDev}}"
+    fstype: ext4
+    opts: rw,auto
+    state: mounted
+
+- name: create output_wal dir
+  ansible.builtin.file:
+    path: /re_dms/output_wal
+    state: directory
+    owner: re_dms
+    group: re_dms
+    mode: '0750'
+
 - name: Copy systemd config file to server
   copy:
     src: "re_dms.conf.{{ env }}"
