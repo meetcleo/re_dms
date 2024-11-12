@@ -625,11 +625,15 @@ impl DatabaseWriter {
                 );
                 return Ok(true);
             } else if s3_file.kind == ChangeKind::Update {
-                logger_panic!(
+                // this could happen if we turn on re_dms for
+                // an existing DB, and we don't care about
+                // backfilling historical data
+                logger_error!(
                     Some(wal_file_number),
                     Some(&table_name),
                     "update_when_theres_no_table"
                 );
+                return Ok(true);
             }
 
             logger_info!(
