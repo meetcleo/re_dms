@@ -1,5 +1,5 @@
 ---
-- hosts: myservers
+- hosts: "{{ env }}"
   become: yes
   become_user: root
   roles:

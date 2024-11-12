@@ -1,8 +1,7 @@
 ---
-# Needs to use client v10 https://forums.aws.amazon.com/thread.jspa?messageID=936554
 - name: Install postgresql-client
   package:
-    name: postgresql-client-10
+    name: postgresql-client
     state: present
 
 - name: create re_dms group
@@ -19,10 +18,31 @@
     state: present
     create_home: no
 
+- name: create ext4 filesystem
+  community.general.filesystem:
+    fstype: ext4
+    dev: "{{filesystemDev}}"
+
+- name: mount filesystem
+  ansible.posix.mount:
+    path: /re_dms
+    src: "{{filesystemDev}}"
+    fstype: ext4
+    opts: rw,auto
+    state: mounted
+
+- name: create output_wal dir
+  ansible.builtin.file:
+    path: /re_dms/output_wal
+    state: directory
+    owner: re_dms
+    group: re_dms
+    mode: '0750'
+
 - name: Copy systemd config file to server
   copy:
-    src: re_dms.conf
-    dest: /etc
+    src: "re_dms.conf.{{ env }}"
+    dest: /etc/re_dms.conf
     owner: root
     group: root
     mode: 0660

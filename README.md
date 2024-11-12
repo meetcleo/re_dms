@@ -74,14 +74,16 @@ Docs on `pg_recvlogical` [here](https://www.postgresql.org/docs/10/app-pgrecvlog
 
 ### Pre-requisites
 
-1. Have ansible installed locally
+1. Have ansible installed locally, including the following collections (`ansible-galaxy collection install ...`):
+    - `community.general`
+    - `ansible.posix`
 1. Have Docker running locally
 1. Have a target instance with the following:
-    1. Debian or Ubuntu (based on `Buster`) installed
+    1. Debian or Ubuntu (based on `Noble`) installed
     1. Writable directory (ideally with persistent storage) for keeping WAL files
     1. Ability to communicate with source and target DB
 1. SSH config for target instance, name of connection specified in `hosts` file (copy from `hosts.example`)
-1. `roles/re_dms/files/re_dms.conf.example` copied to `roles/re_dms/files/re_dms.conf`, including the following:
+1. `roles/re_dms/files/re_dms.conf.example` copied to `roles/re_dms/files/re_dms.conf.[staging|production]`, including the following:
     1. Write creds for Redshift
     1. S3 bucket for storing changes to be applied
     1. AWS creds for writing to S3 bucket
