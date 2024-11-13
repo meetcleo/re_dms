@@ -132,8 +132,10 @@ for details on the metrics and file format see [metrics](https://docs.aws.amazon
 $ ansible-galaxy install christiangda.amazon_cloudwatch_agent
 $ pip install boto # needed for creating the log group with community.aws.cloudwatchlogs_log_group
 $ ansible-galaxy collection install community.aws
-$ ansible-playbook -i hosts re_dms.yml --tags cloudwatch --extra-vars "cloudwatch_aws_access_key_id=SOME_ACCESS_KEY_ID cloudwatch_aws_access_key_secret=SOME_SECRET" # or however you want to provide these variables
+$ aws sso login
+$ ansible-playbook -i hosts re_dms.yml --tags cloudwatch -e "env=[staging|production]" -e "ansible_python_interpreter=python3" -e "cloudwatch_aws_access_key_id=SOME_ACCESS_KEY_ID" -e "cloudwatch_aws_access_key_secret=SOME_SECRET" # or however you want to provide these variables
 ```
+_I needed to tell ansible to use my system python3 intepreter in order to find the additional libraries it needed_
 
 ## How it works
 * reads input data from a `test_decoding` logical replication slot.

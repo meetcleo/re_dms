@@ -362,23 +362,16 @@ impl DatabaseWriter {
             &just_table_name,
         );
 
-        let access_key_id =
-            env::var("AWS_ACCESS_KEY_ID").expect("Unable to find AWS_ACCESS_KEY_ID");
-        let secret_access_key =
-            env::var("AWS_SECRET_ACCESS_KEY").expect("Unable to find AWS_SECRET_ACCESS_KEY");
-        let credentials_string = format!(
-            "aws_access_key_id={aws_access_key_id};aws_secret_access_key={secret_access_key}",
-            aws_access_key_id = access_key_id,
-            secret_access_key = secret_access_key
-        );
+        let iam_role =
+            env::var("IAM_ROLE").expect("Unable to find IAM_ROLE");
         let column_list = self.column_name_list(&s3_file.columns);
         // no gzip
         let copy_to_staging_table = format!(
-            "copy \"{staging_name}\" ({column_list}) from '{remote_filepath}' CREDENTIALS '{credentials_string}' GZIP CSV TRUNCATECOLUMNS IGNOREHEADER 1 DELIMITER ',' NULL as '\\0' compupdate off statupdate off",
+            "copy \"{staging_name}\" ({column_list}) from '{remote_filepath}' IAM_ROLE '{iam_role}' GZIP CSV TRUNCATECOLUMNS IGNOREHEADER 1 DELIMITER ',' NULL as '\\0' compupdate off statupdate off",
             staging_name = &staging_name,
             column_list = &column_list,
             remote_filepath = &remote_filepath,
-            credentials_string = &credentials_string,
+            iam_role = &iam_role,
         );
 
         let data_migration_query_string = self.query_for_change_kind(
@@ -625,11 +618,24 @@ impl DatabaseWriter {
                 );
                 return Ok(true);
             } else if s3_file.kind == ChangeKind::Update {
-                logger_panic!(
-                    Some(wal_file_number),
-                    Some(&table_name),
-                    "update_when_theres_no_table"
-                );
+                let ignore_updates_to_missing_tables = env::var("IGNORE_UPDATES_TO_MISSING_TABLES")
+                  .unwrap_or("false".to_string())
+                  .parse::<bool>()
+                  .expect("IGNORE_UPDATES_TO_MISSING_TABLES is not a valid boolean");
+                if ignore_updates_to_missing_tables {
+                    logger_info!(
+                        Some(wal_file_number),
+                        Some(&table_name),
+                        "update_when_theres_no_table"
+                    );
+                    return Ok(true);
+                } else {
+                    logger_panic!(
+                        Some(wal_file_number),
+                        Some(&table_name),
+                        "update_when_theres_no_table"
+                    );
+                }
             }
 
             logger_info!(

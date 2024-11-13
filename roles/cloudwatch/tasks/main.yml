@@ -10,7 +10,7 @@
 - name: read_config_file
   local_action:
     module: ansible.builtin.shell
-    _raw_params: "/bin/cat {{ role_path }}/files/example_cloudwatch.json"
+    _raw_params: "sed -e 's/TARGET_NAME/re_dms_{{env}}/g' {{ role_path }}/files/example_cloudwatch.json"
   register: cwa_conf_json_file_content_variable
   become: false
   run_once: true
@@ -29,7 +29,7 @@
 - name: setup re_dms log group
   local_action:
     module: community.aws.cloudwatchlogs_log_group
-    log_group_name: re_dms
+    log_group_name: "re_dms_{{env}}"
     retention: 14
   become: false
   tags: log-group
