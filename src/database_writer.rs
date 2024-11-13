@@ -618,15 +618,24 @@ impl DatabaseWriter {
                 );
                 return Ok(true);
             } else if s3_file.kind == ChangeKind::Update {
-                // this could happen if we turn on re_dms for
-                // an existing DB, and we don't care about
-                // backfilling historical data
-                logger_error!(
-                    Some(wal_file_number),
-                    Some(&table_name),
-                    "update_when_theres_no_table"
-                );
-                return Ok(true);
+                let ignore_updates_to_missing_tables = env::var("IGNORE_UPDATES_TO_MISSING_TABLES")
+                  .unwrap_or("false".to_string())
+                  .parse::<bool>()
+                  .expect("IGNORE_UPDATES_TO_MISSING_TABLES is not a valid boolean");
+                if ignore_updates_to_missing_tables {
+                    logger_info!(
+                        Some(wal_file_number),
+                        Some(&table_name),
+                        "update_when_theres_no_table"
+                    );
+                    return Ok(true);
+                } else {
+                    logger_panic!(
+                        Some(wal_file_number),
+                        Some(&table_name),
+                        "update_when_theres_no_table"
+                    );
+                }
             }
 
             logger_info!(
