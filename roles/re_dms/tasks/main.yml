@@ -44,8 +44,8 @@
     src: "re_dms.conf.{{ env }}"
     dest: /etc/re_dms.conf
     owner: root
-    group: root
-    mode: 0660
+    group: re_dms
+    mode: 0640
   tags: copy_config
   notify:
     - Start re_dms
