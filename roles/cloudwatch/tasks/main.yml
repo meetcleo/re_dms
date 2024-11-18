@@ -30,7 +30,7 @@
   local_action:
     module: community.aws.cloudwatchlogs_log_group
     log_group_name: "re_dms_{{env}}"
-    retention: 14
+    retention: 365
   become: false
   tags: log-group
 
