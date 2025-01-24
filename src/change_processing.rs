@@ -166,31 +166,50 @@ impl ChangeSet {
     }
 
     fn handle_update_subsequent(&self, new_change: ParsedLine) -> Result<Option<ParsedLine>> {
-        if let ParsedLine::ChangedData { kind, .. } = new_change {
+        let cloned_new_change: ParsedLine = new_change.clone();
+        if let ParsedLine::ChangedData {
+            kind,
+            columns,
+            table_name,
+        } = new_change {
             match kind {
-                ChangeKind::Insert => Err(ChangeProcessingError {
-                    message: "attempting to insert a record after an update".to_string(),
-                    parsed_line: Some(new_change.clone()),
-                    source_line: None,
-                }),
-                ChangeKind::Update => match new_change {
-                    ParsedLine::ChangedData {
-                        columns,
-                        table_name,
+                ChangeKind::Insert => {
+                    if let Some(ParsedLine::ChangedData {
+                        columns: old_columns,
                         ..
-                    } => self.untoasted_changes(columns, table_name, ChangeKind::Update),
-                    _ => Err(ChangeProcessingError {
-                        message: "don't know how to handle this type of line here".to_string(),
-                        parsed_line: Some(new_change.clone()),
+                    }) = &self.changes
+                    {
+                        if old_columns == &columns {
+                            logger_debug!(
+                                None,
+                                Some(&table_name),
+                                &format!("attempting to insert a record after update and the columns matched:{:?}", cloned_new_change)
+                            );
+
+                            return self.untoasted_changes(columns, table_name, ChangeKind::Update);
+                        } else {
+                            logger_info!(
+                                None,
+                                Some(&table_name),
+                                &format!("attempting to insert a record after update and the columns didn't match:{:?}", cloned_new_change)
+                            );
+                        }
+                    }
+                    Err(ChangeProcessingError {
+                        message: "attempting to insert a record after update".to_string(),
+                        parsed_line: Some(cloned_new_change),
                         source_line: None,
-                    }),
+                    })
                 },
-                ChangeKind::Delete => Ok(Some(new_change)),
+                ChangeKind::Update => {
+                    self.untoasted_changes(columns, table_name, ChangeKind::Update)
+                },
+                ChangeKind::Delete => Ok(Some(cloned_new_change)),
             }
         } else {
             Err(ChangeProcessingError {
                 message: "don't know how to handle this type of line here".to_string(),
-                parsed_line: Some(new_change.clone()),
+                parsed_line: Some(cloned_new_change),
                 source_line: None,
             })
         }
@@ -1663,8 +1682,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
-    fn dml_change_update_insert_panics() {
+    fn dml_change_update_insert_same_data() {
         let table_name = TableName::new("public.foobar".to_string());
         let id_column_info = ColumnInfo::new("id", "bigint");
         let text_column_info = ColumnInfo::new("foobar", "text");
@@ -1688,6 +1706,53 @@ mod tests {
             kind: ChangeKind::Insert,
             table_name: table_name.clone(),
             columns: changed_columns_1.clone(),
+        };
+        let mut change_processing =
+            ChangeProcessing::new(TargetsTablesColumnNames::from_map(HashMap::new()));
+        change_processing
+            .add_change(change_1.clone())
+            .expect("failed processing");
+        change_processing
+            .add_change(change_2.clone())
+            .expect("failed processing");
+    }
+
+    #[test]
+    #[should_panic]
+    fn dml_change_update_insert_different_data_panics() {
+        let table_name = TableName::new("public.foobar".to_string());
+        let id_column_info = ColumnInfo::new("id", "bigint");
+        let text_column_info = ColumnInfo::new("foobar", "text");
+
+        let changed_columns_1 = vec![
+            Column::ChangedColumn {
+                column_info: id_column_info.clone(),
+                value: Some(ColumnValue::Integer(1)),
+            },
+            Column::ChangedColumn {
+                column_info: text_column_info.clone(),
+                value: Some(ColumnValue::Text("1".to_string())),
+            },
+        ];
+        let changed_columns_2 = vec![
+            Column::ChangedColumn {
+                column_info: id_column_info.clone(),
+                value: Some(ColumnValue::Integer(1)),
+            },
+            Column::ChangedColumn {
+                column_info: text_column_info.clone(),
+                value: Some(ColumnValue::Text("2".to_string())),
+            },
+        ];
+        let change_1 = ParsedLine::ChangedData {
+            kind: ChangeKind::Update,
+            table_name: table_name.clone(),
+            columns: changed_columns_1.clone(),
+        };
+        let change_2 = ParsedLine::ChangedData {
+            kind: ChangeKind::Insert,
+            table_name: table_name.clone(),
+            columns: changed_columns_2.clone(),
         };
         let mut change_processing =
             ChangeProcessing::new(TargetsTablesColumnNames::from_map(HashMap::new()));
