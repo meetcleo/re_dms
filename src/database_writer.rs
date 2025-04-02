@@ -808,19 +808,22 @@ impl DatabaseWriter {
             DEFAULT_NUMERIC_PRECISION, DEFAULT_NUMERIC_SCALE
         );
         // {"boolean", "double precision", "integer", "interval", "numeric", "public.hstore", "timestamp without time zone", "text", "character varying", "json", "bigint", "public.citext", "date", "uuid", "jsonb"}
+        let max_varchar = "CHARACTER VARYING(65535)";
         let return_type = match column_type {
-            "text" => "CHARACTER VARYING(65535)",
-            "json" => "CHARACTER VARYING(65535)",
-            "jsonb" => "CHARACTER VARYING(65535)",
-            "bytea" => "CHARACTER VARYING(65535)",
-            "oid" => "CHARACTER VARYING(65535)",
-            "ARRAY" => "CHARACTER VARYING(65535)",
-            "array" => "CHARACTER VARYING(65535)",
-            "USER-DEFINED" => "CHARACTER VARYING(65535)",
-            "public.citext" => "CHARACTER VARYING(65535)",
-            "public.hstore" => "CHARACTER VARYING(65535)",
+            "text" => max_varchar,
+            "json" => max_varchar,
+            "jsonb" => max_varchar,
+            "bytea" => max_varchar,
+            "oid" => max_varchar,
+            "ARRAY" => max_varchar,
+            "array" => max_varchar,
+            "int4range" => max_varchar,
+            "int8range" => max_varchar,
+            "USER-DEFINED" => max_varchar,
+            "public.citext" => max_varchar,
+            "public.hstore" => max_varchar,
             "uuid" => "CHARACTER VARYING(36)",
-            "interval" => "CHARACTER VARYING(65535)",
+            "interval" => max_varchar,
             "numeric" => numeric_type,
             _ => column_type,
         };
