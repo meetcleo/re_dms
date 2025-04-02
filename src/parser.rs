@@ -457,6 +457,12 @@ impl ColumnValue {
             "array" => ColumnTypeEnum::Text,
             "oid" => ColumnTypeEnum::Oid,
             "sch_repcloud.ty_repack_step" => ColumnTypeEnum::StringEnumType,
+            "int4range" => ColumnTypeEnum::Text,
+            "int8range" => ColumnTypeEnum::Text,
+            "numrange" => ColumnTypeEnum::Text,
+            "tsrange" => ColumnTypeEnum::Text,
+            "tstzrange" => ColumnTypeEnum::Text,
+            "daterange" => ColumnTypeEnum::Text,
             _ => panic!("Unknown column type: {:?}", column_type_str),
         }
     }
@@ -1161,6 +1167,34 @@ mod tests {
                     Column::ChangedColumn {
                         column_info: ColumnInfo::new("baz_array".to_string(), "array".to_string()),
                         value: Some(ColumnValue::Text("{\"foo\", \"bar\", \"baz\"}".to_string()))
+                    }
+                ],
+                table_name: ArcIntern::new("public.users".to_string()),
+                kind: ChangeKind::Update
+            }
+        );
+    }
+
+    #[test]
+    fn parses_int8range_type() {
+        let mut parser = Parser::new(true);
+        let line = "table public.users: UPDATE: id[bigint]:123 foobar[text]:'foobar string' baz_int8range[int8range]:'[1743532200,1743553800)'";
+        let result = parser.parse(&line.to_string()).expect("failed parsing");
+        assert_eq!(
+            result,
+            ParsedLine::ChangedData {
+                columns: vec![
+                    Column::ChangedColumn {
+                        column_info: ColumnInfo::new("id".to_string(), "bigint".to_string()),
+                        value: Some(ColumnValue::Integer(123))
+                    },
+                    Column::ChangedColumn {
+                        column_info: ColumnInfo::new("foobar".to_string(), "text".to_string()),
+                        value: Some(ColumnValue::Text("foobar string".to_string()))
+                    },
+                    Column::ChangedColumn {
+                        column_info: ColumnInfo::new("baz_int8range".to_string(), "int8range".to_string()),
+                        value: Some(ColumnValue::Text("[1743532200,1743553800)".to_string()))
                     }
                 ],
                 table_name: ArcIntern::new("public.users".to_string()),
