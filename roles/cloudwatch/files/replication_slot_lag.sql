@@ -1,0 +1,1 @@
+select 'pg_replication_slot_lag_mb:' || greatest(0, round((redo_lsn - restart_lsn) / 1024 /1024, 2)) || '|g|#slot_name:' || slot_name from pg_control_checkpoint(), pg_replication_slots;
