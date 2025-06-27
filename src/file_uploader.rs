@@ -7,7 +7,7 @@ use tokio::fs::File;
 use tokio_util::codec;
 
 #[allow(unused_imports)]
-use crate::{function, logger_debug, logger_error, logger_info, logger_panic};
+use crate::{function, logger_debug, logger_error, logger_info, logger_panic, logger_warning};
 
 use crate::exponential_backoff::*;
 use crate::file_writer::{FileStruct, FileWriter};
@@ -39,12 +39,39 @@ lazy_static! {
         std::env::var("BUCKET_NAME").expect("BUCKET_NAME env is not set");
     static ref BUCKET_FOLDER: String =
         std::env::var("BUCKET_FOLDER").expect("BUCKET_FOLDER env is not set");
+    static ref AWS_REGION: String =
+        std::env::var("AWS_REGION").unwrap_or_else(|_| "us-east-1".to_string());
 }
 
 impl FileUploader {
     pub fn new() -> FileUploader {
+        logger_info!(None, None, &format!("Initializing S3 client with region: {}", AWS_REGION.as_str()));
+        
+        let region = match AWS_REGION.as_str() {
+            "us-east-1" => Region::UsEast1,
+            "us-east-2" => Region::UsEast2,
+            "us-west-1" => Region::UsWest1,
+            "us-west-2" => Region::UsWest2,
+            "ca-central-1" => Region::CaCentral1,
+            "eu-west-1" => Region::EuWest1,
+            "eu-west-2" => Region::EuWest2,
+            "eu-west-3" => Region::EuWest3,
+            "eu-central-1" => Region::EuCentral1,
+            "ap-northeast-1" => Region::ApNortheast1,
+            "ap-northeast-2" => Region::ApNortheast2,
+            "ap-northeast-3" => Region::ApNortheast3,
+            "ap-southeast-1" => Region::ApSoutheast1,
+            "ap-southeast-2" => Region::ApSoutheast2,
+            "ap-south-1" => Region::ApSouth1,
+            "sa-east-1" => Region::SaEast1,
+            _ => {
+                logger_warning!(None, None, &format!("Invalid AWS region: {}. Defaulting to us-east-1", AWS_REGION.as_str()));
+                Region::UsEast1
+            }
+        };
+        
         FileUploader {
-            s3_client: S3Client::new(Region::UsEast1),
+            s3_client: S3Client::new(region),
         }
     }
     pub async fn upload_to_s3(
@@ -98,6 +125,12 @@ impl FileUploader {
                         );
                     }
                     Err(result) => {
+                        // Log the specific S3 error details
+                        logger_error!(
+                            Some(wal_file.file_number),
+                            Some(&file_struct.table_name),
+                            &format!("S3 upload error: {:?} for file: {}", result, remote_filename)
+                        );
                         // treat s3 errors as transient
                         return Err(BackoffError::transient(result));
                     }
