@@ -1,0 +1,1 @@
+select 'percent_dead_tuples:' || round(CAST((float4(n_dead_tup)/float4(n_live_tup))*100 as numeric),2) || '|g|#table_name:' || relname  FROM pg_stat_user_tables WHERE n_live_tup > 0 AND schemaname = 'public' AND (relname IN ('users', 'logins', 'transactions', 'user_relationships_timestamps') OR relname LIKE 'webhooks_incoming_webhooks%');
