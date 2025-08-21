@@ -1,0 +1,5 @@
+BEGIN 3970124255
+table public.foobar: INSERT: baz[text]:'hello
+null and other stuff
+bye'
+COMMIT 3970124255
