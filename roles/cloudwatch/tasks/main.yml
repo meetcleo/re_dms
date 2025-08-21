@@ -66,6 +66,27 @@
     enabled: yes
     daemon_reload: yes
 
+# note with backrefs then it won't change anything already there
+- name: Set rotation count to 7
+  ansible.builtin.lineinfile:
+    path: /etc/logrotate.d/rsyslog
+    regexp: '^(\s*)rotate\s+'
+    line: '\1rotate 7'
+    backrefs: yes
+    backup: no
+    state: present
+  tags: logrotate-config
+
+- name: Set rotation period to daily
+  ansible.builtin.lineinfile:
+    path: /etc/logrotate.d/rsyslog
+    regexp: '^(\s*)weekly'
+    line: '\1daily'
+    backrefs: yes
+    backup: no
+    state: present
+  tags: logrotate-config
+
 - name: Copy systemd service file to server
   ansible.builtin.copy:
     src: '{{ item }}'
