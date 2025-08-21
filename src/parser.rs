@@ -412,7 +412,7 @@ impl ColumnValue {
         continue_parse: bool,
     ) -> Result<(Option<ColumnValue>, &'a str)> {
         const NULL_STRING: &str = "null";
-        if string.starts_with(NULL_STRING) {
+        if string.starts_with(NULL_STRING) && !continue_parse {
             let (_start, rest) = ColumnValue::split_until_char_or_end(string, ' ');
             Ok((None, rest))
         } else {
@@ -1502,5 +1502,47 @@ mod tests {
                 ParsedLine::Commit(3970124255)
             ]
         ))
+    }
+
+    #[test]
+    fn parsing_with_newline_null_works() {
+        use std::fs::File;
+        use std::io::{self, BufRead};
+
+        let mut parser = Parser::new(true);
+        let mut collector = Vec::new();
+        let file = File::open("./test/parser_null_newline_bug.txt")
+            .expect("couldn't find file containing test data");
+        let lines = io::BufReader::new(file).lines();
+        for line in lines {
+            if let Ok(ip) = line {
+                let parsed_line = parser
+                    .parse(&ip)
+                    .expect(&format!("failed to parse: {}", &ip));
+                match parsed_line {
+                    ParsedLine::ContinueParse => {}
+                    _ => {
+                        collector.push(parsed_line);
+                    }
+                }
+            }
+        }
+        assert!(
+            equal_unordered_list(
+                &collector,
+                &vec![
+                    ParsedLine::Begin(3970124255),
+                    ParsedLine::ChangedData {
+                        columns: vec![Column::ChangedColumn {
+                            column_info: ColumnInfo::new("baz".to_string(), "text".to_string()),
+                            value: Some(ColumnValue::Text("hello\nnull and other stuff\nbye".to_string()))
+                        }],
+                        table_name: ArcIntern::new("public.foobar".to_string()),
+                        kind: ChangeKind::Insert
+                    },
+                    ParsedLine::Commit(3970124255)
+                ]
+            )
+        );
     }
 }
