@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use glob::glob;
 use lazy_static::lazy_static;
 use std::fs::{self, File, OpenOptions};
@@ -40,6 +41,8 @@ pub struct WalFile {
     // for the directory associated with this wal file see
     // path_for_wal_directory
     pub wal_directory: PathBuf,
+    // timestamp when this WAL file was created
+    pub created_at: DateTime<Utc>,
     // we have interior mutability of the file, and synchronise with a mutex
     // NOTE: it is unsafe to create two wal_files with the same file_number
     // (keep wal file creation single threaded!)
@@ -85,7 +88,9 @@ impl Eq for WalFile {}
 
 impl PartialEq for WalFile {
     fn eq(&self, other: &Self) -> bool {
-        self.file_number == other.file_number && Arc::ptr_eq(&self.file, &other.file)
+        self.file_number == other.file_number 
+            && Arc::ptr_eq(&self.file, &other.file)
+            && self.created_at == other.created_at
     }
 }
 
@@ -134,6 +139,7 @@ impl WalFile {
             file_number: wal_file_number,
             file: Arc::new(Some(Mutex::new(WalFileInternal::new(file)))),
             wal_directory: wal_file_directory.to_path_buf(),
+            created_at: Utc::now(),
         }
     }
     // 16 hex chars

@@ -3,6 +3,7 @@ use crate::parser::{
     TableName,
 };
 use crate::targets_tables_column_names::{Table as TableFromTarget, TargetsTablesColumnNames};
+use crate::transaction_filter::{filter_transaction, FilterResult};
 use crate::wal_file_manager::WalFile;
 use itertools::Itertools;
 use std::collections::hash_map::Entry::{Occupied, Vacant};
@@ -680,6 +681,7 @@ impl ChangeProcessing {
         if self.table_holder.changes_len() != 0 {
             panic!("Tried to register wal file while we have changes in our tables");
         }
+        
         self.associated_wal_file = associated_wal_file;
     }
     pub fn add_change(
@@ -693,6 +695,23 @@ impl ChangeProcessing {
             | ParsedLine::Truncate => Ok(None),
             ParsedLine::ContinueParse => Ok(None), // need to be exhaustive
             ParsedLine::ChangedData { .. } => {
+                // Check if transaction should be filtered based on updated_at column
+                if let Some(filter_result) = self.should_filter_transaction(&parsed_line) {
+                    match filter_result {
+                        FilterResult::Process => {
+                            // Continue with normal processing
+                        }
+                        FilterResult::Skip(reason) => {
+                            logger_debug!(
+                                None,
+                                None,  
+                                &format!("Skipping transaction: {}", reason)
+                            );
+                            return Ok(None);
+                        }
+                    }
+                }
+
                 // map here maps over the option
                 // NOTE: this means that we must return a table if we want to return a ddl result
                 Ok(self
@@ -721,6 +740,47 @@ impl ChangeProcessing {
                     }))
             }
         }
+    }
+
+    /// Check if a transaction should be filtered based on its updated_at timestamp
+    /// Returns Some(FilterResult) if the transaction has an updated_at column, None otherwise
+    fn should_filter_transaction(&self, parsed_line: &ParsedLine) -> Option<FilterResult> {
+        if let ParsedLine::ChangedData { columns, .. } = parsed_line {
+            // Get WAL creation time for filtering
+            let wal_creation_time = match &self.associated_wal_file {
+                Some(wal_file) => wal_file.created_at,
+                None => {
+                    // No WAL file, can't filter - process the transaction
+                    return None;
+                }
+            };
+
+            // Look for an updated_at column in the transaction
+            for column in columns {
+                if column.column_name() == "updated_at" {
+                    // Found updated_at column, check if it has a value
+                    match column {
+                        Column::ChangedColumn { value: Some(ColumnValue::Text(timestamp_str)), .. } => {
+                            return Some(filter_transaction(wal_creation_time, timestamp_str));
+                        }
+                        Column::ChangedColumn { value: None, .. } => {
+                            // updated_at is NULL, process the transaction
+                            return Some(FilterResult::Process);
+                        }
+                        Column::UnchangedToastColumn { .. } => {
+                            // Toast column, we can't check the timestamp, so process it
+                            return Some(FilterResult::Process);
+                        }
+                        _ => {
+                            // Other column value types for updated_at (unexpected), process it
+                            return Some(FilterResult::Process);
+                        }
+                    }
+                }
+            }
+        }
+        // No updated_at column found, don't filter
+        None
     }
 
     #[allow(dead_code)]

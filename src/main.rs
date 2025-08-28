@@ -25,6 +25,7 @@ mod logger;
 mod parser;
 mod shutdown_handler;
 mod targets_tables_column_names;
+mod transaction_filter;
 mod wal_file_manager;
 
 use file_uploader_threads::DEFAULT_CHANNEL_SIZE;
