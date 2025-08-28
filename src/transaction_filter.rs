@@ -71,26 +71,14 @@ pub fn filter_transaction(wal_creation_time: DateTime<Utc>, updated_at_str: &str
 }
 
 /// Parse a PostgreSQL timestamp string to UTC DateTime
-/// Handles various PostgreSQL timestamp formats:
-/// - "2020-11-27 15:31:21.771279" (timestamp without timezone)
-/// - "2020-11-27 15:31:21.771279+00:00" (timestamp with timezone)
+/// Handles PostgreSQL "timestamp without time zone" format: "2020-11-27 15:31:21.771279"
 fn parse_timestamp(timestamp_str: &str) -> Result<DateTime<Utc>, String> {
-    // Try parsing with timezone first
-    if let Ok(dt) = DateTime::parse_from_str(timestamp_str, "%Y-%m-%d %H:%M:%S%.f%z") {
-        return Ok(dt.with_timezone(&Utc));
-    }
-
-    // Try parsing with 'T' separator and timezone
-    if let Ok(dt) = DateTime::parse_from_str(timestamp_str, "%Y-%m-%dT%H:%M:%S%.f%z") {
-        return Ok(dt.with_timezone(&Utc));
-    }
-
-    // Try parsing without timezone (assume UTC)
+    // Try parsing with microseconds first (our standard format)
     if let Ok(naive_dt) = NaiveDateTime::parse_from_str(timestamp_str, "%Y-%m-%d %H:%M:%S%.f") {
         return Ok(DateTime::from_utc(naive_dt, Utc));
     }
 
-    // Try parsing without microseconds
+    // Fallback: try parsing without microseconds
     if let Ok(naive_dt) = NaiveDateTime::parse_from_str(timestamp_str, "%Y-%m-%d %H:%M:%S") {
         return Ok(DateTime::from_utc(naive_dt, Utc));
     }
@@ -101,7 +89,7 @@ fn parse_timestamp(timestamp_str: &str) -> Result<DateTime<Utc>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::{TimeZone, Utc};
+    use chrono::{Datelike, TimeZone, Utc};
 
     #[test]
     fn test_filter_recent_transaction() {
@@ -148,18 +136,38 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_various_timestamp_formats() {
-        // PostgreSQL timestamp without timezone
+    fn test_parse_postgresql_timestamp_formats() {
+        // PostgreSQL timestamp with microseconds (our standard format)
         assert!(parse_timestamp("2020-11-27 15:31:21.771279").is_ok());
 
-        // PostgreSQL timestamp without microseconds
+        // PostgreSQL timestamp without microseconds (fallback)
         assert!(parse_timestamp("2020-11-27 15:31:21").is_ok());
 
-        // ISO format with timezone
-        assert!(parse_timestamp("2020-11-27T15:31:21.771279+00:00").is_ok());
-
-        // Invalid format
+        // Invalid formats should fail
         assert!(parse_timestamp("invalid-timestamp").is_err());
+        assert!(parse_timestamp("2020-11-27T15:31:21.771279+00:00").is_err()); // ISO format not supported
+        assert!(parse_timestamp("").is_err());
+    }
+
+    #[test]
+    fn test_parse_actual_test_data_format() {
+        // Test the exact formats found in test/parser.txt
+        let test_timestamps = vec![
+            "2020-11-27 15:31:21.771279", // from transactions table
+            "2020-11-27 15:35:28.542551", // from users table
+            "2020-11-27 15:35:28.540886", // from app_sessions table
+        ];
+
+        for timestamp in test_timestamps {
+            let result = parse_timestamp(timestamp);
+            assert!(result.is_ok(), "Failed to parse timestamp: {}", timestamp);
+            
+            // Verify the parsed timestamp is reasonable
+            let parsed = result.unwrap();
+            assert_eq!(parsed.year(), 2020);
+            assert_eq!(parsed.month(), 11);
+            assert_eq!(parsed.day(), 27);
+        }
     }
 
     #[test]
@@ -193,14 +201,6 @@ mod tests {
         assert!(matches!(filter_transaction(wal_time, precise_old_transaction), FilterResult::Skip(_)));
     }
 
-    #[test]
-    fn test_timezone_handling() {
-        let wal_time = Utc.ymd(2023, 1, 1).and_hms(12, 0, 0);
-
-        // Test timezone conversion (assuming UTC for simplicity in test)
-        let tz_transaction = "2023-01-01T11:00:00.000000+00:00";
-        assert_eq!(filter_transaction(wal_time, tz_transaction), FilterResult::Process);
-    }
 
     #[test]
     fn test_filter_result_equality() {
