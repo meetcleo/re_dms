@@ -23,6 +23,49 @@ pub enum FilterResult {
     Skip(String), // reason for skipping
 }
 
+/// Check if a transaction should be filtered based on its updated_at timestamp
+/// Returns Some(FilterResult) if the transaction has an updated_at column, None otherwise
+///
+/// # Arguments
+/// * `wal_creation_time` - When the current WAL file was created
+/// * `parsed_line` - The parsed transaction line to check
+///
+/// # Returns
+/// * `Some(FilterResult::Process)` if the transaction should be processed
+/// * `Some(FilterResult::Skip(reason))` if the transaction should be skipped
+/// * `None` if no updated_at column found (don't filter)
+pub fn should_filter_transaction(wal_creation_time: DateTime<Utc>, parsed_line: &crate::parser::ParsedLine) -> Option<FilterResult> {
+    use crate::parser::{Column, ColumnValue, ParsedLine};
+    
+    if let ParsedLine::ChangedData { columns, .. } = parsed_line {
+        // Look for an updated_at column in the transaction
+        for column in columns {
+            if column.column_name() == "updated_at" {
+                // Found updated_at column, check if it has a value
+                match column {
+                    Column::ChangedColumn { value: Some(ColumnValue::Text(timestamp_str)), .. } => {
+                        return Some(filter_transaction_by_timestamp(wal_creation_time, timestamp_str));
+                    }
+                    Column::ChangedColumn { value: None, .. } => {
+                        // updated_at is NULL, process the transaction
+                        return Some(FilterResult::Process);
+                    }
+                    Column::UnchangedToastColumn { .. } => {
+                        // Toast column, we can't check the timestamp, so process it
+                        return Some(FilterResult::Process);
+                    }
+                    _ => {
+                        // Other column value types for updated_at (unexpected), process it
+                        return Some(FilterResult::Process);
+                    }
+                }
+            }
+        }
+    }
+    // No updated_at column found, don't filter
+    None
+}
+
 /// Filter a transaction based on its updated_at timestamp relative to WAL creation time
 ///
 /// # Arguments
@@ -32,7 +75,7 @@ pub enum FilterResult {
 /// # Returns
 /// * `FilterResult::Process` if the transaction should be processed
 /// * `FilterResult::Skip(reason)` if the transaction should be skipped
-pub fn filter_transaction(wal_creation_time: DateTime<Utc>, updated_at_str: &str) -> FilterResult {
+pub fn filter_transaction_by_timestamp(wal_creation_time: DateTime<Utc>, updated_at_str: &str) -> FilterResult {
     let updated_at = match parse_timestamp(updated_at_str) {
         Ok(dt) => dt,
         Err(e) => {
@@ -97,7 +140,7 @@ mod tests {
 
         // Transaction from 30 minutes ago (within 1 hour threshold)
         let recent_transaction = "2023-01-01 11:30:00.000000";
-        assert_eq!(filter_transaction(wal_time, recent_transaction), FilterResult::Process);
+        assert_eq!(filter_transaction_by_timestamp(wal_time, recent_transaction), FilterResult::Process);
     }
 
     #[test]
@@ -106,7 +149,7 @@ mod tests {
 
         // Transaction from 2 hours ago (beyond 1 hour threshold)
         let old_transaction = "2023-01-01 10:00:00.000000";
-        if let FilterResult::Skip(reason) = filter_transaction(wal_time, old_transaction) {
+        if let FilterResult::Skip(reason) = filter_transaction_by_timestamp(wal_time, old_transaction) {
             assert!(reason.contains("7200 seconds older"));
         } else {
             panic!("Expected transaction to be filtered out");
@@ -119,7 +162,7 @@ mod tests {
 
         // Transaction exactly at the threshold (1 hour ago)
         let boundary_transaction = "2023-01-01 11:00:00.000000";
-        assert_eq!(filter_transaction(wal_time, boundary_transaction), FilterResult::Process);
+        assert_eq!(filter_transaction_by_timestamp(wal_time, boundary_transaction), FilterResult::Process);
     }
 
     #[test]
@@ -128,7 +171,7 @@ mod tests {
 
         // Transaction 1 second beyond threshold
         let beyond_threshold = "2023-01-01 10:59:59.000000";
-        if let FilterResult::Skip(_) = filter_transaction(wal_time, beyond_threshold) {
+        if let FilterResult::Skip(_) = filter_transaction_by_timestamp(wal_time, beyond_threshold) {
             // Expected
         } else {
             panic!("Expected transaction to be filtered out");
@@ -175,9 +218,9 @@ mod tests {
         let wal_time = Utc.ymd(2023, 1, 1).and_hms(12, 0, 0);
 
         // Invalid timestamps should be processed (fail safe)
-        assert_eq!(filter_transaction(wal_time, "invalid-timestamp"), FilterResult::Process);
-        assert_eq!(filter_transaction(wal_time, ""), FilterResult::Process);
-        assert_eq!(filter_transaction(wal_time, "2023-13-45 25:70:99"), FilterResult::Process);
+        assert_eq!(filter_transaction_by_timestamp(wal_time, "invalid-timestamp"), FilterResult::Process);
+        assert_eq!(filter_transaction_by_timestamp(wal_time, ""), FilterResult::Process);
+        assert_eq!(filter_transaction_by_timestamp(wal_time, "2023-13-45 25:70:99"), FilterResult::Process);
     }
 
     #[test]
@@ -186,7 +229,7 @@ mod tests {
 
         // Future transaction (should be processed)
         let future_transaction = "2023-01-01 13:00:00.000000";
-        assert_eq!(filter_transaction(wal_time, future_transaction), FilterResult::Process);
+        assert_eq!(filter_transaction_by_timestamp(wal_time, future_transaction), FilterResult::Process);
     }
 
     #[test]
@@ -195,10 +238,10 @@ mod tests {
 
         // Test microsecond precision in filtering
         let precise_transaction = "2023-01-01 11:00:00.000001"; // Just over threshold
-        assert_eq!(filter_transaction(wal_time, precise_transaction), FilterResult::Process);
+        assert_eq!(filter_transaction_by_timestamp(wal_time, precise_transaction), FilterResult::Process);
 
         let precise_old_transaction = "2023-01-01 10:59:59.999999"; // Just under threshold
-        assert!(matches!(filter_transaction(wal_time, precise_old_transaction), FilterResult::Skip(_)));
+        assert!(matches!(filter_transaction_by_timestamp(wal_time, precise_old_transaction), FilterResult::Skip(_)));
     }
 
 
@@ -231,7 +274,7 @@ mod tests {
 
         // Very old transaction (days old)
         let very_old = "2022-12-01 12:00:00.000000";
-        if let FilterResult::Skip(reason) = filter_transaction(wal_time, very_old) {
+        if let FilterResult::Skip(reason) = filter_transaction_by_timestamp(wal_time, very_old) {
             assert!(reason.contains("seconds older"));
         } else {
             panic!("Expected very old transaction to be filtered");
@@ -248,7 +291,7 @@ mod tests {
         for i in 0..10000 {
             let timestamp = format!("2023-01-01 11:{:02}:{:02}.000000",
                                   (i / 60) % 60, i % 60);
-            filter_transaction(wal_time, &timestamp);
+            filter_transaction_by_timestamp(wal_time, &timestamp);
         }
 
         let duration = start.elapsed();
