@@ -36,7 +36,7 @@ pub enum FilterResult {
 /// * `None` if no updated_at column found (don't filter)
 pub fn should_filter_transaction(wal_creation_time: DateTime<Utc>, parsed_line: &crate::parser::ParsedLine) -> Option<FilterResult> {
     use crate::parser::{Column, ColumnValue, ParsedLine};
-    
+
     if let ParsedLine::ChangedData { columns, .. } = parsed_line {
         // Look for an updated_at column in the transaction
         for column in columns {
@@ -204,7 +204,7 @@ mod tests {
         for timestamp in test_timestamps {
             let result = parse_timestamp(timestamp);
             assert!(result.is_ok(), "Failed to parse timestamp: {}", timestamp);
-            
+
             // Verify the parsed timestamp is reasonable
             let parsed = result.unwrap();
             assert_eq!(parsed.year(), 2020);
