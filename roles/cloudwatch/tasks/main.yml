@@ -97,7 +97,25 @@
     - measure_number_of_wal_files.sh
     - measure_age_of_oldest_wal_file.sh
     - measure_age_of_youngest_wal_file.sh
+    - dead_tuple_percentages.sh
+    - dead_tuple_percentages.sql
+    - replication_slot_lag.sh
+    - replication_slot_lag.sql
+    - vacuum_analyze.sh
   tags: statsd-metrics
+
+- name: Git checkout vacuum analyze tool
+  ansible.builtin.git:
+    repo: 'https://github.com/BhuviTheDataGuy/RedShift-ToolKit'
+    dest: /usr/local/bin/RedShift-ToolKit
+    update: false
+
+- name: Make vacuum analyze script executable
+  ansible.builtin.file:
+    path: /usr/local/bin/RedShift-ToolKit/VacuumAnalyzeUtility/vacuum-analyze-utility.sh
+    owner: root
+    group: re_dms
+    mode: '0750'
 
 - name: set custom cron metric reporting to statsd
   ansible.builtin.cron:
@@ -110,4 +128,34 @@
     # pipefail to exit early
     # echo as a guage to netcat, and send to default statsd collection agent.
     job: "(/usr/local/bin/measure_number_of_wal_files.sh ; /usr/local/bin/measure_age_of_oldest_wal_file.sh ; /usr/local/bin/measure_age_of_youngest_wal_file.sh) 2>&1 | logger -t bash_metrics"
+  tags: statsd-metrics
+
+- name: set custom dead tuple reporting to statsd
+  ansible.builtin.cron:
+    name: 'check number of dead tuples.'
+    minute: '*/5' # every 5 minutes
+    hour: '*'
+    weekday: '*'
+    user: 're_dms'
+    job: "/usr/local/bin/dead_tuple_percentages.sh 2>&1 | logger -t dead_tuple_percentages"
+  tags: statsd-metrics
+
+- name: set custom replication slot lag reporting to statsd
+  ansible.builtin.cron:
+    name: 'check replication slot lag'
+    minute: '*/5' # every 5 minutes
+    hour: '*'
+    weekday: '*'
+    user: 're_dms'
+    job: "/usr/local/bin/replication_slot_lag.sh 2>&1 | logger -t replication_slot_lag"
+  tags: statsd-metrics
+
+- name: vacuum analyze public tables
+  ansible.builtin.cron:
+    name: 'vacuum analyze public tables'
+    minute: '0' # 9pm nightly
+    hour: '21'
+    weekday: '*'
+    user: 're_dms'
+    job: "/usr/local/bin/vacuum_analyze.sh 2>&1 | logger -t vacuum_analyze"
   tags: statsd-metrics
