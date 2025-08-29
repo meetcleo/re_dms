@@ -698,14 +698,17 @@ impl ChangeProcessing {
             ParsedLine::ChangedData { ref table_name, .. } => {
 
                 // Check if transaction should be filtered based on updated_at column
-                if let Some(wal_file) = &self.associated_wal_file {
-                    if let Some(FilterResult::Skip(reason)) = should_filter_transaction(wal_file.created_at, &parsed_line) {
-                        logger_debug!(
-                            Some(wal_file.file_number),
-                            Some(&table_name),
-                            &format!("Skipping transaction: {}", reason)
-                        );
-                        return Ok(None);
+                // Only apply filtering to public.transactions table
+                if table_name.as_ref() == "public.transactions" {
+                    if let Some(wal_file) = &self.associated_wal_file {
+                        if let Some(FilterResult::Skip(reason)) = should_filter_transaction(wal_file.created_at, &parsed_line) {
+                            logger_debug!(
+                                Some(wal_file.file_number),
+                                Some(&table_name),
+                                &format!("Skipping transaction: {}", reason)
+                            );
+                            return Ok(None);
+                        }
                     }
                 }
 
@@ -2373,5 +2376,206 @@ mod tests {
         };
         assert_eq!(change_processing.table_holder, expected_table_holder_2);
         assert!(result_2.is_none());
+    }
+
+    #[test]
+    fn transaction_filtering_only_applies_to_public_transactions_table() {
+        use chrono::{Duration, Utc};
+        clear_testing_directory();
+
+        // Create a WAL file with a specific creation time
+        let mut wal_file = new_wal_file();
+        wal_file.created_at = Utc::now() - Duration::hours(2);
+
+        // Create test data with an old updated_at timestamp
+        let old_timestamp = "2020-01-01 00:00:00.000000";
+        let table_name = TableName::new("public.transactions".to_string());
+        let id_column_info = ColumnInfo::new("id", "bigint");
+        let updated_at_column_info = ColumnInfo::new("updated_at", "timestamp");
+
+        let columns = vec![
+            Column::ChangedColumn {
+                column_info: id_column_info.clone(),
+                value: Some(ColumnValue::Integer(1)),
+            },
+            Column::ChangedColumn {
+                column_info: updated_at_column_info.clone(),
+                value: Some(ColumnValue::Text(old_timestamp.to_string())),
+            },
+        ];
+
+        let change = ParsedLine::ChangedData {
+            kind: ChangeKind::Insert,
+            table_name: table_name.clone(),
+            columns,
+        };
+
+        let mut tables_columns_names_map = HashMap::new();
+        tables_columns_names_map.insert(
+            table_name.clone(),
+            vec![id_column_info.name.clone(), updated_at_column_info.name.clone()]
+                .iter()
+                .cloned()
+                .collect(),
+        );
+
+        let mut change_processing =
+            ChangeProcessing::new(TargetsTablesColumnNames::from_map(tables_columns_names_map));
+        change_processing.register_wal_file(Some(wal_file));
+
+        // This should be filtered out because it's in public.transactions and has an old updated_at
+        let _result = change_processing.add_change(change).expect("Failed processing change");
+        // Check that no changes were added (filtered out)
+        assert_eq!(change_processing.get_stats(), hashmap!(), "Old transaction in public.transactions should be filtered out");
+    }
+
+    #[test]
+    fn transaction_filtering_does_not_apply_to_other_tables() {
+        use chrono::{Duration, Utc};
+        clear_testing_directory();
+
+        // Create a WAL file with a specific creation time
+        let mut wal_file = new_wal_file();
+        wal_file.created_at = Utc::now() - Duration::hours(2);
+
+        // Create test data with an old updated_at timestamp for a different table
+        let old_timestamp = "2020-01-01 00:00:00.000000";
+        let table_name = TableName::new("public.users".to_string());  // Different table
+        let id_column_info = ColumnInfo::new("id", "bigint");
+        let updated_at_column_info = ColumnInfo::new("updated_at", "timestamp");
+
+        let columns = vec![
+            Column::ChangedColumn {
+                column_info: id_column_info.clone(),
+                value: Some(ColumnValue::Integer(1)),
+            },
+            Column::ChangedColumn {
+                column_info: updated_at_column_info.clone(),
+                value: Some(ColumnValue::Text(old_timestamp.to_string())),
+            },
+        ];
+
+        let change = ParsedLine::ChangedData {
+            kind: ChangeKind::Insert,
+            table_name: table_name.clone(),
+            columns,
+        };
+
+        let mut tables_columns_names_map = HashMap::new();
+        tables_columns_names_map.insert(
+            table_name.clone(),
+            vec![id_column_info.name.clone()]
+                .iter()
+                .cloned()
+                .collect(),
+        );
+
+        let mut change_processing =
+            ChangeProcessing::new(TargetsTablesColumnNames::from_map(tables_columns_names_map));
+        change_processing.register_wal_file(Some(wal_file));
+
+        // This should NOT be filtered out even though it has an old updated_at, because it's not public.transactions
+        let _result = change_processing.add_change(change).expect("Failed processing change");
+        // Check that the change was added (not filtered)
+        let expected_stats = hashmap!(&table_name => 1);
+        assert_eq!(change_processing.get_stats(), expected_stats, "Old transaction in public.users should NOT be filtered out");
+    }
+
+    #[test]
+    fn transaction_filtering_with_recent_timestamp_in_public_transactions() {
+        use chrono::Utc;
+        clear_testing_directory();
+
+        // Create a WAL file with current time
+        let mut wal_file = new_wal_file();
+        wal_file.created_at = Utc::now();
+
+        // Create test data with a recent updated_at timestamp
+        let recent_timestamp = Utc::now().format("%Y-%m-%d %H:%M:%S.%f").to_string();
+        let table_name = TableName::new("public.transactions".to_string());
+        let id_column_info = ColumnInfo::new("id", "bigint");
+        let updated_at_column_info = ColumnInfo::new("updated_at", "timestamp");
+
+        let columns = vec![
+            Column::ChangedColumn {
+                column_info: id_column_info.clone(),
+                value: Some(ColumnValue::Integer(1)),
+            },
+            Column::ChangedColumn {
+                column_info: updated_at_column_info.clone(),
+                value: Some(ColumnValue::Text(recent_timestamp)),
+            },
+        ];
+
+        let change = ParsedLine::ChangedData {
+            kind: ChangeKind::Insert,
+            table_name: table_name.clone(),
+            columns,
+        };
+
+        let mut tables_columns_names_map = HashMap::new();
+        tables_columns_names_map.insert(
+            table_name.clone(),
+            vec![id_column_info.name.clone()]
+                .iter()
+                .cloned()
+                .collect(),
+        );
+
+        let mut change_processing =
+            ChangeProcessing::new(TargetsTablesColumnNames::from_map(tables_columns_names_map));
+        change_processing.register_wal_file(Some(wal_file));
+
+        // This should NOT be filtered out because it's recent
+        let _result = change_processing.add_change(change).expect("Failed processing change");
+        // Check that the change was added (not filtered)
+        let expected_stats = hashmap!(&table_name => 1);
+        assert_eq!(change_processing.get_stats(), expected_stats, "Recent transaction in public.transactions should NOT be filtered out");
+    }
+
+    #[test]
+    fn transaction_filtering_without_updated_at_column_in_public_transactions() {
+        use chrono::Utc;
+        clear_testing_directory();
+
+        // Create a WAL file with current time
+        let mut wal_file = new_wal_file();
+        wal_file.created_at = Utc::now();
+
+        // Create test data WITHOUT updated_at column
+        let table_name = TableName::new("public.transactions".to_string());
+        let id_column_info = ColumnInfo::new("id", "bigint");
+
+        let columns = vec![
+            Column::ChangedColumn {
+                column_info: id_column_info.clone(),
+                value: Some(ColumnValue::Integer(1)),
+            },
+        ];
+
+        let change = ParsedLine::ChangedData {
+            kind: ChangeKind::Insert,
+            table_name: table_name.clone(),
+            columns,
+        };
+
+        let mut tables_columns_names_map = HashMap::new();
+        tables_columns_names_map.insert(
+            table_name.clone(),
+            vec![id_column_info.name.clone()]
+                .iter()
+                .cloned()
+                .collect(),
+        );
+
+        let mut change_processing =
+            ChangeProcessing::new(TargetsTablesColumnNames::from_map(tables_columns_names_map));
+        change_processing.register_wal_file(Some(wal_file));
+
+        // This should NOT be filtered out because there's no updated_at column
+        let _result = change_processing.add_change(change).expect("Failed processing change");
+        // Check that the change was added (not filtered)
+        let expected_stats = hashmap!(&table_name => 1);
+        assert_eq!(change_processing.get_stats(), expected_stats, "Transaction without updated_at column should NOT be filtered out");
     }
 }
