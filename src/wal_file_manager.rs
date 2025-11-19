@@ -232,6 +232,15 @@ pub enum WalFileMode {
     Reprocessing(String),
 }
 
+impl std::fmt::Display for WalFileMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            WalFileMode::Processing => write!(f, "Processing"),
+            WalFileMode::Reprocessing(path) => write!(f, "Reprocessing({})", path),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct WalFileManager {
     // the number of our wal file. starts at 1, goes to i64::maxint at which point we break

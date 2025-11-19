@@ -71,7 +71,7 @@ openssl = "0.10"
 
 # serialisation
 serde = "1.0.117"
-config = "0.10.1"
+config = "0.15"
 
 # hashmap literal macro
 maplit = "1.0.2"
@@ -85,7 +85,7 @@ dogstatsd = "0.6.2"
 
 sentry = { version = "0.32.1", optional = true }
 
-[dev_dependencies]
+[dev-dependencies]
 mock_instant = { version = "0.2", features = ["sync"] }
 # so we can have things running globally before our tests.
 ctor = "0.1.16"
