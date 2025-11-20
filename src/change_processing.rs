@@ -723,7 +723,8 @@ impl ChangeProcessing {
         }
     }
 
-    #[allow(dead_code)]
+    /// Get statistics for all tables. Used for debugging and testing.
+    #[allow(dead_code)] // Used in tests, intentionally part of public API for debugging
     pub fn get_stats(&self) -> HashMap<&TableName, usize> {
         self.table_holder
             .tables
@@ -732,7 +733,8 @@ impl ChangeProcessing {
             .collect()
     }
 
-    #[allow(dead_code)]
+    /// Print statistics for all tables. Used for debugging and testing.
+    #[allow(dead_code)] // Used in tests, intentionally part of public API for debugging
     pub fn print_stats(&self) {
         self.table_holder
             .tables
