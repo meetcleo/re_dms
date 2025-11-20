@@ -3,6 +3,8 @@ use dogstatsd::{Client as StatsdClient, Options as StatsdOptions};
 use openssl::ssl::{SslConnector, SslMethod};
 use postgres_openssl::MakeTlsConnector;
 use serde::Deserialize;
+use std::error::Error;
+use std::fmt;
 use std::time::{Duration, Instant};
 use tokio::time::timeout;
 use tokio_postgres::error::Error as TokioPostgresError;
@@ -57,11 +59,38 @@ pub enum DatabaseWriterError {
     TimeoutError(tokio::time::error::Elapsed),
 }
 
+impl fmt::Display for DatabaseWriterError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DatabaseWriterError::PoolError(err) => {
+                write!(f, "Pool error: {}", err)
+            }
+            DatabaseWriterError::TokioError(err) => {
+                write!(f, "Tokio postgres error: {}", err)
+            }
+            DatabaseWriterError::TimeoutError(err) => {
+                write!(f, "Query timeout error: {}", err)
+            }
+        }
+    }
+}
+
+impl Error for DatabaseWriterError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            DatabaseWriterError::PoolError(err) => Some(err),
+            DatabaseWriterError::TokioError(err) => Some(err),
+            DatabaseWriterError::TimeoutError(err) => Some(err),
+        }
+    }
+}
+
 impl Config {
     pub fn from_env() -> Result<Self, ::config::ConfigError> {
-        let mut cfg = ::config::Config::new();
-        cfg.merge(::config::Environment::new().separator("__"))?;
-        cfg.try_into()
+        ::config::Config::builder()
+            .add_source(::config::Environment::default().separator("__"))
+            .build()?
+            .try_deserialize()
     }
 }
 

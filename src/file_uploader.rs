@@ -1,10 +1,8 @@
 use backoff::Error as BackoffError;
-use futures::TryStreamExt;
 use lazy_static::lazy_static;
-use rusoto_core::{ByteStream, Region, RusotoError};
-use rusoto_s3::{PutObjectError, PutObjectRequest, S3Client, S3};
-use tokio::fs::File;
-use tokio_util::codec;
+use aws_sdk_s3::Client as S3Client;
+use aws_sdk_s3::Error as S3Error;
+use aws_sdk_s3::primitives::ByteStream;
 
 #[allow(unused_imports)]
 use crate::{function, logger_debug, logger_error, logger_info, logger_panic, logger_warning};
@@ -39,39 +37,38 @@ lazy_static! {
         std::env::var("BUCKET_NAME").expect("BUCKET_NAME env is not set");
     static ref BUCKET_FOLDER: String =
         std::env::var("BUCKET_FOLDER").expect("BUCKET_FOLDER env is not set");
-    static ref AWS_REGION: String =
-        std::env::var("AWS_REGION").unwrap_or_else(|_| "us-east-1".to_string());
+    static ref AWS_REGION: String = {
+        let region = std::env::var("AWS_REGION").unwrap_or_else(|_| "us-east-1".to_string());
+        let valid_regions = [
+            "us-east-1", "us-east-2", "us-west-1", "us-west-2",
+            "ca-central-1",
+            "eu-west-1", "eu-west-2", "eu-west-3", "eu-central-1",
+            "ap-northeast-1", "ap-northeast-2", "ap-northeast-3",
+            "ap-southeast-1", "ap-southeast-2", "ap-south-1",
+            "sa-east-1",
+        ];
+        if !valid_regions.contains(&region.as_str()) {
+            logger_warning!(None, None, &format!("Invalid AWS region: {}. Defaulting to us-east-1", region));
+            "us-east-1".to_string()
+        } else {
+            region
+        }
+    };
 }
 
 impl FileUploader {
-    pub fn new() -> FileUploader {
+    pub async fn new() -> FileUploader {
         logger_info!(None, None, &format!("Initializing S3 client with region: {}", AWS_REGION.as_str()));
         
-        let region = match AWS_REGION.as_str() {
-            "us-east-1" => Region::UsEast1,
-            "us-east-2" => Region::UsEast2,
-            "us-west-1" => Region::UsWest1,
-            "us-west-2" => Region::UsWest2,
-            "ca-central-1" => Region::CaCentral1,
-            "eu-west-1" => Region::EuWest1,
-            "eu-west-2" => Region::EuWest2,
-            "eu-west-3" => Region::EuWest3,
-            "eu-central-1" => Region::EuCentral1,
-            "ap-northeast-1" => Region::ApNortheast1,
-            "ap-northeast-2" => Region::ApNortheast2,
-            "ap-northeast-3" => Region::ApNortheast3,
-            "ap-southeast-1" => Region::ApSoutheast1,
-            "ap-southeast-2" => Region::ApSoutheast2,
-            "ap-south-1" => Region::ApSouth1,
-            "sa-east-1" => Region::SaEast1,
-            _ => {
-                logger_warning!(None, None, &format!("Invalid AWS region: {}. Defaulting to us-east-1", AWS_REGION.as_str()));
-                Region::UsEast1
-            }
-        };
+        let region = aws_config::Region::new(AWS_REGION.to_string());
+        let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+            .region(region)
+            .load()
+            .await;
+        let s3_client = S3Client::new(&config);
         
         FileUploader {
-            s3_client: S3Client::new(region),
+            s3_client,
         }
     }
     pub async fn upload_to_s3(
@@ -79,7 +76,7 @@ impl FileUploader {
         wal_file: &wal_file_manager::WalFile,
         file_name: &str,
         file_struct: &FileStruct,
-    ) -> Result<CleoS3File, BackoffError<RusotoError<PutObjectError>>> {
+    ) -> Result<CleoS3File, BackoffError<S3Error>> {
         // info!("copying file {}", file_name);
         let local_filename = file_name;
         let remote_filename = BUCKET_FOLDER.to_owned() + file_name;
@@ -87,35 +84,25 @@ impl FileUploader {
         // async
         // info!("{}", local_filename);
         let meta = ::std::fs::metadata(local_filename).unwrap();
-        let tokio_file_result = File::open(&local_filename).await;
-        match tokio_file_result {
-            Ok(tokio_file) => {
-                // async
-                // roughly equivalent to https://stackoverflow.com/questions/59318460/what-is-the-best-way-to-convert-an-asyncread-to-a-trystream-of-bytes
-                // but requires ignoring a lot if unimportant stuff.
-                // Essentially, we have an async file, and want an immutable bytestream that we can read from it.
-                // our s3 library can then stream that to s3. This means we pause the async task on every bit of both read and
-                // write IO and are very efficient.
-                // map_ok is a future combinator, that will apply the closure to each frame
-                // (freeze-ing the frame to make it immutable since this is needed by the rusoto api)
-                let byte_stream = codec::FramedRead::new(tokio_file, codec::BytesCodec::new())
-                    .map_ok(|frame| frame.freeze());
-
+        let file_path = std::path::Path::new(local_filename);
+        let byte_stream_result = ByteStream::from_path(file_path).await;
+        match byte_stream_result {
+            Ok(byte_stream) => {
                 logger_debug!(
                     Some(wal_file.file_number),
                     Some(&file_struct.table_name),
                     &format!("file_length:{} file_name:{}", meta.len(), file_name)
                 );
-                let put_request = PutObjectRequest {
-                    bucket: BUCKET_NAME.to_owned(),
-                    key: remote_filename.clone(),
-                    content_length: Some(meta.len() as i64),
-                    body: Some(ByteStream::new(byte_stream).into()),
-                    // body: Some(buffer.into()),
-                    ..Default::default()
-                };
-
-                let maybe_uploaded = self.s3_client.put_object(put_request).await;
+                
+                let maybe_uploaded = self.s3_client
+                    .put_object()
+                    .bucket(BUCKET_NAME.as_str())
+                    .key(&remote_filename)
+                    .content_length(meta.len() as i64)
+                    .body(byte_stream)
+                    .send()
+                    .await;
+                
                 match maybe_uploaded {
                     Ok(_result) => {
                         logger_info!(
@@ -132,7 +119,7 @@ impl FileUploader {
                             &format!("S3 upload error: {:?} for file: {}", result, remote_filename)
                         );
                         // treat s3 errors as transient
-                        return Err(BackoffError::transient(result));
+                        return Err(BackoffError::transient(result.into()));
                     }
                 }
                 if let Some(columns) = &file_struct.columns {
@@ -198,7 +185,7 @@ impl FileUploader {
         wal_file: &mut wal_file_manager::WalFile,
         file_name: &str,
         file_struct: &FileStruct,
-    ) -> Result<CleoS3File, BackoffError<RusotoError<PutObjectError>>> {
+    ) -> Result<CleoS3File, BackoffError<S3Error>> {
         // for simplicity, this
         let result = retry(default_exponential_backoff(), || async { self.upload_to_s3(wal_file, file_name, file_struct).await }).await;
         match result {

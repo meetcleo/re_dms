@@ -4,6 +4,8 @@ use openssl::ssl::{SslConnector, SslMethod};
 use postgres_openssl::MakeTlsConnector;
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
+use std::error::Error;
+use std::fmt;
 
 use itertools::Itertools;
 
@@ -48,11 +50,34 @@ pub enum TargetsTablesColumnNamesError {
     TokioError(tokio_postgres::Error),
 }
 
+impl fmt::Display for TargetsTablesColumnNamesError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            TargetsTablesColumnNamesError::PoolError(err) => {
+                write!(f, "Pool error: {}", err)
+            }
+            TargetsTablesColumnNamesError::TokioError(err) => {
+                write!(f, "Tokio postgres error: {}", err)
+            }
+        }
+    }
+}
+
+impl Error for TargetsTablesColumnNamesError {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match self {
+            TargetsTablesColumnNamesError::PoolError(err) => Some(err),
+            TargetsTablesColumnNamesError::TokioError(err) => Some(err),
+        }
+    }
+}
+
 impl Config {
     pub fn from_env() -> Result<Self, ::config::ConfigError> {
-        let mut cfg = ::config::Config::new();
-        cfg.merge(::config::Environment::new().separator("__"))?;
-        cfg.try_into()
+        ::config::Config::builder()
+            .add_source(::config::Environment::default().separator("__"))
+            .build()?
+            .try_deserialize()
     }
 }
 

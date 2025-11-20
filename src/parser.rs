@@ -48,7 +48,7 @@ pub trait SchemaAndTable {
     fn original_schema_and_table_name(&self) -> (&str, &str);
 }
 
-fn departition_table_name(table_name: &str) -> Cow<str> {
+fn departition_table_name(table_name: &str) -> Cow<'_, str> {
     match &*PARTITION_SUFFIX_REGEXP {
         None => Cow::from(table_name),
         Some(partition_suffix_regexp) => partition_suffix_regexp.replacen(table_name, 1, ""),

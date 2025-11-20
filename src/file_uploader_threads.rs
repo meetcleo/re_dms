@@ -100,8 +100,8 @@ impl<ChannelType> GenericTableThread<ChannelType> {
 }
 
 impl FileUploaderThreads {
-    pub fn new() -> FileUploaderThreads {
-        let shared_resource = Arc::new(FileUploader::new());
+    pub async fn new() -> FileUploaderThreads {
+        let shared_resource = Arc::new(FileUploader::new().await);
         let table_streams = HashMap::new();
         FileUploaderThreads {
             shared_resource,
@@ -124,7 +124,7 @@ impl FileUploaderThreads {
         mut receiver: mpsc::Receiver<change_processing::ChangeProcessingResult>,
         result_sender: mpsc::Sender<UploaderStageResult>,
     ) {
-        let mut file_uploader_stream = FileUploaderThreads::new();
+        let mut file_uploader_stream = FileUploaderThreads::new().await;
         loop {
             let received = receiver.recv().await;
             if let Some(file_writer) = received {
