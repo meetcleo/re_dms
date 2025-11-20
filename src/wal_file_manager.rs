@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use glob::glob;
 use lazy_static::lazy_static;
 use std::fs::{self, File, OpenOptions};
@@ -40,6 +41,8 @@ pub struct WalFile {
     // for the directory associated with this wal file see
     // path_for_wal_directory
     pub wal_directory: PathBuf,
+    // timestamp when this WAL file was created
+    pub created_at: DateTime<Utc>,
     // we have interior mutability of the file, and synchronise with a mutex
     // NOTE: it is unsafe to create two wal_files with the same file_number
     // (keep wal file creation single threaded!)
@@ -85,7 +88,8 @@ impl Eq for WalFile {}
 
 impl PartialEq for WalFile {
     fn eq(&self, other: &Self) -> bool {
-        self.file_number == other.file_number && Arc::ptr_eq(&self.file, &other.file)
+        self.file_number == other.file_number
+            && Arc::ptr_eq(&self.file, &other.file)
     }
 }
 
@@ -130,10 +134,36 @@ impl WalFile {
             "Unable to create wal file: {}",
             path.to_str().unwrap_or("unprintable non-utf-8 path")
         ));
+
+        // Get the actual file creation time from filesystem
+        let created_at = match wal_file_mode {
+            WalFileMode::Processing => {
+                // New file being created, use current time
+                Utc::now()
+            }
+            WalFileMode::Reprocessing(_) => {
+                // Existing file being reprocessed, get actual creation time
+                match file.metadata().and_then(|m| m.created()) {
+                    Ok(system_time) => {
+                        DateTime::<Utc>::from(system_time)
+                    }
+                    Err(e) => {
+                        logger_error!(
+                            Some(wal_file_number),
+                            None,
+                            &format!("Failed to get file creation time, using current time: {}", e)
+                        );
+                        Utc::now()
+                    }
+                }
+            }
+        };
+
         WalFile {
             file_number: wal_file_number,
             file: Arc::new(Some(Mutex::new(WalFileInternal::new(file)))),
             wal_directory: wal_file_directory.to_path_buf(),
+            created_at,
         }
     }
     // 16 hex chars
@@ -704,5 +734,42 @@ mod tests {
             wal_file_manager.clean_up_final_wal_file();
         }
         assert!(!Path::new(filename).exists());
+    }
+
+    #[test]
+    fn test_wal_file_created_at_timestamp() {
+        clear_testing_directory();
+        let directory_path = PathBuf::from(TESTING_PATH);
+
+        // Test 1: New file (Processing mode) should use current time
+        let before_create = Utc::now();
+        let new_wal_file = WalFile::new(100, directory_path.as_path(), WalFileMode::Processing);
+        let after_create = Utc::now();
+
+        // created_at should be between before and after
+        assert!(new_wal_file.created_at >= before_create);
+        assert!(new_wal_file.created_at <= after_create);
+
+        // Clean up and wait a bit to ensure filesystem timestamp difference
+        drop(new_wal_file);
+        std::thread::sleep(std::time::Duration::from_millis(10));
+
+        // Test 2: Reprocessing existing file should use filesystem creation time
+        let reprocess_wal_file = WalFile::new(
+            100,
+            directory_path.as_path(),
+            WalFileMode::Reprocessing("/tmp/wal_testing/0000000000000064.wal".to_string())
+        );
+
+        // The reprocessed file should have an older timestamp (from filesystem)
+        // It should NOT be the current time
+        let current_time = Utc::now();
+        let time_diff = (current_time - reprocess_wal_file.created_at).num_milliseconds();
+
+        // Should be at least a few milliseconds old (from when we created it above)
+        assert!(time_diff >= 5, "Reprocessed file timestamp should be older than current time");
+
+        // Clean up
+        let _result = fs::remove_file("/tmp/wal_testing/0000000000000064.wal");
     }
 }

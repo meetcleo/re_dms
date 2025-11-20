@@ -2539,6 +2539,7 @@ dependencies = [
  "aws-sdk-s3",
  "backoff",
  "bigdecimal",
+ "chrono",
  "clap",
  "config",
  "csv",
