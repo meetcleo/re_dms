@@ -577,7 +577,7 @@ impl ColumnValue {
     pub fn to_string_truncated(&self) -> String {
         let mut string = self.to_string();
         // modifies in place
-        string.truncate(REDSHIFT_MAX_COLUMN_SIZE);
+        string.truncate(string.floor_char_boundary(REDSHIFT_MAX_COLUMN_SIZE));
         string
     }
 }
@@ -1553,5 +1553,24 @@ mod tests {
                 ]
             )
         );
+    }
+
+    #[test]
+    fn to_string_struncated_works() {
+        let dont_truncate: String = "hello".to_string();
+        let dont_truncate_value = ColumnValue::Text(dont_truncate);
+        assert_eq!(dont_truncate_value.to_string_truncated(), "hello");
+
+        // too big
+        let truncate: String = "a".repeat(REDSHIFT_MAX_COLUMN_SIZE + 2);
+        let truncate_value = ColumnValue::Text(truncate.clone());
+        assert_eq!(truncate.to_string().len(), REDSHIFT_MAX_COLUMN_SIZE + 2);
+        assert_eq!(truncate_value.to_string_truncated().len(), REDSHIFT_MAX_COLUMN_SIZE);
+
+        // utf-8 code boundary
+        let truncate_utf_8: String = "a".repeat(REDSHIFT_MAX_COLUMN_SIZE - 2) + "😀";
+        let truncate_utf_8_value = ColumnValue::Text(truncate_utf_8.clone());
+        assert_eq!(truncate_utf_8.to_string().len(), REDSHIFT_MAX_COLUMN_SIZE + 2); // smiley is 4 bytes
+        assert_eq!(truncate_utf_8_value.to_string_truncated().len(), REDSHIFT_MAX_COLUMN_SIZE - 2);
     }
 }
