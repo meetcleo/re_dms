@@ -173,7 +173,7 @@ impl FileStruct {
                     .filter(|x| x.is_changed_data_column())
                     .map(|x| {
                         if let Some(value) = x.column_value_for_changed_column() {
-                            value.to_string()
+                            value.to_string_truncated()
                         } else {
                             match x.column_info().column_type_enum() {
                                 ColumnTypeEnum::Text => "\0".to_owned(),

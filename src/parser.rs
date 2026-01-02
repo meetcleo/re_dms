@@ -24,6 +24,9 @@ pub type TableName = ArcIntern<String>;
 pub type ColumnName = ArcIntern<String>;
 pub type ColumnType = ArcIntern<String>;
 
+// https://docs.aws.amazon.com/redshift/latest/dg/r_Character_types.html
+const REDSHIFT_MAX_COLUMN_SIZE: usize = 65535;
+
 lazy_static! {
     // leave these as unwrap
     static ref TABLE_BLACKLIST: Vec<String> = env::var("TABLE_BLACKLIST").unwrap_or("".to_owned()).split(",").map(|x| x.to_owned()).collect();
@@ -570,6 +573,12 @@ impl ColumnValue {
                 line: string.to_string(),
             }),
         }
+    }
+    pub fn to_string_truncated(&self) -> String {
+        let mut string = self.to_string();
+        // modifies in place
+        string.truncate(REDSHIFT_MAX_COLUMN_SIZE);
+        string
     }
 }
 
