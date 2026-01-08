@@ -604,6 +604,7 @@ impl Parser {
             x if { x.starts_with("BEGIN") } => self.parse_begin(x),
             x if { x.starts_with("COMMIT") } => self.parse_commit(x),
             x if { x.ends_with("TRUNCATE: (no-flags)") } => self.parse_truncate_msg(x),
+            x if { x.ends_with("TRUNCATE: cascade") } => self.parse_truncate_msg(x),
             x if { x.starts_with("table") } => self.parse_change(x),
             x if { x.starts_with("pg_recvlogical") } => self.parse_pg_rcvlogical_msg(x),
             x => Err(ParsingError {
@@ -718,6 +719,7 @@ impl Parser {
 
     fn parse_truncate_msg(&self, string: &str) -> Result<ParsedLine> {
         // "table public.transaction_enrichment_merchant_matching_logs: TRUNCATE: (no-flags)"
+        // "table public.transaction_enrichment_merchant_matching_logs: TRUNCATE: cascade"
         logger_info!(
             self.parse_state.wal_file_number,
             None,
