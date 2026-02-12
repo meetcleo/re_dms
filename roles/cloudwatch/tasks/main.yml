@@ -45,7 +45,7 @@
     src: credentials_template.j2
     dest: /home/cwagent/.aws/credentials
     owner: cwagent
-    mode: '0600'
+    mode: "0600"
   tags: copy-credentials
 
 # this will install the cloudwatch agent, but not start anything.
@@ -89,7 +89,7 @@
 
 - name: Copy systemd service file to server
   ansible.builtin.copy:
-    src: '{{ item }}'
+    src: "{{ item }}"
     dest: /usr/local/bin
     owner: re_dms
     mode: 0755
@@ -97,17 +97,33 @@
     - measure_number_of_wal_files.sh
     - measure_age_of_oldest_wal_file.sh
     - measure_age_of_youngest_wal_file.sh
+    - tx_measure_number_of_wal_files.sh
+    - tx_measure_age_of_oldest_wal_file.sh
+    - tx_measure_age_of_youngest_wal_file.sh
   tags: statsd-metrics
 
 - name: set custom cron metric reporting to statsd
   ansible.builtin.cron:
-    name: 'check number of wal files.'
-    minute: '*' # these are defaults but explicitly every minute
-    hour: '*'
-    weekday: '*'
-    user: 're_dms'
+    name: "check number of wal files."
+    minute: "*" # these are defaults but explicitly every minute
+    hour: "*"
+    weekday: "*"
+    user: "re_dms"
     # calculate number of wal files
     # pipefail to exit early
     # echo as a guage to netcat, and send to default statsd collection agent.
     job: "(/usr/local/bin/measure_number_of_wal_files.sh ; /usr/local/bin/measure_age_of_oldest_wal_file.sh ; /usr/local/bin/measure_age_of_youngest_wal_file.sh) 2>&1 | logger -t bash_metrics"
+  tags: statsd-metrics
+
+- name: set transactions custom cron metric reporting to statsd
+  ansible.builtin.cron:
+    name: "check number of wal files for transactions domain."
+    minute: "*" # these are defaults but explicitly every minute
+    hour: "*"
+    weekday: "*"
+    user: "re_dms"
+    # calculate number of wal files
+    # pipefail to exit early
+    # echo as a guage to netcat, and send to default statsd collection agent.
+    job: "(/usr/local/bin/tx_measure_number_of_wal_files.sh ; /usr/local/bin/tx_measure_age_of_oldest_wal_file.sh ; /usr/local/bin/tx_measure_age_of_youngest_wal_file.sh) 2>&1 | logger -t tx_bash_metrics"
   tags: statsd-metrics

@@ -37,7 +37,15 @@
     state: directory
     owner: re_dms
     group: re_dms
-    mode: '0750'
+    mode: "0750"
+
+- name: create output_wal dir for transactions database
+  ansible.builtin.file:
+    path: /re_dms/transactions_output_wal
+    state: directory
+    owner: re_dms
+    group: re_dms
+    mode: "0750"
 
 - name: Copy systemd config file to server
   copy:
@@ -50,6 +58,17 @@
   notify:
     - Start re_dms
 
+- name: Copy systemd transactions config file to server
+  copy:
+    src: "transactions_re_dms.conf.{{ env }}"
+    dest: /etc/transactions_re_dms.conf
+    owner: root
+    group: root
+    mode: 0660
+  tags: copy_config
+  notify:
+    - Start transactions re_dms
+
 - name: Copy systemd service file to server
   copy:
     src: re_dms.service
@@ -58,6 +77,15 @@
     group: root
   notify:
     - Start re_dms
+
+- name: Copy transactions systemd service file to server
+  copy:
+    src: transactions_re_dms.service
+    dest: /etc/systemd/system
+    owner: root
+    group: root
+  notify:
+    - Start transactions re_dms
 
 - name: Copy binary to server
   copy:
@@ -68,3 +96,4 @@
     group: root
   notify:
     - Start re_dms
+    - Start transactions re_dms
