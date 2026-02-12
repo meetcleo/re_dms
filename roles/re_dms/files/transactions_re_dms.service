@@ -1,0 +1,17 @@
+[Unit]
+Description=transactions re_dms service
+StartLimitIntervalSec=600
+StartLimitBurst=3
+
+[Service]
+User=re_dms
+Group=re_dms
+EnvironmentFile=/etc/transactions_re_dms.conf
+ExecStart=/usr/local/bin/re_dms
+TimeoutStopSec=1200
+LimitNOFILE=4096
+Restart=on-failure
+RestartSec=60
+
+[Install]
+WantedBy=multi-user.target

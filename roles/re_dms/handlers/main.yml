@@ -5,3 +5,9 @@
     state: restarted
     enabled: yes
     daemon_reload: yes
+- name: Start transactions re_dms
+  systemd:
+    name: transactions_re_dms
+    state: restarted
+    enabled: yes
+    daemon_reload: yes
